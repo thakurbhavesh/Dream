@@ -687,6 +687,8 @@ const onConnection = (socket) => {
         const normalized = normalizeGroupMessage(saved, Number(userId));
         await signMessageFileUrls(normalized);
 
+        // Poll insertion now happens inside sendGroupMessage transaction (chatModel.js)
+
         await deliverGroupToMembers({
           groupId, orgId, userId, normalized,
           senderName: socket.user.name,
@@ -968,6 +970,7 @@ const onConnection = (socket) => {
   socket.on('poll:vote', async (data, ack) => {
     try {
       const { messageId, threadId, optionId, pollType } = data;
+      console.log('[poll:vote] userId=%s messageId=%s optionId=%s pollType=%s', userId, messageId, optionId, pollType);
       if (!messageId || !threadId || !optionId) return ack?.({ error: 'messageId, threadId, and optionId required' });
 
       const isGroup = threadId.startsWith('group-');
@@ -998,7 +1001,7 @@ const onConnection = (socket) => {
       // Update vote in options
       meta.options = meta.options.map((opt) => {
         const voters = Array.isArray(opt.voters) ? opt.voters : [];
-        const alreadyVoted = voters.some((v) => v.id === voterId);
+        const alreadyVoted = voters.some((v) => String(v.id) === String(voterId));
 
         if (opt.id === optionId) {
           if (alreadyVoted) {
@@ -1006,7 +1009,7 @@ const onConnection = (socket) => {
             return {
               ...opt,
               votes: Math.max(0, (opt.votes || 0) - 1),
-              voters: voters.filter((v) => v.id !== voterId),
+              voters: voters.filter((v) => String(v.id) !== String(voterId)),
             };
           }
           // Add vote
@@ -1021,7 +1024,7 @@ const onConnection = (socket) => {
           return {
             ...opt,
             votes: Math.max(0, (opt.votes || 0) - 1),
-            voters: voters.filter((v) => v.id !== voterId),
+            voters: voters.filter((v) => String(v.id) !== String(voterId)),
           };
         }
         return opt;
@@ -1033,6 +1036,77 @@ const onConnection = (socket) => {
         `UPDATE ${table} SET message_metadata = $1::jsonb, updated_at = NOW() WHERE ${idCol} = $2`,
         [encMeta, messageId]
       );
+
+      // Also persist vote to group_poll_votes table (best effort)
+      if (isGroup) {
+        try {
+          const { rows: pollRows } = await db.query(
+            `SELECT p.poll_id, o.option_id FROM group_polls p
+             JOIN group_poll_options o ON o.poll_id = p.poll_id
+             WHERE p.group_message_id = $1`,
+            [messageId]
+          );
+          if (pollRows.length > 0) {
+            const pollId = pollRows[0].poll_id;
+            // Match frontend optionId to DB option by finding its position in meta.options array
+            const optIndex = meta.options.findIndex(opt => opt.id === optionId);
+            let dbOptionId = null;
+            if (optIndex >= 0) {
+              // order_no in DB = index + 1 (inserted as i + 1 in sendGroupMessage)
+              const { rows: optRows } = await db.query(
+                `SELECT option_id FROM group_poll_options WHERE poll_id = $1 AND order_no = $2`,
+                [pollId, optIndex + 1]
+              );
+              dbOptionId = optRows[0]?.option_id;
+            }
+
+            if (dbOptionId) {
+              // Check if user has an active vote on this exact option
+              const { rows: existingVote } = await db.query(
+                `SELECT vote_id FROM group_poll_votes WHERE poll_id = $1 AND user_id = $2 AND option_id = $3 AND status = 'active'`,
+                [pollId, voterId, dbOptionId]
+              );
+              if (existingVote.length > 0) {
+                // Toggle off — soft delete (status = 'removed')
+                await db.query(
+                  `UPDATE group_poll_votes SET status = 'removed', updated_at = NOW() WHERE vote_id = $1`,
+                  [existingVote[0].vote_id]
+                );
+                await db.query(`UPDATE group_poll_options SET vote_count = GREATEST(0, vote_count - 1) WHERE option_id = $1`, [dbOptionId]);
+              } else {
+                // For single poll, soft-remove old active votes first
+                if (pollType === 'single') {
+                  const { rows: oldVotes } = await db.query(
+                    `SELECT vote_id, option_id FROM group_poll_votes WHERE poll_id = $1 AND user_id = $2 AND status = 'active'`,
+                    [pollId, voterId]
+                  );
+                  if (oldVotes.length > 0) {
+                    const oldVoteIds = oldVotes.map(v => v.vote_id);
+                    const oldOptionIds = oldVotes.map(v => v.option_id);
+                    await db.query(
+                      `UPDATE group_poll_options SET vote_count = GREATEST(0, vote_count - 1) WHERE option_id = ANY($1::bigint[])`,
+                      [oldOptionIds]
+                    );
+                    await db.query(
+                      `UPDATE group_poll_votes SET status = 'removed', updated_at = NOW() WHERE vote_id = ANY($1::bigint[])`,
+                      [oldVoteIds]
+                    );
+                  }
+                }
+                // Insert new active vote
+                await db.query(
+                  `INSERT INTO group_poll_votes (poll_id, option_id, user_id, status) VALUES ($1, $2, $3, 'active')`,
+                  [pollId, dbOptionId, voterId]
+                );
+                await db.query(`UPDATE group_poll_options SET vote_count = vote_count + 1 WHERE option_id = $1`, [dbOptionId]);
+                console.log('[poll:vote] vote inserted: pollId=%s optionId=%s userId=%s', pollId, dbOptionId, voterId);
+              }
+            }
+          }
+        } catch (pollVoteErr) {
+          console.error('[socket] poll vote table error', pollVoteErr.message);
+        }
+      }
 
       // Emit to all participants
       const payload = { threadId, messageId: String(messageId), options: meta.options, voterId, voterName };
@@ -1084,6 +1158,19 @@ const onConnection = (socket) => {
         [encMeta, messageId]
       );
 
+      // Also update group_polls table (best effort)
+      if (isGroup) {
+        try {
+          await db.query(
+            `UPDATE group_polls SET status = 'ended', ended_at = $1, ended_by = $2, updated_at = NOW()
+             WHERE group_message_id = $3`,
+            [meta.endedAt, Number(userId), messageId]
+          );
+        } catch (pollEndErr) {
+          console.error('[socket] poll end table error', pollEndErr.message);
+        }
+      }
+
       // Emit to all participants
       const payload = { threadId, messageId: String(messageId), endedAt: meta.endedAt, endedBy: meta.endedBy };
       if (threadId.startsWith('dm-')) {
@@ -1100,6 +1187,85 @@ const onConnection = (socket) => {
       ack?.({ ok: true });
     } catch (err) {
       console.error('[socket] poll:end error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Poll Edit ─────────────────────────────────────────────────────────
+  socket.on('poll:edit', async (data, ack) => {
+    try {
+      const { messageId, threadId, poll } = data;
+      if (!messageId || !threadId || !poll) return ack?.({ error: 'messageId, threadId, and poll required' });
+
+      const isGroup = threadId.startsWith('group-');
+      const table = isGroup ? 'group_messages' : 'messages';
+      const idCol = isGroup ? 'group_message_id' : 'message_id';
+
+      // Read existing metadata, merge with new poll data
+      const { rows: metaRows } = await db.query(
+        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
+        [messageId]
+      );
+      if (!metaRows[0]) return ack?.({ error: 'Message not found' });
+
+      const meta = metaRows[0].message_metadata
+        ? decryptMetadata(metaRows[0].message_metadata)
+        : {};
+
+      // Update poll fields
+      if (poll.question !== undefined) meta.question = poll.question;
+      if (poll.options) meta.options = poll.options;
+      if (poll.type) meta.type = poll.type;
+      if (poll.endAt !== undefined) meta.endAt = poll.endAt;
+      if (poll.showResultsBeforeVote !== undefined) meta.showResultsBeforeVote = poll.showResultsBeforeVote;
+      if (poll.endAccess) meta.endAccess = poll.endAccess;
+      meta.editedAt = new Date().toISOString();
+      meta.editedBy = Number(userId);
+
+      const encMeta = encryptMetadata(meta);
+      // Also update the message text to the poll question
+      const msgText = poll.question || meta.question || '';
+      const encMsg = encryptMessage(msgText);
+      await db.query(
+        `UPDATE ${table} SET message = $1, message_metadata = $2::jsonb, updated_at = NOW() WHERE ${idCol} = $3`,
+        [encMsg, encMeta, messageId]
+      );
+
+      // Update group_polls table too
+      if (isGroup) {
+        try {
+          const pollModel = require('../models/groupPollModel');
+          const dbPoll = await pollModel.getPollByMessageId(messageId);
+          if (dbPoll) {
+            await pollModel.editPoll(dbPoll.poll_id, {
+              question: poll.question,
+              options: poll.options,
+            });
+          }
+        } catch (pollEditErr) {
+          console.error('[socket] poll edit table error', pollEditErr.message);
+        }
+      }
+
+      // Build updated content for emit
+      const updatedContent = { ...meta };
+
+      // Emit to all participants
+      const payload = { threadId, messageId: String(messageId), content: updatedContent };
+      if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          emitToUser(String(memberId), 'poll:edited', payload);
+        }
+      } else if (threadId.startsWith('dm-')) {
+        const otherUserId = threadId.replace('dm-', '');
+        emitToUser(userId, 'poll:edited', payload);
+        emitToUser(otherUserId, 'poll:edited', { ...payload, threadId: `dm-${userId}` });
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] poll:edit error', err.message);
       ack?.({ error: err.message });
     }
   });
@@ -1789,6 +1955,23 @@ const buildContent = (row) => {
       caption: meta.caption || '',
       displayHost: meta.displayHost || '',
       ...linkFields,
+    };
+  }
+  // Poll messages — pass all poll payload fields into content for PollMsg component
+  if (row.message_type === 'poll') {
+    const { sentFrom, editHistory, ...pollFields } = meta;
+    return {
+      question: meta.question || row.message || 'Poll',
+      type: meta.type || 'single',
+      options: Array.isArray(meta.options) ? meta.options : [],
+      allowMultiple: meta.allowMultiple || meta.type === 'multiple',
+      endAt: meta.endAt || null,
+      createdBy: meta.createdBy || null,
+      endAccess: meta.endAccess || 'creator-or-admin',
+      editAccess: meta.editAccess || meta.endAccess || 'creator-or-admin',
+      showResultsBeforeVote: meta.showResultsBeforeVote ?? false,
+      totalVotes: meta.totalVotes || 0,
+      viewerVotes: meta.viewerVotes || [],
     };
   }
   // Text messages — text + html (formatting) + emoji flags, no metadata leak

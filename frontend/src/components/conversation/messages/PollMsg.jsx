@@ -41,11 +41,16 @@ const formatRemaining = (ms) => {
   return `${minutes}m`;
 };
 
-const normalizeVoteState = (poll) => {
-  const viewerVotes = Array.isArray(poll?.viewerVotes) ? poll.viewerVotes : [];
-  return {
-    optionIds: viewerVotes.filter(Boolean),
-  };
+const normalizeVoteState = (poll, currentUserId) => {
+  // Explicit viewerVotes takes priority
+  const viewerVotes = Array.isArray(poll?.viewerVotes) ? poll.viewerVotes.filter(Boolean) : [];
+  if (viewerVotes.length > 0) return { optionIds: viewerVotes };
+  // Derive from options.voters — find which options the current user voted on
+  if (!currentUserId || !Array.isArray(poll?.options)) return { optionIds: [] };
+  const votedIds = poll.options
+    .filter(opt => Array.isArray(opt.voters) && opt.voters.some(v => String(v.id) === String(currentUserId)))
+    .map(opt => opt.id);
+  return { optionIds: votedIds };
 };
 
 const POLL_AVATAR_MAX = 4;
@@ -73,8 +78,8 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
   const viewerIsAdmin =
     message?.metadata?.viewerRole === "admin" ||
     message?.metadata?.viewerIsAdmin === true;
-  const isCreator = Boolean(currentUserId && currentUserId === createdById);
-  const [voteState, setVoteState] = useState(() => normalizeVoteState(poll));
+  const isCreator = Boolean(currentUserId && String(currentUserId) === String(createdById));
+  const [voteState, setVoteState] = useState(() => normalizeVoteState(poll, currentUserId));
   const [localEndedAt, setLocalEndedAt] = useState(null);
   const endAt = toDate(poll.endAt);
   const endedAt = toDate(poll.endedAt) ?? localEndedAt;
@@ -84,9 +89,9 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
 
   useEffect(() => {
-    setVoteState(normalizeVoteState(poll));
+    setVoteState(normalizeVoteState(poll, currentUserId));
     setLocalOptions(options);
-  }, [message?.id, poll]);
+  }, [message?.id, poll, currentUserId]);
 
   useEffect(() => {
     if (!endAt || endedAt) return undefined;
@@ -186,7 +191,7 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
               const wasSelected = voteState.optionIds.includes(option.id);
               if (wasSelected) {
                 const nextVoters = Array.isArray(option.voters)
-                  ? option.voters.filter((voter) => voter?.id !== currentUserId)
+                  ? option.voters.filter((voter) => String(voter?.id) !== String(currentUserId))
                   : [];
                 return {
                   ...option,
@@ -201,7 +206,7 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
           if (pollType === "multiple") {
             if (alreadySelected) {
               const nextVoters = Array.isArray(option.voters)
-                ? option.voters.filter((voter) => voter?.id !== currentUserId)
+                ? option.voters.filter((voter) => String(voter?.id) !== String(currentUserId))
                 : [];
               return {
                 ...option,
@@ -235,7 +240,7 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
           };
         });
       });
-      onAction?.("poll-vote", message, { optionId, pollType });
+      onAction?.("poll-vote", { optionId, pollType });
     },
     [
       canVoteReason,
@@ -256,7 +261,7 @@ const PollMsg = ({ message, onAction, currentUserId }) => {
   const handleEndPollConfirm = () => {
     const endedAtValue = new Date();
     setLocalEndedAt(endedAtValue);
-    onAction?.("poll-end", message, { endedAt: endedAtValue.toISOString() });
+    onAction?.("poll-end", { endedAt: endedAtValue.toISOString() });
     setEndConfirmOpen(false);
   };
 

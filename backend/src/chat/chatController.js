@@ -443,6 +443,23 @@ const buildContent = (row) => {
     const { sentFrom, editHistory, html, ...codeFields } = meta;
     return { code: row.message, ...codeFields };
   }
+  // Poll messages — pass all poll payload fields into content for PollMsg component
+  if (row.message_type === 'poll') {
+    const { sentFrom, editHistory, ...pollFields } = meta;
+    return {
+      question: meta.question || row.message || 'Poll',
+      type: meta.type || 'single',
+      options: Array.isArray(meta.options) ? meta.options : [],
+      allowMultiple: meta.allowMultiple || meta.type === 'multiple',
+      endAt: meta.endAt || null,
+      createdBy: meta.createdBy || null,
+      endAccess: meta.endAccess || 'creator-or-admin',
+      editAccess: meta.editAccess || meta.endAccess || 'creator-or-admin',
+      showResultsBeforeVote: meta.showResultsBeforeVote ?? false,
+      totalVotes: meta.totalVotes || 0,
+      viewerVotes: meta.viewerVotes || [],
+    };
+  }
   // Text messages — text + html (formatting) + emoji flags, no metadata leak
   return {
     text: row.message || '',

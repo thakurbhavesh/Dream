@@ -36,4 +36,13 @@ router.get('/groups/:groupId/info',      auth, controller.getGroupInfo);
 // Exchange info — message/file/image/video counts with date filter
 router.get('/exchange-info',             auth, controller.getExchangeInfo);
 
+// ─── Poll APIs ──────────────────────────────────────────────────────────────
+const pollController = require('../controllers/pollController');
+router.get('/polls/:messageId',          auth, pollController.getPoll);
+router.get('/polls/group/:groupId',      auth, pollController.getGroupPolls);
+router.post('/polls/:messageId/vote',    auth, pollController.votePoll);
+router.post('/polls/:messageId/end',     auth, pollController.endPoll);
+router.patch('/polls/:messageId',        auth, pollController.editPoll);
+router.delete('/polls/:messageId',       auth, pollController.deletePoll);
+
 module.exports = router;

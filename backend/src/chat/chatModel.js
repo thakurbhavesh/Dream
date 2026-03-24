@@ -547,6 +547,37 @@ const sendGroupMessage = async ({ orgId, groupId, senderId, message, messageType
       }
     }
 
+    // Insert into group_polls + group_poll_options if this is a poll message
+    if (messageType === 'poll' && metadata) {
+      const question = metadata.question || message || 'Poll';
+      const pollType = metadata.type || 'single';
+      const showResults = metadata.showResultsBeforeVote ?? false;
+      const endsAt = metadata.endAt || null;
+      const endPermission = metadata.endAccess === 'creator' ? 'creator_only' : 'creator_admin';
+
+      console.log(`[chatModel] poll INSERT: group_message_id=${newMsg.group_message_id}, question=${question}, options=${JSON.stringify(metadata.options)?.slice(0, 300)}`);
+
+      const pollResult = await client.query(
+        `INSERT INTO group_polls (group_message_id, group_id, question, poll_type, show_results_before_vote, ends_at, end_permission, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING poll_id`,
+        [newMsg.group_message_id, groupId, question, pollType, showResults, endsAt, endPermission, senderId]
+      );
+      const pollId = pollResult.rows[0]?.poll_id;
+      console.log(`[chatModel] poll row inserted poll_id=${pollId}`);
+
+      if (pollId && Array.isArray(metadata.options)) {
+        for (let i = 0; i < metadata.options.length; i++) {
+          const opt = metadata.options[i];
+          const optText = opt.label || opt.text || `Option ${i + 1}`;
+          await client.query(
+            `INSERT INTO group_poll_options (poll_id, option_text, order_no) VALUES ($1, $2, $3)`,
+            [pollId, optText, i + 1]
+          );
+        }
+        console.log(`[chatModel] poll options inserted count=${metadata.options.length}`);
+      }
+    }
+
     await client.query('COMMIT');
     return newMsg;
   } catch (err) {
@@ -583,9 +614,21 @@ const markGroupMessagesRead = async (orgId, groupId, userId) => {
       AND gm.group_id = $2
       AND gmr.user_id = $3
       AND gmr.delivery_status != 'read'
-    RETURNING gmr.recipient_id
+    RETURNING gmr.recipient_id, gmr.group_message_id
   `;
   const { rows } = await db.query(query, [orgId, groupId, userId]);
+
+  // Insert into group_message_reads so message:info overlay shows read receipts
+  if (rows.length > 0) {
+    const messageIds = [...new Set(rows.map(r => r.group_message_id))];
+    await db.query(
+      `INSERT INTO group_message_reads (group_message_id, user_id, read_at)
+       SELECT unnest($1::bigint[]), $2, NOW()
+       ON CONFLICT (group_message_id, user_id) DO NOTHING`,
+      [messageIds, userId]
+    );
+  }
+
   return rows;
 };
 

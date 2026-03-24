@@ -885,7 +885,7 @@ users
 | sender_id | BIGINT | NOT NULL, FK → users |
 | receiver_id | BIGINT | NOT NULL, FK → users |
 | message | TEXT | AES-256-GCM encrypted |
-| message_type | VARCHAR(20) | NOT NULL, DEFAULT 'text', CHECK ('text','file','link','code','system','emoji','image','video','audio') |
+| message_type | VARCHAR(20) | NOT NULL, DEFAULT 'text', CHECK ('text','file','link','code','system','emoji','image','video','audio','poll') |
 | message_metadata | JSONB | AES-256-GCM encrypted (stored as `{"_enc":"..."}`) |
 | send_time | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
 | read_time | TIMESTAMPTZ | |
@@ -936,7 +936,7 @@ users
 | organization_id | BIGINT | NOT NULL, FK → organizations |
 | group_id | BIGINT | NOT NULL, FK → groups ON DELETE CASCADE |
 | sender_id | BIGINT | NOT NULL, FK → users |
-| message_type | VARCHAR(20) | NOT NULL, DEFAULT 'text', CHECK ('text','file','link','code','system','emoji','image','video','audio') |
+| message_type | VARCHAR(20) | NOT NULL, DEFAULT 'text', CHECK ('text','file','link','code','system','emoji','image','video','audio','poll') |
 | message | TEXT | AES-256-GCM encrypted |
 | message_metadata | JSONB | AES-256-GCM encrypted |
 | created_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
@@ -1044,9 +1044,10 @@ users
 | option_id | BIGINT | NOT NULL, FK → group_poll_options ON DELETE CASCADE |
 | user_id | BIGINT | NOT NULL, FK → users |
 | voted_at | TIMESTAMPTZ | NOT NULL, DEFAULT NOW() |
+| status | VARCHAR(20) | NOT NULL, DEFAULT 'active', CHECK ('active','removed') |
 
-**Unique:** (poll_id, user_id, option_id)
-**Indexes:** poll_id, user_id
+**Unique (partial):** (poll_id, user_id, option_id) WHERE status = 'active'
+**Indexes:** poll_id, user_id, (poll_id, status)
 
 ---
 

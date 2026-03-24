@@ -542,6 +542,12 @@ Access: `JWT`
 | POST   | `/chat/threads/:id/read`          | Mark all messages in thread as read |
 | PATCH  | `/chat/messages/:id`              | Edit a DM message |
 | DELETE | `/chat/messages/:id`              | Delete a DM message |
+| GET    | `/chat/polls/:messageId`          | Get poll with options & voters |
+| GET    | `/chat/polls/group/:groupId`      | List all polls in a group (paginated) |
+| POST   | `/chat/polls/:messageId/vote`     | Vote / toggle vote on a poll option |
+| POST   | `/chat/polls/:messageId/end`      | End a poll |
+| PATCH  | `/chat/polls/:messageId`          | Edit poll question/options (creator only) |
+| DELETE | `/chat/polls/:messageId`          | Soft-delete a poll (creator only) |
 
 ### Organization Profile
 
@@ -1365,6 +1371,234 @@ curl "$BASE_URL/organization/locations" -H "Authorization: Bearer $TOKEN"
 
 ---
 
+## Group Polls (`/chat/polls`)
+
+All endpoints require JWT authentication via `Authorization: Bearer <token>`.
+
+### Get Poll by Message ID
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/chat/polls/:messageId` | JWT | Get full poll details including options & voters |
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "poll_id": 1,
+    "group_message_id": 450,
+    "group_id": 3,
+    "question": "What day works best for standup?",
+    "poll_type": "single",
+    "show_results_before_vote": false,
+    "ends_at": "2026-03-25T18:00:00.000Z",
+    "end_permission": "creator_admin",
+    "status": "active",
+    "created_by": 2,
+    "created_at": "2026-03-24T10:00:00.000Z",
+    "options": [
+      {
+        "option_id": 1,
+        "option_text": "Monday",
+        "vote_count": 3,
+        "order_no": 1,
+        "voters": [
+          { "userId": 2, "votedAt": "2026-03-24T10:05:00.000Z" },
+          { "userId": 3, "votedAt": "2026-03-24T10:06:00.000Z" },
+          { "userId": 5, "votedAt": "2026-03-24T10:07:00.000Z" }
+        ]
+      },
+      {
+        "option_id": 2,
+        "option_text": "Wednesday",
+        "vote_count": 1,
+        "order_no": 2,
+        "voters": [
+          { "userId": 4, "votedAt": "2026-03-24T10:08:00.000Z" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### List Group Polls
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/chat/polls/group/:groupId` | JWT | List all polls in a group (paginated) |
+
+**Query params:** `limit` (default 20, max 100), `offset` (default 0)
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "poll_id": 1,
+      "group_message_id": 450,
+      "group_id": 3,
+      "question": "What day works best?",
+      "poll_type": "single",
+      "status": "active",
+      "created_by": 2,
+      "creator_name": "Bhavesh Singh",
+      "total_votes": 4,
+      "created_at": "2026-03-24T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+### Vote on a Poll
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/chat/polls/:messageId/vote` | JWT | Vote or toggle vote on a poll option |
+
+**Request:**
+```json
+{
+  "optionId": 1
+}
+```
+
+**Response (vote added):**
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "added",
+    "poll": { "...full poll object with updated counts..." }
+  }
+}
+```
+
+**Response (vote removed — toggle off):**
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "removed",
+    "poll": { "...full poll object with updated counts..." }
+  }
+}
+```
+
+**Behaviour:**
+- Single-choice polls: existing votes are removed before adding the new vote
+- Multi-choice polls: voting the same option again toggles it off
+- Returns `400` if poll has ended or expired
+
+### End a Poll
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/chat/polls/:messageId/end` | JWT | End an active poll (stops accepting votes) |
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "poll_id": 1,
+    "status": "ended",
+    "ended_at": "2026-03-24T12:00:00.000Z",
+    "ended_by": 2
+  }
+}
+```
+
+### Edit a Poll
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| PATCH | `/chat/polls/:messageId` | JWT | Edit poll question and/or options (creator only) |
+
+**Request:**
+```json
+{
+  "question": "Updated question text?",
+  "options": [
+    { "option_id": 1, "text": "Updated option A" },
+    { "option_id": 2, "text": "Updated option B" },
+    { "text": "New option C" }
+  ]
+}
+```
+
+**Notes:**
+- Only the poll creator can edit
+- Cannot edit an ended poll
+- Options with `option_id` update existing options; options without `option_id` are added as new
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": { "...updated poll object..." }
+}
+```
+
+### Delete a Poll
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| DELETE | `/chat/polls/:messageId` | JWT | Soft-delete a poll (creator only) |
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": { "deleted": true }
+}
+```
+
+### cURL Examples
+
+```bash
+# Get poll by message ID
+curl "$BASE_URL/chat/polls/450" -H "Authorization: Bearer $TOKEN"
+
+# List group polls (paginated)
+curl "$BASE_URL/chat/polls/group/3?limit=20&offset=0" -H "Authorization: Bearer $TOKEN"
+
+# Vote on a poll
+curl -X POST "$BASE_URL/chat/polls/450/vote" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "X-CSRF-Token: $CSRF_TOKEN" -d '{"optionId":1}'
+
+# End a poll
+curl -X POST "$BASE_URL/chat/polls/450/end" -H "Authorization: Bearer $TOKEN" -H "X-CSRF-Token: $CSRF_TOKEN"
+
+# Edit a poll
+curl -X PATCH "$BASE_URL/chat/polls/450" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "X-CSRF-Token: $CSRF_TOKEN" -d '{"question":"New question?","options":[{"option_id":1,"text":"A"},{"option_id":2,"text":"B"}]}'
+
+# Delete a poll
+curl -X DELETE "$BASE_URL/chat/polls/450" -H "Authorization: Bearer $TOKEN" -H "X-CSRF-Token: $CSRF_TOKEN"
+```
+
+### Socket.IO Events (Real-time)
+
+| Event | Direction | Payload | Description |
+|-------|-----------|---------|-------------|
+| `poll:vote` | Client → Server | `{ messageId, threadId, optionId, pollType }` | Cast or toggle a vote |
+| `poll:end` | Client → Server | `{ messageId, threadId, endedAt }` | End a poll |
+| `poll:edit` | Client → Server | `{ messageId, threadId, poll }` | Edit poll question/options |
+| `poll:voted` | Server → Client | `{ messageId, threadId, poll }` | Broadcast updated poll after vote |
+| `poll:ended` | Server → Client | `{ messageId, threadId, poll }` | Broadcast poll ended |
+| `poll:edited` | Server → Client | `{ messageId, threadId, poll }` | Broadcast poll edited |
+
+### Database Tables
+
+| Table | Key Columns |
+|-------|-------------|
+| `group_polls` | poll_id, group_message_id, group_id, question, poll_type (`single`/`multiple`), show_results_before_vote, ends_at, end_permission (`creator_only`/`creator_admin`/`admin`), status (`active`/`ended`/`deleted`), created_by, ended_by |
+| `group_poll_options` | option_id, poll_id, option_text, vote_count, order_no |
+| `group_poll_votes` | vote_id, poll_id, option_id, user_id, voted_at (unique: poll_id + user_id + option_id) |
+
+---
+
 ## AI Assistant Module (`/live-assistant`)
 
 All endpoints require JWT authentication via `Authorization: Bearer <token>`.
@@ -1500,3 +1734,15 @@ Active knowledge entries are automatically injected into AI assistant context. T
   }
 }
 ```
+
+## Update Log (2026-03-24)
+
+- Group Polls REST API added (`/chat/polls`):
+  - `GET /chat/polls/:messageId` — full poll with options & voters (JWT)
+  - `GET /chat/polls/group/:groupId` — paginated poll list per group (JWT)
+  - `POST /chat/polls/:messageId/vote` — vote/toggle on a poll option (JWT)
+  - `POST /chat/polls/:messageId/end` — end a poll (JWT)
+  - `PATCH /chat/polls/:messageId` — edit poll question/options, creator only (JWT)
+  - `DELETE /chat/polls/:messageId` — soft-delete poll, creator only (JWT)
+- Socket.IO poll events documented: `poll:vote`, `poll:end`, `poll:edit`, `poll:voted`, `poll:ended`, `poll:edited`
+- Database tables documented: `group_polls`, `group_poll_options`, `group_poll_votes`

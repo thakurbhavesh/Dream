@@ -946,6 +946,19 @@ const GeneralApp = () => {
       patchMessage?.(data.threadId, updated);
     }, [findMessage, upsertMessage, patchMessage]),
 
+    onPollEdited: useCallback((data) => {
+      if (!data?.threadId || !data?.messageId || !data?.content) return;
+      const msg = findMessage(data.threadId, data.messageId);
+      if (!msg) return;
+      const updated = {
+        ...msg,
+        content: { ...msg.content, ...data.content },
+        metadata: { ...msg.metadata, ...data.content },
+      };
+      upsertMessage(data.threadId, updated);
+      patchMessage?.(data.threadId, updated);
+    }, [findMessage, upsertMessage, patchMessage]),
+
     // S3 upload progress from backend (Phase 2: Backend → S3, maps to 50-100%)
     onUploadS3Progress: useCallback((data) => {
       if (!data?.uploadId) return;
@@ -2563,9 +2576,13 @@ const GeneralApp = () => {
       };
       upsertMessage(targetThreadId, updated);
       patchMessage?.(targetThreadId, updated);
+      // Persist poll edit to backend via socket
+      if (isRealThread(targetThreadId)) {
+        chatSocket.editPoll(messageId, targetThreadId, updatedPoll);
+      }
       setPollEditingReference(null);
     },
-    [conversationMessages, patchMessage, upsertMessage]
+    [conversationMessages, patchMessage, upsertMessage, chatSocket, isRealThread]
   );
 
   const handleMessageAction = useCallback(

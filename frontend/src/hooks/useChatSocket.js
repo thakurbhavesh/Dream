@@ -87,6 +87,7 @@ const useChatSocket = ({
   onMessagePinned,
   onPollVoted,
   onPollEnded,
+  onPollEdited,
   onTypingUpdate,
   onUserOnline,
   onUserOffline,
@@ -110,6 +111,7 @@ const useChatSocket = ({
     onMessagePinned,
     onPollVoted,
     onPollEnded,
+    onPollEdited,
     onTypingUpdate,
     onUserOnline,
     onUserOffline,
@@ -133,6 +135,7 @@ const useChatSocket = ({
       "message:pinned": (data) => callbacksRef.current.onMessagePinned?.(data),
       "poll:voted": (data) => callbacksRef.current.onPollVoted?.(data),
       "poll:ended": (data) => callbacksRef.current.onPollEnded?.(data),
+      "poll:edited": (data) => callbacksRef.current.onPollEdited?.(data),
       "message:read_ack": (data) => callbacksRef.current.onReadAck?.(data),
       "message:delivered_ack": (data) => callbacksRef.current.onDeliveredAck?.(data),
       "thread:update": (data) => callbacksRef.current.onThreadUpdate?.(data),
@@ -272,6 +275,15 @@ const useChatSocket = ({
     [socket]
   );
 
+  const editPoll = useCallback(
+    (messageId, threadId, poll) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("poll:edit", { messageId, threadId, poll }, resolve);
+      }),
+    [socket]
+  );
+
   const joinGroup = useCallback(
     (groupId) => { socket?.emit("group:join", { groupId }); },
     [socket]
@@ -297,9 +309,10 @@ const useChatSocket = ({
     pinMessage,
     votePoll,
     endPoll,
+    editPoll,
     joinGroup,
     focusThread,
-  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, joinGroup, focusThread]);
+  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, editPoll, joinGroup, focusThread]);
 };
 
 export default useChatSocket;
