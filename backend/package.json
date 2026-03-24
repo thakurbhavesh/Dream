@@ -1,0 +1,45 @@
+{
+  "name": "node-mvc-complete",
+  "version": "1.0.0",
+  "description": "Sample Node.js MVC API with PostgreSQL and Redis caching",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "keywords": [
+    "node",
+    "express",
+    "mvc",
+    "redis",
+    "postgres"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@aws-sdk/client-s3": "^3.1009.0",
+    "@aws-sdk/lib-storage": "^3.1009.0",
+    "@aws-sdk/s3-request-presigner": "^3.1009.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "country-state-city": "^3.2.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "geoip-lite": "^1.4.10",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^2.1.1",
+    "nodemailer": "^8.0.1",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.11.5",
+    "redis": "^4.6.13",
+    "socket.io": "^4.8.3",
+    "stripe": "^18.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "socket.io-client": "^4.8.3"
+  }
+}

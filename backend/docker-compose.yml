@@ -1,0 +1,25 @@
+# docker-compose.yml
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command: >
+      sh -c '
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --save 60 1 --appendonly yes --requirepass "$$REDIS_PASSWORD";
+        else
+          exec redis-server --save 60 1 --appendonly yes;
+        fi
+      '
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

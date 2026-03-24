@@ -1,0 +1,145 @@
+[33mcommit e03b684e512e3e8d6ab477e36f55962d99e8e864[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mdev-bhavesh[m[33m, [m[1;31morigin/staging[m[33m, [m[1;32mstaging[m[33m)[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 15:51:25 2026 +0530
+
+    activity_log  use all controller
+
+[33mcommit 3adb77ae5a187641c80ffb60788c5f86efa67189[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 15:42:05 2026 +0530
+
+    platform & ip  restriction documnet update
+
+[33mcommit 11ecb8ef6008d335a51985116b9371a120110497[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 15:38:41 2026 +0530
+
+    platform & ip  restriction
+
+[33mcommit ce7ef870f6d50813501be925a3d4edf4a5461131[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 13:35:11 2026 +0530
+
+    all issue fix
+
+[33mcommit b2483b109a333c81d54c5b8a0a3b931dbfbada31[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 13:10:54 2026 +0530
+
+    mail template
+
+[33mcommit ccf6d446cdb0e8c30335bfb5231ff44563cd1a55[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 13:07:28 2026 +0530
+
+    mail template
+
+[33mcommit e0d6141f0f9c54d8131e639f8f1af7cbe6571bf0[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 12:58:51 2026 +0530
+
+    contact us mailtemplate update
+
+[33mcommit 979af6968afc14c9790272cae14fbefe1d4b5664[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 12:54:38 2026 +0530
+
+    contact us module complete
+
+[33mcommit 825858d8211c889807fb7a0dd3fd09ad23c6c2b8[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 11:57:13 2026 +0530
+
+    messenger features
+
+[33mcommit b3ff91fc5246e0c8885076811634beaade0448e4[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Wed Feb 25 11:17:36 2026 +0530
+
+    site Details api add
+
+[33mcommit a3339a658682d8b21874b28b90fd396eecb8d636[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Tue Feb 24 18:25:38 2026 +0530
+
+    .md file updated
+
+[33mcommit a903c7805b7b4751b01e51590e820bea8e74d16a[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Tue Feb 24 16:37:37 2026 +0530
+
+    plan features and .md file updated
+
+[33mcommit c4c34e1ecd0f558836f6ef83bf79321bf64bfda8[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Tue Feb 24 14:01:00 2026 +0530
+
+    organization menu permission
+
+[33mcommit 5ab374ee34c725f002d28e1cb2d9506eccaaf942[m
+Author: bhaveshsingh-cmyk <bhavesh.singh@aabhyasa.com>
+Date:   Tue Feb 24 13:23:21 2026 +0530
+
+    initial fies
+
+[33mcommit f20e6aa76ee0cfff00f828dbfa5bf4db1691cef0[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Mon Nov 10 11:32:24 2025 +0530
+
+    make changes into the readme.md
+
+[33mcommit ebbb17a96cefa6e1a1bcd7e9720a3cc38c3fa05b[m
+Merge: 6d47f2e 368af38
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 12:13:04 2025 +0530
+
+    Merge branch 'backend' into staging
+
+[33mcommit 368af38e799fd280e387c2fa4b62ba07821ac4f0[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 12:11:07 2025 +0530
+
+    updated readme
+
+[33mcommit 6d47f2e9580adae0aae847bf9e35461b737ef4a0[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 12:08:33 2025 +0530
+
+    updated the index
+
+[33mcommit 3c4cc00dd0ccd664a8e1a080b9e4bdf6c22f8fdf[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m
+Merge: 37120e0 ae5fa6f
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:51:22 2025 +0530
+
+    updated
+
+[33mcommit ae5fa6f49a5c624ba249bd9ae957e1f7e3383b55[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:41:10 2025 +0530
+
+    updated hsdfshdfv
+
+[33mcommit 37120e0f075731c09cb84f50fd606a0667995eb4[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:40:40 2025 +0530
+
+    modified readme
+
+[33mcommit 0c62024f9cbd8d88798b2efe59ad05e55708beea[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:25:34 2025 +0530
+
+    created index file and modified readme
+
+[33mcommit b13775151ac29ca3dd98fc1734d99e8d5bbbf4da[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:25:09 2025 +0530
+
+    created index file and modified readme
+
+[33mcommit 90c95e7af37dd7e6ba580853d0ccbd8d5506e6e5[m
+Author: Jai <jaiprakash.maurya@aabhyasa.com>
+Date:   Fri Nov 7 11:07:35 2025 +0530
+
+    first commit

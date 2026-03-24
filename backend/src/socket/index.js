@@ -1,0 +1,1910 @@
+const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
+const chatModel = require('../chat/chatModel');
+const db = require('../config/database');
+const { signProfileFields } = require('../utils/signProfileUrls');
+const { signMessageFileUrls } = require('../utils/signFileUrls');
+const { encryptMessage, decryptMessage, encryptMetadata, decryptMetadata } = require('../utils/messageCipher');
+const controlModel = require('../models/organizationControlModel');
+
+/** @type {Server} */
+let io = null;
+
+// ─── Organization Controls enforcement ───────────────────────────────────────
+// Preload ALL controls for an org in one query, cache for 5 minutes.
+// This ensures typing/status events NEVER hit the DB individually.
+const _orgControlsCache = new Map();   // orgId → { data: Map<featureKey, row>, ts }
+const CONTROL_CACHE_TTL = 5 * 60_000; // 5 minutes
+
+const preloadOrgControls = async (orgId) => {
+  try {
+    const rows = await controlModel.findAllControls(orgId);
+    const map = new Map();
+    for (const row of rows) map.set(row.feature_key, row);
+    _orgControlsCache.set(orgId, { data: map, ts: Date.now() });
+    return map;
+  } catch {
+    return new Map();
+  }
+};
+
+const getOrgControl = async (orgId, featureKey) => {
+  const cached = _orgControlsCache.get(orgId);
+  if (cached && Date.now() - cached.ts < CONTROL_CACHE_TTL) {
+    return cached.data.get(featureKey) || null;
+  }
+  const map = await preloadOrgControls(orgId);
+  return map.get(featureKey) || null;
+};
+
+/** Invalidate cache when admin updates a control (call from controller) */
+const invalidateOrgControlsCache = (orgId) => {
+  _orgControlsCache.delete(orgId);
+};
+
+/**
+ * Resolve role_id (from JWT) → role_key string used in allowed_roles JSONB.
+ * Role mapping: 1=owner, 2=admin, 3=moderator, 4=user (standard TeamChatX roles).
+ * Falls back to DB lookup if the ID is outside the known range.
+ */
+const _roleIdToKey = { 1: 'owner', 2: 'admin', 3: 'moderator', 4: 'user' };
+const _roleKeySet = new Set(['owner', 'admin', 'moderator', 'user']);
+
+const getRoleKey = async (roleId) => {
+  // JWT may contain role_key string (e.g. "owner") or numeric role_id (e.g. 1)
+  if (typeof roleId === 'string' && _roleKeySet.has(roleId)) return roleId;
+  if (_roleIdToKey[roleId]) return _roleIdToKey[roleId];
+  try {
+    const { rows } = await db.query('SELECT role_key FROM roles WHERE role_id = $1 LIMIT 1', [roleId]);
+    const key = rows[0]?.role_key || 'user';
+    _roleIdToKey[roleId] = key;
+    return key;
+  } catch { return 'user'; }
+};
+
+/**
+ * Check if a feature action is allowed for this org + user role.
+ * Returns { allowed, reason, control } — caller decides what to do with denied actions.
+ * Also checks time_limit_minutes for edit/recall (message must be within N minutes of creation).
+ */
+const checkOrgControl = async (orgId, roleId, featureKey, messageCreatedAt) => {
+  const control = await getOrgControl(orgId, featureKey);
+
+  // No control row → feature allowed by default
+  if (!control) return { allowed: true, control: null };
+
+  // Feature disabled entirely
+  if (!control.enabled) return { allowed: false, reason: `${featureKey} is disabled for this organization`, control };
+
+  // Check role permission
+  const roleKey = await getRoleKey(roleId);
+  const allowedRoles = control.allowed_roles;
+  if (allowedRoles && typeof allowedRoles === 'object') {
+    if (!allowedRoles[roleKey]) {
+      return { allowed: false, reason: `Your role (${roleKey}) cannot ${featureKey}`, control };
+    }
+  }
+
+  // Check time limit (for edit/recall/delete)
+  if (control.time_limit_minutes && messageCreatedAt) {
+    const created = new Date(messageCreatedAt);
+    const now = new Date();
+    const diffMinutes = (now - created) / 60000;
+    if (diffMinutes > control.time_limit_minutes) {
+      return {
+        allowed: false,
+        reason: `${featureKey} time limit exceeded (${control.time_limit_minutes} min)`,
+        control,
+      };
+    }
+  }
+
+  return { allowed: true, control };
+};
+
+// ─── Scalable presence tracking ──────────────────────────────────────────────
+// userId (string) → Set<socketId> — supports multi-tab/device per user
+const userSockets = new Map();
+
+const addUserSocket = (userId, socketId) => {
+  let set = userSockets.get(userId);
+  if (!set) { set = new Set(); userSockets.set(userId, set); }
+  set.add(socketId);
+};
+
+const removeUserSocket = (userId, socketId) => {
+  const set = userSockets.get(userId);
+  if (!set) return;
+  set.delete(socketId);
+  if (set.size === 0) userSockets.delete(userId);
+};
+
+/** Emit to all tabs/devices of a user via their personal room (efficient — no loop) */
+const emitToUser = (userId, event, data) => {
+  io.to(`user:${String(userId)}`).emit(event, data);
+};
+
+const isUserOnline = (userId) => userSockets.has(String(userId));
+
+// userId (string) → orgId — track which org each connected user belongs to
+const userOrgMap = new Map();
+
+// orgId → Set<userId> — O(1) lookup for online users per org (avoids full Map scan)
+const orgOnlineUsers = new Map();
+
+// ─── Per-socket rate limiter (sliding window, no external dependency) ─────────
+// Returns a function: () => boolean (true = allowed, false = rate-limited)
+const createRateLimiter = (maxPerWindow, windowMs) => {
+  const timestamps = [];
+  return () => {
+    const now = Date.now();
+    // Remove expired timestamps
+    while (timestamps.length && timestamps[0] <= now - windowMs) timestamps.shift();
+    if (timestamps.length >= maxPerWindow) return false;
+    timestamps.push(now);
+    return true;
+  };
+};
+
+// ─── Active thread tracking (for delivery status) ────────────────────────────
+// socketId (string) → threadId that socket has open (e.g. "dm-5", "group-3")
+// Tracked per-socket so multi-tab users don't overwrite each other's active thread
+const socketActiveThread = new Map();
+
+const setUserActiveThread = (userId, threadId, socketId) => {
+  if (threadId && socketId) {
+    socketActiveThread.set(String(socketId), { userId: String(userId), threadId: String(threadId) });
+  } else if (socketId) {
+    socketActiveThread.delete(String(socketId));
+  }
+};
+
+// Returns the active thread if ANY of the user's sockets has it open
+const getUserActiveThread = (userId) => {
+  const uid = String(userId);
+  const sockets = userSockets.get(uid);
+  if (!sockets || !sockets.size) return null;
+  for (const sid of sockets) {
+    const entry = socketActiveThread.get(sid);
+    if (entry && entry.threadId) return entry.threadId;
+  }
+  return null;
+};
+
+// ─── Parse cookies from raw header ────────────────────────────────────────────
+const parseCookies = (raw) => {
+  const map = {};
+  if (!raw) return map;
+  for (const pair of raw.split(';')) {
+    const idx = pair.indexOf('=');
+    if (idx < 1) continue;
+    map[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+  }
+  return map;
+};
+
+// ─── JWT auth middleware ──────────────────────────────────────────────────────
+const authenticateSocket = (socket, next) => {
+  // Collect all possible token sources (auth.token, Authorization header, access_token cookie).
+  // On reconnection the client may send a stale auth.token while the browser cookie
+  // has already been refreshed by a REST /auth/refresh call.  Try ALL sources and
+  // use the first one that passes jwt.verify so a fresh cookie can rescue an expired
+  // explicit token.
+  const cookies = parseCookies(socket.handshake.headers?.cookie);
+  const candidates = [
+    socket.handshake.auth?.token || '',
+    (socket.handshake.headers?.authorization || '').replace('Bearer ', ''),
+    cookies.access_token || '',
+  ].filter(Boolean);
+
+  // De-duplicate (auth.token and cookie may carry the same value)
+  const uniqueTokens = [...new Set(candidates)];
+
+  if (uniqueTokens.length === 0) {
+    console.warn('[socket] auth: no token found (auth/header/cookie all empty)');
+    return next(new Error('Authentication required'));
+  }
+
+  for (const token of uniqueTokens) {
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      socket.user = payload;
+      return next();
+    } catch {
+      // This token failed — try the next one
+    }
+  }
+
+  // None of the tokens were valid
+  console.warn('[socket] auth: all token sources failed for socket', socket.id);
+  next(new Error('Invalid token'));
+};
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+const initSocket = (httpServer) => {
+  const allowedOrigins = String(
+    process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || 'http://localhost:5173'
+  ).split(',').map((s) => s.trim()).filter(Boolean);
+
+  io = new Server(httpServer, {
+    cors: {
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        if (process.env.NODE_ENV !== 'production' &&
+          /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          return cb(null, true);
+        }
+        cb(new Error('CORS'));
+      },
+      credentials: true,
+    },
+    // Allow both transports — polling handshake then upgrade to websocket
+    transports: ['polling', 'websocket'],
+    allowUpgrades: true,
+    // Tuned for 50K+ concurrent connections
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    maxHttpBufferSize: 1e6,       // 1 MB max message
+    perMessageDeflate: false,     // disable compression for lower CPU at scale
+    httpCompression: false,
+    connectTimeout: 10000,
+  });
+
+  io.use(authenticateSocket);
+  io.on('connection', onConnection);
+
+  console.log('[socket] Socket.IO initialized');
+  return io;
+};
+
+// ─── Connection handler ───────────────────────────────────────────────────────
+// ─── Resolve user's latest device geo data ────────────────────────────────────
+const formatDeviceType = (type) => {
+  if (!type || type === 'other') return 'Browser';
+  const map = { desktop: 'Desktop', mobile: 'Mobile', tablet: 'Tablet', web: 'Browser' };
+  return map[type.toLowerCase()] || type;
+};
+
+const loadUserGeo = async (userId) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT city, country, device_type, os_name
+       FROM user_devices WHERE user_id = $1 AND status = 'active'
+       ORDER BY last_active_at DESC NULLS LAST LIMIT 1`,
+      [userId]
+    );
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      city: r.city || null,
+      country: r.country || null,
+      device: formatDeviceType(r.device_type),
+      platform: r.os_name || 'Web',
+    };
+  } catch { return null; }
+};
+
+// Batch version — 1 query for multiple users instead of N queries
+const loadUserGeoBatch = async (userIds) => {
+  if (!userIds?.length) return new Map();
+  try {
+    const { rows } = await db.query(
+      `SELECT DISTINCT ON (user_id) user_id, city, country, device_type, os_name
+       FROM user_devices WHERE user_id = ANY($1) AND status = 'active'
+       ORDER BY user_id, last_active_at DESC NULLS LAST`,
+      [userIds.map(Number)]
+    );
+    const map = new Map();
+    for (const r of rows) {
+      map.set(Number(r.user_id), {
+        city: r.city || null,
+        country: r.country || null,
+        device: formatDeviceType(r.device_type),
+        platform: r.os_name || 'Web',
+      });
+    }
+    return map;
+  } catch { return new Map(); }
+};
+
+// ─── Reusable helpers (eliminate duplicate logic across send/forward/edit) ────
+
+/** Build sentFrom geo object from socket's cached device data */
+const buildSentFrom = (socket) => {
+  const geo = socket.geo || {};
+  return (geo.city || geo.country)
+    ? { city: geo.city, country: geo.country, device: geo.device || 'Web' }
+    : null;
+};
+
+/** Format geo into "City, Country" string */
+const formatLocation = (geo) => {
+  if (!geo) return null;
+  if (geo.city && geo.country) return `${geo.city}, ${geo.country}`;
+  return geo.country || geo.city || null;
+};
+
+/**
+ * Resolve DM delivery status + run side effects (DB update, ack emit).
+ * Returns 'sent' | 'delivered' | 'read'.
+ */
+const resolveDMDelivery = ({ saved, receiverId, userId, orgId, threadId }) => {
+  const receiverOnline = isUserOnline(String(receiverId));
+  const receiverThread = getUserActiveThread(String(receiverId));
+  const senderThreadId = `dm-${userId}`;
+
+  if (!receiverOnline) return { status: 'sent', receiverOnline, receiverThread, senderThreadId };
+
+  if (receiverThread === senderThreadId) {
+    chatModel.markDMMessagesRead(orgId, receiverId, Number(userId)).catch(() => {});
+    db.query(
+      `UPDATE messages SET delivered_at = NOW() WHERE message_id = $1 AND delivered_at IS NULL`,
+      [saved.message_id]
+    ).catch(() => {});
+    emitToUser(userId, 'message:read_ack', {
+      threadId, readBy: String(receiverId),
+      readAt: new Date().toISOString(),
+    });
+    return { status: 'read', receiverOnline, receiverThread, senderThreadId };
+  }
+
+  db.query(
+    `UPDATE messages SET delivered_at = NOW() WHERE message_id = $1 AND delivered_at IS NULL`,
+    [saved.message_id]
+  ).catch(() => {});
+  emitToUser(userId, 'message:delivered_ack', {
+    threadId,
+    deliveredBy: String(receiverId),
+    deliveredAt: new Date().toISOString(),
+    messageIds: [String(saved.message_id)],
+  });
+  return { status: 'delivered', receiverOnline, receiverThread, senderThreadId };
+};
+
+/** Deliver DM to receiver: message:new + thread:update + notification */
+const deliverDMToReceiver = async ({ receiverId, userId, orgId, normalized, senderThreadId, receiverThread, receiverOnline, senderName, messageType, message }) => {
+  emitToUser(String(receiverId), 'message:new', {
+    threadId: senderThreadId,
+    message: { ...normalized, direction: 'incoming' },
+  });
+
+  if (receiverThread !== senderThreadId) {
+    const unreadResult = await db.query(
+      `SELECT COUNT(*) AS cnt FROM messages
+       WHERE organization_id = $1 AND sender_id = $2 AND receiver_id = $3
+         AND read_time IS NULL AND message IS NOT NULL`,
+      [orgId, Number(userId), receiverId]
+    ).catch(() => ({ rows: [{ cnt: 0 }] }));
+    emitToUser(String(receiverId), 'thread:update', {
+      threadId: senderThreadId,
+      unreadCount: Number(unreadResult.rows[0]?.cnt || 0),
+      readStatus: 'unread',
+    });
+
+    if (receiverOnline) {
+      emitToUser(String(receiverId), 'notification', {
+        type: 'message',
+        title: senderName || 'New message',
+        body: messageType === 'text' ? message : `Sent a ${messageType}`,
+        threadId: senderThreadId,
+        senderId: userId,
+        senderName,
+      });
+    }
+  } else {
+    // Thread is open — ensure unread badge stays at 0
+    emitToUser(String(receiverId), 'thread:update', {
+      threadId: senderThreadId,
+      unreadCount: 0,
+      readStatus: 'read',
+    });
+  }
+};
+
+/** Deliver group message to all members: message:new + batch unread + notification */
+const deliverGroupToMembers = async ({ groupId, orgId, userId, normalized, senderName, messageType, message, threadId }) => {
+  const members = await getGroupMemberIds(groupId);
+  const otherMemberIds = members.filter((m) => String(m) !== userId);
+
+  // Batch unread counts in 1 query
+  const unreadMap = new Map();
+  if (otherMemberIds.length) {
+    const { rows: unreadRows } = await db.query(
+      `SELECT gmr.user_id, COUNT(*) AS cnt
+       FROM group_message_recipients gmr
+       JOIN group_messages gm ON gm.group_message_id = gmr.group_message_id
+       WHERE gm.organization_id = $1 AND gm.group_id = $2
+         AND gmr.user_id = ANY($3) AND gmr.delivery_status != 'read'
+       GROUP BY gmr.user_id`,
+      [orgId, groupId, otherMemberIds]
+    ).catch(() => ({ rows: [] }));
+    for (const r of unreadRows) unreadMap.set(Number(r.user_id), Number(r.cnt));
+  }
+
+  for (const memberId of otherMemberIds) {
+    emitToUser(String(memberId), 'message:new', {
+      threadId,
+      message: { ...normalized, direction: 'incoming' },
+    });
+    const memberThread = getUserActiveThread(String(memberId));
+    if (memberThread !== threadId) {
+      emitToUser(String(memberId), 'thread:update', {
+        threadId,
+        unreadCount: unreadMap.get(Number(memberId)) || 0,
+        readStatus: 'unread',
+      });
+    } else {
+      // Thread is open — ensure unread badge stays at 0
+      emitToUser(String(memberId), 'thread:update', {
+        threadId,
+        unreadCount: 0,
+        readStatus: 'read',
+      });
+    }
+    if (isUserOnline(String(memberId)) && memberThread !== threadId) {
+      emitToUser(String(memberId), 'notification', {
+        type: 'message',
+        title: 'Group message',
+        body: `${senderName}: ${messageType === 'text' ? message : `Sent a ${messageType}`}`,
+        threadId,
+        senderId: userId,
+        senderName,
+      });
+    }
+  }
+};
+
+/** Build edit payload shape that frontend expects */
+const buildEditPayload = (normalized, newText) => {
+  const editText = normalized.content?.text || newText;
+  return {
+    ...normalized,
+    message: editText,
+    text: editText,
+    preview: editText,
+    body: editText,
+    content: { text: editText, isEmojiOnly: false, emojiCount: 0 },
+    metadata: {
+      ...(normalized.metadata || {}),
+      editedAt: normalized.editedAt || new Date().toISOString(),
+    },
+    __normalized: false,
+    __renderCache: null,
+  };
+};
+
+/** Check org control for a feature (edit/delete/recall) with time limit */
+const checkFeatureAllowed = async (orgId, featureKey, messageId, threadId) => {
+  const ctrl = await getOrgControl(orgId, featureKey);
+  if (ctrl && !ctrl.enabled) return { allowed: false, reason: `${featureKey} is disabled for this organization` };
+  if (ctrl && ctrl.time_limit_minutes) {
+    const msgTime = await getMessageCreatedAt(messageId, threadId);
+    if (msgTime) {
+      const diffMinutes = (Date.now() - new Date(msgTime).getTime()) / 60000;
+      if (diffMinutes > ctrl.time_limit_minutes) {
+        return { allowed: false, reason: `${featureKey[0].toUpperCase() + featureKey.slice(1)} time limit exceeded (${ctrl.time_limit_minutes} min)` };
+      }
+    }
+  }
+  return { allowed: true };
+};
+
+const onConnection = (socket) => {
+  const userId = String(socket.user.sub);
+  const orgId = socket.user.org;
+
+  // Per-socket rate limiters (protect DB from spam)
+  const rl = {
+    send:    createRateLimiter(30, 10_000),   // 30 messages per 10s
+    edit:    createRateLimiter(10, 10_000),   // 10 edits per 10s
+    react:   createRateLimiter(20, 10_000),   // 20 reactions per 10s
+    typing:  createRateLimiter(5, 3_000),     // 5 typing events per 3s
+    read:    createRateLimiter(10, 5_000),    // 10 read marks per 5s
+    focus:   createRateLimiter(10, 5_000),    // 10 focus switches per 5s
+    info:    createRateLimiter(5, 5_000),     // 5 info requests per 5s
+    pin:     createRateLimiter(5, 10_000),    // 5 pin/unpin per 10s
+    recall:  createRateLimiter(5, 10_000),    // 5 recalls per 10s
+    del:     createRateLimiter(10, 10_000),   // 10 deletes per 10s
+    forward: createRateLimiter(10, 10_000),   // 10 forwards per 10s
+  };
+
+  // Preload organization controls into cache on connect (non-blocking)
+  if (orgId) preloadOrgControls(orgId).catch(() => {});
+
+  // Cache user's device geo data for message metadata (non-blocking)
+  loadUserGeo(Number(userId)).then((geo) => { socket.geo = geo || {}; }).catch(() => { socket.geo = {}; });
+
+  const wasAlreadyOnline = isUserOnline(userId);
+
+  addUserSocket(userId, socket.id);
+  if (orgId) {
+    userOrgMap.set(userId, orgId);
+    if (!orgOnlineUsers.has(orgId)) orgOnlineUsers.set(orgId, new Set());
+    orgOnlineUsers.get(orgId).add(userId);
+  }
+
+  // Join personal + org rooms (rooms are the most efficient way to broadcast)
+  socket.join(`user:${userId}`);
+  if (orgId) socket.join(`org:${orgId}`);
+
+  console.log(`[socket] connected user=${userId} sid=${socket.id} tabs=${userSockets.get(userId)?.size}`);
+
+  // Broadcast online to org — only on FIRST tab (not duplicate per tab)
+  // Respects organization 'indicators' control
+  if (!wasAlreadyOnline && orgId) {
+    getOrgControl(orgId, 'indicators').then((ctrl) => {
+      if (!ctrl || ctrl.enabled) {
+        socket.to(`org:${orgId}`).emit('user:online', { userId, status: 'Online' });
+      }
+    }).catch(() => {
+      socket.to(`org:${orgId}`).emit('user:online', { userId, status: 'Online' });
+    });
+  }
+
+  // Tell new user who's already online (same org only) — O(1) via orgOnlineUsers Set
+  if (orgId) {
+    const orgSet = orgOnlineUsers.get(orgId);
+    if (orgSet && orgSet.size > 1) {
+      const onlineUsers = [];
+      for (const uid of orgSet) {
+        if (uid !== userId) onlineUsers.push(uid);
+      }
+      socket.emit('users:online_list', { users: onlineUsers });
+    }
+
+    // ── Heavy DB queries only on FIRST tab connect (skip for multi-tab reconnect) ──
+    if (!wasAlreadyOnline) {
+      // Sync DM unread counts (skip self-chat — Myself thread is managed by frontend)
+      db.query(
+        `SELECT sender_id, COUNT(*) AS cnt FROM messages
+         WHERE organization_id = $1 AND receiver_id = $2 AND sender_id != $2 AND read_time IS NULL AND message IS NOT NULL
+         GROUP BY sender_id`,
+        [orgId, Number(userId)]
+      ).then(({ rows }) => {
+        for (const r of rows) {
+          socket.emit('thread:update', {
+            threadId: `dm-${r.sender_id}`,
+            unreadCount: Number(r.cnt),
+            readStatus: Number(r.cnt) > 0 ? 'unread' : 'read',
+          });
+        }
+      }).catch(() => {});
+
+      // Sync group unread counts
+      db.query(
+        `SELECT gm.group_id, COUNT(*) AS cnt
+         FROM group_message_recipients gmr
+         JOIN group_messages gm ON gm.group_message_id = gmr.group_message_id
+         WHERE gm.organization_id = $1 AND gmr.user_id = $2 AND gmr.delivery_status != 'read'
+         GROUP BY gm.group_id`,
+        [orgId, Number(userId)]
+      ).then(({ rows }) => {
+        for (const r of rows) {
+          socket.emit('thread:update', {
+            threadId: `group-${r.group_id}`,
+            unreadCount: Number(r.cnt),
+            readStatus: Number(r.cnt) > 0 ? 'unread' : 'read',
+          });
+        }
+      }).catch(() => {});
+    }
+
+    // ─── Deliver undelivered messages when user comes online (first tab only) ──
+    if (!wasAlreadyOnline) {
+    // Mark all undelivered DMs as delivered and notify each sender (double tick)
+    db.query(
+      `UPDATE messages
+       SET delivered_at = NOW()
+       WHERE organization_id = $1 AND receiver_id = $2
+         AND delivered_at IS NULL AND read_time IS NULL AND message IS NOT NULL
+       RETURNING message_id, sender_id`,
+      [orgId, Number(userId)]
+    ).then(({ rows }) => {
+      if (!rows.length) return;
+      // Group by sender to send one ack per sender
+      const senderMap = new Map();
+      for (const r of rows) {
+        if (!senderMap.has(String(r.sender_id))) senderMap.set(String(r.sender_id), []);
+        senderMap.get(String(r.sender_id)).push(String(r.message_id));
+      }
+      const deliveredAt = new Date().toISOString();
+      for (const [senderId, messageIds] of senderMap) {
+        emitToUser(senderId, 'message:delivered_ack', {
+          threadId: `dm-${userId}`,
+          deliveredBy: userId,
+          deliveredAt,
+          messageIds,
+        });
+      }
+    }).catch(() => {});
+    }
+  }
+
+  // ─── Auth: allow client to update token mid-session (e.g. after REST refresh) ─
+  socket.on('auth:refresh_token', (data, ack) => {
+    const newToken = data?.token;
+    if (!newToken) return ack?.({ error: 'token required' });
+    try {
+      const payload = jwt.verify(newToken, process.env.JWT_SECRET);
+      socket.user = payload;
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: 'Invalid token' });
+    }
+  });
+
+  // ─── Send Message ─────────────────────────────────────────────────────────
+  socket.on('message:send', async (data, ack) => {
+    if (!rl.send()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { threadId, message, message_type = 'text', metadata: rawMeta = null } = data;
+      console.log(`[socket] message:send received threadId=${threadId} userId=${userId} type=${message_type}`);
+      if (!threadId || (!message && message_type === 'text')) {
+        return ack?.({ error: 'message and threadId required' });
+      }
+      // Inject sender geo location into metadata
+      const sentFrom = buildSentFrom(socket);
+      const metadata = sentFrom ? { ...(rawMeta || {}), sentFrom } : rawMeta;
+
+      if (threadId.startsWith('dm-')) {
+        const receiverId = Number(threadId.replace('dm-', ''));
+        const isSelfChat = receiverId === Number(userId);
+        const saved = await chatModel.sendDMMessage({
+          orgId, senderId: Number(userId), receiverId,
+          message, messageType: message_type, metadata,
+        });
+        await signProfileFields(saved);
+        const normalized = normalizeDMMessage(saved, Number(userId));
+        await signMessageFileUrls(normalized);
+
+        if (isSelfChat) {
+          // Self-chat: mark as read immediately, no delivery to "other" user needed
+          console.log(`[socket] self-chat message saved: user=${userId} message_id=${saved?.message_id} threadId=${threadId}`);
+          chatModel.markDMMessagesRead(orgId, Number(userId), Number(userId)).catch(() => {});
+          ack?.({ ok: true, message: { ...normalized, status: 'read' } });
+        } else {
+          const delivery = resolveDMDelivery({ saved, receiverId, userId, orgId, threadId });
+          await deliverDMToReceiver({
+            receiverId, userId, orgId, normalized,
+            senderThreadId: delivery.senderThreadId,
+            receiverThread: delivery.receiverThread,
+            receiverOnline: delivery.receiverOnline,
+            senderName: socket.user.name,
+            messageType: message_type, message,
+          });
+
+          ack?.({ ok: true, message: { ...normalized, status: delivery.status } });
+        }
+
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const saved = await chatModel.sendGroupMessage({
+          orgId, groupId, senderId: Number(userId),
+          message, messageType: message_type, metadata,
+        });
+        await signProfileFields(saved);
+        const normalized = normalizeGroupMessage(saved, Number(userId));
+        await signMessageFileUrls(normalized);
+
+        await deliverGroupToMembers({
+          groupId, orgId, userId, normalized,
+          senderName: socket.user.name,
+          messageType: message_type, message, threadId,
+        });
+
+        ack?.({ ok: true, message: normalized });
+      }
+    } catch (err) {
+      console.error('[socket] message:send error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Edit Message (sender only) ───────────────────────────────────────────
+  socket.on('message:edit', async (data, ack) => {
+    if (!rl.edit()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId, newText } = data;
+      if (!messageId || !newText) return ack?.({ error: 'messageId and newText required' });
+
+      const editCheck = await checkFeatureAllowed(orgId, 'edit', messageId, threadId);
+      if (!editCheck.allowed) return ack?.({ error: editCheck.reason });
+
+      if (threadId?.startsWith('dm-')) {
+        const updated = await chatModel.editDMMessage(messageId, orgId, Number(userId), newText);
+        if (!updated) return ack?.({ error: 'Not found or no permission' });
+        await signProfileFields(updated);
+        const normalized = normalizeDMMessage(updated, Number(userId));
+        await signMessageFileUrls(normalized);
+        console.log(`[socket] message:edit DM id=${messageId}`);
+
+        const receiverId = String(
+          updated.receiver_id === Number(userId) ? updated.sender_id : updated.receiver_id
+        );
+        const editPayload = buildEditPayload(normalized, newText);
+        emitToUser(receiverId, 'message:edited', {
+          threadId: `dm-${userId}`,
+          message: { ...editPayload, direction: 'incoming' },
+        });
+        emitToUser(userId, 'message:edited', {
+          threadId,
+          message: { ...editPayload, direction: 'outgoing' },
+        });
+        const recvThread = getUserActiveThread(receiverId);
+        if (isUserOnline(receiverId) && recvThread !== `dm-${userId}`) {
+          emitToUser(receiverId, 'notification', {
+            type: 'edit', title: 'Message edited',
+            body: `${socket.user.name} edited a message`,
+            threadId: `dm-${userId}`, senderId: userId,
+          });
+        }
+        ack?.({ ok: true, message: normalized });
+
+      } else if (threadId?.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const updated = await editGroupMessage(messageId, orgId, groupId, Number(userId), newText);
+        if (!updated) return ack?.({ error: 'Not found or no permission' });
+        const normalized = normalizeGroupMessage(updated, Number(userId));
+        await signMessageFileUrls(normalized);
+        const grpEditPayload = buildEditPayload(normalized, newText);
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          const dir = String(memberId) === userId ? 'outgoing' : 'incoming';
+          emitToUser(String(memberId), 'message:edited', {
+            threadId,
+            message: { ...grpEditPayload, direction: dir },
+          });
+          if (String(memberId) !== userId) {
+            const editMemberThread = getUserActiveThread(String(memberId));
+            if (isUserOnline(String(memberId)) && editMemberThread !== threadId) {
+              emitToUser(String(memberId), 'notification', {
+                type: 'edit', title: 'Message edited',
+                body: `${socket.user.name} edited a message`,
+                threadId, senderId: userId, senderName: socket.user.name,
+              });
+            }
+          }
+        }
+        ack?.({ ok: true });
+      }
+    } catch (err) {
+      console.error('[socket] message:edit error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Delete Message (sender side only) ────────────────────────────────────
+  socket.on('message:delete', async (data, ack) => {
+    if (!rl.del()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId } = data;
+      if (!messageId) return ack?.({ error: 'messageId required' });
+
+      const delCheck = await checkFeatureAllowed(orgId, 'delete', messageId, threadId);
+      if (!delCheck.allowed) return ack?.({ error: delCheck.reason });
+
+      if (threadId?.startsWith('dm-')) {
+        const deleted = await chatModel.deleteDMMessage(messageId, orgId, Number(userId));
+        if (!deleted) return ack?.({ error: 'Not found or no permission' });
+        // Log delete action in message_actions
+        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(() => {});
+        emitToUser(userId, 'message:deleted', { threadId, messageId: String(messageId) });
+        ack?.({ ok: true });
+
+      } else if (threadId?.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const deleted = await chatModel.deleteGroupMessage(messageId, orgId, groupId, Number(userId));
+        if (!deleted) return ack?.({ error: 'Not found or no permission' });
+        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(() => {});
+        emitToUser(userId, 'message:deleted', { threadId, messageId: String(messageId) });
+        ack?.({ ok: true });
+      }
+    } catch (err) {
+      console.error('[socket] message:delete error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Pin / Unpin Message ───────────────────────────────────────────────────
+  socket.on('message:pin', async (data, ack) => {
+    if (!rl.pin()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId, pinned } = data;
+      if (!messageId || !threadId) return ack?.({ error: 'messageId and threadId required' });
+      const pinValue = pinned ? 1 : 0;
+
+      // Log pin action in message_actions
+      logMessageAction(messageId, threadId, Number(userId), 'pin', pinValue).catch(() => {});
+
+      // Update message metadata with pin status (encrypted)
+      const isGroup = threadId.startsWith('group-');
+      const table = isGroup ? 'group_messages' : 'messages';
+      const idCol = isGroup ? 'group_message_id' : 'message_id';
+      // Read existing metadata, decrypt, merge pin info, re-encrypt
+      const { rows: metaRows } = await db.query(
+        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
+        [messageId]
+      );
+      const existingMeta = metaRows[0]?.message_metadata
+        ? decryptMetadata(metaRows[0].message_metadata)
+        : {};
+      const mergedMeta = {
+        ...existingMeta,
+        pinned: !!pinned,
+        pinnedBy: userId,
+        pinnedAt: new Date().toISOString(),
+      };
+      const encMeta = encryptMetadata(mergedMeta);
+      await db.query(
+        `UPDATE ${table}
+         SET message_metadata = $1::jsonb,
+             updated_at = NOW()
+         WHERE ${idCol} = $2`,
+        [encMeta, messageId]
+      );
+
+      // Emit to participants
+      if (threadId.startsWith('dm-')) {
+        const otherUserId = threadId.replace('dm-', '');
+        emitToUser(userId, 'message:pinned', { threadId, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId });
+        emitToUser(otherUserId, 'message:pinned', {
+          threadId: `dm-${userId}`, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId,
+        });
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          emitToUser(String(memberId), 'message:pinned', {
+            threadId, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId,
+          });
+        }
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] message:pin error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Recall / Unsend (both sides) ─────────────────────────────────────────
+  socket.on('message:recall', async (data, ack) => {
+    if (!rl.recall()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId } = data;
+      if (!messageId) return ack?.({ error: 'messageId required' });
+
+      const recallCheck = await checkFeatureAllowed(orgId, 'recall', messageId, threadId);
+      if (!recallCheck.allowed) return ack?.({ error: recallCheck.reason });
+
+      if (threadId?.startsWith('dm-')) {
+        const recalled = await recallDMMessage(messageId, orgId, Number(userId));
+        if (!recalled) return ack?.({ error: 'Not found or no permission' });
+        const receiverId = String(
+          Number(recalled.receiver_id) === Number(userId) ? recalled.sender_id : recalled.receiver_id
+        );
+        console.log(`[socket] recall DM: sender=${userId} receiver=${receiverId} msgId=${messageId}`);
+        const receiverThreadId = `dm-${userId}`;
+        // Sender: delete from their view (same as performMessageRemoval does locally)
+        emitToUser(userId, 'message:deleted', { threadId, messageId: String(messageId) });
+        // Receiver: delete from their view
+        emitToUser(receiverId, 'message:deleted', {
+          threadId: receiverThreadId, messageId: String(messageId),
+        });
+        console.log(`[socket] recall emitted delete to both: sender threadId=${threadId}, receiver threadId=${receiverThreadId}`);
+        ack?.({ ok: true });
+
+      } else if (threadId?.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const recalled = await recallGroupMessage(messageId, orgId, groupId, Number(userId));
+        if (!recalled) return ack?.({ error: 'Not found or no permission' });
+        const members = await getGroupMemberIds(groupId);
+        console.log(`[socket] recall group: sender=${userId} groupId=${groupId} msgId=${messageId} members=${members.length}`);
+        for (const memberId of members) {
+          // Delete from all members' view (sender + receivers)
+          emitToUser(String(memberId), 'message:deleted', {
+            threadId, messageId: String(messageId),
+          });
+        }
+        ack?.({ ok: true });
+      }
+    } catch (err) {
+      console.error('[socket] message:recall error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Reaction ─────────────────────────────────────────────────────────────
+  socket.on('message:react', async (data, ack) => {
+    if (!rl.react()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId, emoji } = data;
+      if (!messageId || !emoji) return ack?.({ error: 'messageId and emoji required' });
+      const reaction = await toggleReaction(messageId, threadId, Number(userId), emoji);
+
+      const reactionPayload = { ...reaction, userName: socket.user.name || '' };
+
+      if (threadId?.startsWith('dm-')) {
+        const otherUserId = threadId.replace('dm-', '');
+        // Do NOT emit back to sender — they already applied the reaction locally
+        emitToUser(otherUserId, 'message:reacted', {
+          threadId: `dm-${userId}`, messageId: String(messageId), ...reactionPayload,
+        });
+        const otherThread = getUserActiveThread(otherUserId);
+        if (isUserOnline(otherUserId) && otherThread !== `dm-${userId}`) {
+          emitToUser(otherUserId, 'notification', {
+            type: 'reaction', title: 'Reaction',
+            body: `${socket.user.name} reacted ${emoji}`,
+            threadId: `dm-${userId}`, senderId: userId,
+          });
+        }
+      } else if (threadId?.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          // Skip sender — they already applied the reaction locally
+          if (String(memberId) === userId) continue;
+          emitToUser(String(memberId), 'message:reacted', {
+            threadId, messageId: String(messageId), ...reactionPayload,
+          });
+          const mThread = getUserActiveThread(String(memberId));
+          if (isUserOnline(String(memberId)) && mThread !== threadId) {
+            emitToUser(String(memberId), 'notification', {
+              type: 'reaction', title: 'Reaction',
+              body: `${socket.user.name} reacted ${emoji}`,
+              threadId, senderId: userId,
+            });
+          }
+        }
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] message:react error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Poll Vote ──────────────────────────────────────────────────────────
+  socket.on('poll:vote', async (data, ack) => {
+    try {
+      const { messageId, threadId, optionId, pollType } = data;
+      if (!messageId || !threadId || !optionId) return ack?.({ error: 'messageId, threadId, and optionId required' });
+
+      const isGroup = threadId.startsWith('group-');
+      const table = isGroup ? 'group_messages' : 'messages';
+      const idCol = isGroup ? 'group_message_id' : 'message_id';
+
+      // Read existing metadata
+      const { rows: metaRows } = await db.query(
+        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
+        [messageId]
+      );
+      if (!metaRows[0]) return ack?.({ error: 'Message not found' });
+
+      const meta = metaRows[0].message_metadata
+        ? decryptMetadata(metaRows[0].message_metadata)
+        : {};
+
+      if (!meta.options || !Array.isArray(meta.options)) return ack?.({ error: 'Not a poll message' });
+
+      // Check if poll has ended
+      if (meta.endedAt || (meta.endAt && new Date(meta.endAt) < new Date())) {
+        return ack?.({ error: 'Poll has ended' });
+      }
+
+      const voterId = Number(userId);
+      const voterName = socket.user.name || '';
+
+      // Update vote in options
+      meta.options = meta.options.map((opt) => {
+        const voters = Array.isArray(opt.voters) ? opt.voters : [];
+        const alreadyVoted = voters.some((v) => v.id === voterId);
+
+        if (opt.id === optionId) {
+          if (alreadyVoted) {
+            // Remove vote (toggle off)
+            return {
+              ...opt,
+              votes: Math.max(0, (opt.votes || 0) - 1),
+              voters: voters.filter((v) => v.id !== voterId),
+            };
+          }
+          // Add vote
+          return {
+            ...opt,
+            votes: (opt.votes || 0) + 1,
+            voters: [...voters, { id: voterId, name: voterName }],
+          };
+        }
+        // For single-choice: remove voter from other options
+        if (pollType === 'single' && alreadyVoted) {
+          return {
+            ...opt,
+            votes: Math.max(0, (opt.votes || 0) - 1),
+            voters: voters.filter((v) => v.id !== voterId),
+          };
+        }
+        return opt;
+      });
+
+      // Save back encrypted
+      const encMeta = encryptMetadata(meta);
+      await db.query(
+        `UPDATE ${table} SET message_metadata = $1::jsonb, updated_at = NOW() WHERE ${idCol} = $2`,
+        [encMeta, messageId]
+      );
+
+      // Emit to all participants
+      const payload = { threadId, messageId: String(messageId), options: meta.options, voterId, voterName };
+      if (threadId.startsWith('dm-')) {
+        const otherUserId = threadId.replace('dm-', '');
+        emitToUser(userId, 'poll:voted', payload);
+        emitToUser(otherUserId, 'poll:voted', { ...payload, threadId: `dm-${userId}` });
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          emitToUser(String(memberId), 'poll:voted', payload);
+        }
+      }
+      ack?.({ ok: true, options: meta.options });
+    } catch (err) {
+      console.error('[socket] poll:vote error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Poll End ──────────────────────────────────────────────────────────
+  socket.on('poll:end', async (data, ack) => {
+    try {
+      const { messageId, threadId, endedAt } = data;
+      if (!messageId || !threadId) return ack?.({ error: 'messageId and threadId required' });
+
+      const isGroup = threadId.startsWith('group-');
+      const table = isGroup ? 'group_messages' : 'messages';
+      const idCol = isGroup ? 'group_message_id' : 'message_id';
+
+      // Read existing metadata
+      const { rows: metaRows } = await db.query(
+        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
+        [messageId]
+      );
+      if (!metaRows[0]) return ack?.({ error: 'Message not found' });
+
+      const meta = metaRows[0].message_metadata
+        ? decryptMetadata(metaRows[0].message_metadata)
+        : {};
+
+      meta.endedAt = endedAt || new Date().toISOString();
+      meta.endedBy = Number(userId);
+
+      const encMeta = encryptMetadata(meta);
+      await db.query(
+        `UPDATE ${table} SET message_metadata = $1::jsonb, updated_at = NOW() WHERE ${idCol} = $2`,
+        [encMeta, messageId]
+      );
+
+      // Emit to all participants
+      const payload = { threadId, messageId: String(messageId), endedAt: meta.endedAt, endedBy: meta.endedBy };
+      if (threadId.startsWith('dm-')) {
+        const otherUserId = threadId.replace('dm-', '');
+        emitToUser(userId, 'poll:ended', payload);
+        emitToUser(otherUserId, 'poll:ended', { ...payload, threadId: `dm-${userId}` });
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          emitToUser(String(memberId), 'poll:ended', payload);
+        }
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] poll:end error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Typing ───────────────────────────────────────────────────────────────
+  // Uses same simple enabled-only check as online/offline indicators (no role check).
+  socket.on('typing:start', async (data) => {
+    if (!rl.typing()) return;
+    try {
+      const { threadId } = data || {};
+      if (!threadId) return;
+      // ── Organization control: only check if feature is enabled (same as online/offline) ──
+      const ctrl = await getOrgControl(orgId, 'indicators');
+      if (ctrl && !ctrl.enabled) return;
+
+      const payload = { userId, name: socket.user.name, isTyping: true };
+
+      if (threadId.startsWith('dm-')) {
+        const receiverId = threadId.replace('dm-', '');
+        emitToUser(receiverId, 'typing:update', { ...payload, threadId: `dm-${userId}` });
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          if (String(memberId) === userId) continue;
+          emitToUser(String(memberId), 'typing:update', { ...payload, threadId });
+        }
+      }
+    } catch (err) {
+      console.error('[socket] typing:start error', err.message);
+    }
+  });
+
+  socket.on('typing:stop', async (data) => {
+    if (!rl.typing()) return;
+    try {
+      const { threadId } = data || {};
+      if (!threadId) return;
+      const ctrl = await getOrgControl(orgId, 'indicators');
+      if (ctrl && !ctrl.enabled) return;
+
+      const payload = { userId, name: socket.user.name, isTyping: false };
+
+      if (threadId.startsWith('dm-')) {
+        emitToUser(threadId.replace('dm-', ''), 'typing:update', { ...payload, threadId: `dm-${userId}` });
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const memberId of members) {
+          if (String(memberId) === userId) continue;
+          emitToUser(String(memberId), 'typing:update', { ...payload, threadId });
+        }
+      }
+    } catch (err) {
+      console.error('[socket] typing:stop error', err.message);
+    }
+  });
+
+  // ─── Tab Visibility (browser tab focus/blur) ────────────────────────────────
+  socket.on('tab-visibility', async (data) => {
+    if (!orgId) return;
+    const { tabcheck } = data || {};
+    // tabcheck: 1 = tab visible/focused, 0 = tab hidden/blurred
+    if (tabcheck === 1) {
+      // User returned to tab — broadcast online status to org
+      const ctrl = await getOrgControl(orgId, 'indicators').catch(() => null);
+      if (!ctrl || ctrl.enabled) {
+        socket.to(`org:${orgId}`).emit('user:online', { userId, status: 'Online' });
+      }
+    }
+  });
+
+  // ─── Presence / Activity Status ────────────────────────────────────────────
+  socket.on('update_activity_status', async (data) => {
+    if (!orgId) return;
+    // ── Organization control: status (Away, Idle, etc.) ──
+    const statusCheck = await checkOrgControl(orgId, socket.user.role, 'status');
+    if (!statusCheck.allowed) return;
+
+    socket.to(`org:${orgId}`).emit('user:status', {
+      userId, status: data?.activity_status || 'Online',
+    });
+  });
+
+  // ─── Join group rooms ─────────────────────────────────────────────────────
+  socket.on('group:join', async (data) => {
+    const { groupId } = data || {};
+    if (!groupId) return;
+    // Verify user is an active member before allowing room join
+    const members = await getGroupMemberIds(Number(groupId));
+    if (!members.includes(Number(userId))) return;
+    socket.join(`group:group-${groupId}`);
+  });
+
+  // ─── Mark read (single handler for both message:read and internal use) ───
+  const markThreadAsRead = async (threadId) => {
+    if (!threadId) return;
+    const geo = socket.geo || {};
+    const readFrom = (geo.city || geo.country)
+      ? { city: geo.city, country: geo.country, device: geo.device || 'Web' }
+      : null;
+
+    if (threadId.startsWith('dm-')) {
+      const otherUserId = threadId.replace('dm-', '');
+      const isSelfChat = String(otherUserId) === String(userId);
+      await chatModel.markDMMessagesRead(orgId, Number(userId), Number(otherUserId));
+
+      if (!isSelfChat) {
+        // Send read_ack (green tick) to the other user
+        const senderThread = `dm-${userId}`;
+        emitToUser(otherUserId, 'message:read_ack', {
+          threadId: senderThread,
+          readBy: userId,
+          readByName: socket.user.name,
+          readAt: new Date().toISOString(),
+          ...(readFrom ? { readFrom } : {}),
+        });
+        emitToUser(otherUserId, 'thread:update', {
+          threadId: senderThread,
+          readStatus: 'read',
+        });
+      }
+      // Reset own unread count
+      emitToUser(userId, 'thread:update', {
+        threadId,
+        unreadCount: 0,
+        readStatus: 'read',
+      });
+
+    } else if (threadId.startsWith('group-')) {
+      const groupId = Number(threadId.replace('group-', ''));
+      const readRows = await chatModel.markGroupMessagesRead(orgId, groupId, Number(userId));
+      // Reset own unread count for this group
+      emitToUser(userId, 'thread:update', {
+        threadId,
+        unreadCount: 0,
+        readStatus: 'read',
+      });
+      // Notify group message senders that their messages were read
+      if (readRows.length > 0) {
+        // Get unique senders of the messages just marked read
+        const { rows: senderRows } = await db.query(
+          `SELECT DISTINCT gm.sender_id FROM group_messages gm
+           JOIN group_message_recipients gmr ON gmr.group_message_id = gm.group_message_id
+           WHERE gmr.recipient_id = ANY($1) AND gm.sender_id != $2`,
+          [readRows.map(r => r.recipient_id), Number(userId)]
+        ).catch(() => ({ rows: [] }));
+        const readAckData = {
+          threadId,
+          readBy: userId,
+          readByName: socket.user.name,
+          readAt: new Date().toISOString(),
+          ...(geo.city || geo.country ? { readFrom: { city: geo.city, country: geo.country, device: geo.device || 'Web' } } : {}),
+        };
+        for (const s of senderRows) {
+          emitToUser(String(s.sender_id), 'message:read_ack', readAckData);
+        }
+      }
+    }
+  };
+
+  socket.on('message:read', async (data) => {
+    if (!rl.read()) return;
+    try {
+      await markThreadAsRead(data?.threadId);
+    } catch (err) {
+      console.error('[socket] message:read error', err.message);
+    }
+  });
+
+  // ─── Message Info (full details: times, receipts, geo) ───────────────────
+  socket.on('message:info', async (data, ack) => {
+    if (!rl.info()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { messageId, threadId } = data || {};
+      if (!messageId || !threadId) return ack?.({ error: 'messageId and threadId required' });
+
+      if (threadId.startsWith('dm-')) {
+        // Fetch DM message with all timestamps
+        const { rows } = await db.query(
+          `SELECT m.message_id, m.sender_id, m.receiver_id, m.message, m.message_type,
+                  m.message_metadata, m.send_time, m.delivered_at, m.read_time, m.edit_time,
+                  s.name AS sender_name, s.profile_url AS sender_avatar,
+                  r.name AS reader_name, r.profile_url AS reader_avatar
+           FROM messages m
+           JOIN users s ON s.user_id = m.sender_id
+           JOIN users r ON r.user_id = m.receiver_id
+           WHERE m.message_id = $1 AND m.organization_id = $2`,
+          [messageId, orgId]
+        );
+        if (!rows[0]) return ack?.({ error: 'Message not found' });
+        const msg = rows[0];
+        msg.message = decryptMessage(msg.message);
+        msg.message_metadata = decryptMetadata(msg.message_metadata);
+        const meta = msg.message_metadata || {};
+
+        // Get reader's device geo (last active device of the receiver)
+        const readerId = msg.sender_id === Number(userId) ? msg.receiver_id : msg.sender_id;
+        const readerGeo = await loadUserGeo(readerId);
+
+        // Build receipts — read messages show in BOTH read and delivered sections
+        const readReceipts = [];
+        const deliveredReceipts = [];
+        const readerEntry = {
+          id: String(readerId),
+          name: msg.sender_id === Number(userId) ? msg.reader_name : msg.sender_name,
+          avatar: msg.sender_id === Number(userId) ? msg.reader_avatar : msg.sender_avatar,
+          deliveredAt: msg.delivered_at?.toISOString?.() ?? msg.send_time?.toISOString?.() ?? null,
+          city: readerGeo?.city || null,
+          location: formatLocation(readerGeo),
+          device: readerGeo?.device || 'Browser',
+          platform: readerGeo?.platform || 'Web',
+        };
+        if (msg.read_time) {
+          readReceipts.push({ ...readerEntry, readAt: msg.read_time?.toISOString?.() ?? String(msg.read_time) });
+          deliveredReceipts.push(readerEntry);
+        } else {
+          deliveredReceipts.push(readerEntry);
+        }
+
+        // Sender geo
+        const senderGeo = meta.sentFrom || (await loadUserGeo(msg.sender_id)) || {};
+
+        ack?.({
+          ok: true,
+          info: {
+            messageId: String(msg.message_id),
+            threadId,
+            sendTime: msg.send_time?.toISOString?.() ?? null,
+            deliveredTime: msg.delivered_at?.toISOString?.() ?? null,
+            readTime: msg.read_time?.toISOString?.() ?? null,
+            editTime: msg.edit_time?.toISOString?.() ?? null,
+            sender: {
+              id: String(msg.sender_id),
+              name: msg.sender_name,
+              avatar: msg.sender_avatar,
+              location: formatLocation(senderGeo),
+              device: senderGeo.device || 'Browser',
+              platform: 'Web',
+            },
+            metadata: meta,
+            receipts: {
+              read: readReceipts,
+              delivered: deliveredReceipts,
+            },
+          },
+        });
+
+      } else if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        // Fetch group message
+        const { rows } = await db.query(
+          `SELECT gm.group_message_id, gm.sender_id, gm.message, gm.message_type,
+                  gm.message_metadata, gm.created_at, gm.updated_at,
+                  s.name AS sender_name, s.profile_url AS sender_avatar
+           FROM group_messages gm
+           JOIN users s ON s.user_id = gm.sender_id
+           WHERE gm.group_message_id = $1 AND gm.organization_id = $2 AND gm.group_id = $3`,
+          [messageId, orgId, groupId]
+        );
+        if (!rows[0]) return ack?.({ error: 'Message not found' });
+        const msg = rows[0];
+        msg.message = decryptMessage(msg.message);
+        msg.message_metadata = decryptMetadata(msg.message_metadata);
+        const meta = msg.message_metadata || {};
+
+        // Fetch read receipts from group_message_reads
+        const { rows: readRows } = await db.query(
+          `SELECT gmr.user_id, gmr.read_at, u.name, u.profile_url AS avatar
+           FROM group_message_reads gmr
+           JOIN users u ON u.user_id = gmr.user_id
+           WHERE gmr.group_message_id = $1`,
+          [messageId]
+        ).catch(() => ({ rows: [] }));
+
+        const readerIds = new Set(readRows.map(r => r.user_id));
+        const members = await getGroupMemberIds(groupId);
+
+        // Batch load geo for ALL members + sender in 1 query instead of N
+        const allUserIds = [...new Set([...members, msg.sender_id])];
+        const geoMap = await loadUserGeoBatch(allUserIds);
+
+        // Fetch names/avatars for unread members in 1 query
+        const unreadMemberIds = members.filter(id => id !== msg.sender_id && !readerIds.has(id));
+        const { rows: unreadUsers } = unreadMemberIds.length
+          ? await db.query('SELECT user_id, name, profile_url AS avatar FROM users WHERE user_id = ANY($1)', [unreadMemberIds])
+          : { rows: [] };
+        const unreadUserMap = new Map(unreadUsers.map(u => [u.user_id, u]));
+
+        const readReceipts = readRows.map(r => {
+          const geo = geoMap.get(Number(r.user_id)) || {};
+          return {
+            id: String(r.user_id), name: r.name, avatar: r.avatar,
+            readAt: r.read_at?.toISOString?.() ?? String(r.read_at),
+            location: formatLocation(geo),
+            device: geo.device || 'Browser', platform: 'Web',
+          };
+        });
+
+        const deliveredReceipts = unreadMemberIds.map(memberId => {
+          const u = unreadUserMap.get(memberId);
+          if (!u) return null;
+          const geo = geoMap.get(Number(memberId)) || {};
+          return {
+            id: String(memberId), name: u.name, avatar: u.avatar,
+            deliveredAt: msg.created_at?.toISOString?.() ?? null,
+            location: formatLocation(geo),
+            device: geo.device || 'Browser', platform: 'Web',
+          };
+        }).filter(Boolean);
+
+        const senderGeo = meta.sentFrom || geoMap.get(Number(msg.sender_id)) || {};
+        ack?.({
+          ok: true,
+          info: {
+            messageId: String(msg.group_message_id),
+            threadId,
+            sendTime: msg.created_at?.toISOString?.() ?? null,
+            readTime: null,
+            editTime: msg.updated_at && msg.updated_at !== msg.created_at ? msg.updated_at?.toISOString?.() : null,
+            sender: {
+              id: String(msg.sender_id),
+              name: msg.sender_name,
+              avatar: msg.sender_avatar,
+              location: formatLocation(senderGeo),
+              device: senderGeo.device || 'Browser',
+              platform: 'Web',
+            },
+            metadata: meta,
+            receipts: {
+              read: readReceipts,
+              delivered: deliveredReceipts,
+            },
+          },
+        });
+      }
+    } catch (err) {
+      console.error('[socket] message:info error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Forward ──────────────────────────────────────────────────────────────
+  socket.on('message:forward', async (data, ack) => {
+    if (!rl.forward()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetThreadId, message, message_type = 'text', metadata = null } = data;
+      if (!targetThreadId || !message) return ack?.({ error: 'targetThreadId and message required' });
+
+      const fwdSentFrom = buildSentFrom(socket);
+      const forwardMeta = { ...(metadata || {}), forwarded: true, forwardedBy: socket.user.name, ...(fwdSentFrom ? { sentFrom: fwdSentFrom } : {}) };
+
+      if (targetThreadId.startsWith('dm-')) {
+        const receiverId = Number(targetThreadId.replace('dm-', ''));
+        const saved = await chatModel.sendDMMessage({
+          orgId, senderId: Number(userId), receiverId,
+          message, messageType: message_type, metadata: forwardMeta,
+        });
+        await signProfileFields(saved);
+        const normalized = normalizeDMMessage(saved, Number(userId));
+        await signMessageFileUrls(normalized);
+
+        const delivery = resolveDMDelivery({ saved, receiverId, userId, orgId, threadId: targetThreadId });
+        await deliverDMToReceiver({
+          receiverId, userId, orgId, normalized,
+          senderThreadId: delivery.senderThreadId,
+          receiverThread: delivery.receiverThread,
+          receiverOnline: delivery.receiverOnline,
+          senderName: socket.user.name,
+          messageType: message_type, message,
+        });
+
+        ack?.({ ok: true, message: { ...normalized, status: delivery.status } });
+
+      } else if (targetThreadId.startsWith('group-')) {
+        const groupId = Number(targetThreadId.replace('group-', ''));
+        const saved = await chatModel.sendGroupMessage({
+          orgId, groupId, senderId: Number(userId),
+          message, messageType: message_type, metadata: forwardMeta,
+        });
+        await signProfileFields(saved);
+        const normalized = normalizeGroupMessage(saved, Number(userId));
+        await signMessageFileUrls(normalized);
+
+        await deliverGroupToMembers({
+          groupId, orgId, userId, normalized,
+          senderName: socket.user.name,
+          messageType: message_type, message, threadId: targetThreadId,
+        });
+
+        ack?.({ ok: true, message: normalized });
+      }
+    } catch (err) {
+      console.error('[socket] message:forward error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Thread focus (for delivery status tracking) ─────────────────────────
+  // Only tracks which thread user is viewing + marks read (reuses markThreadAsRead)
+  socket.on('thread:focus', async (data) => {
+    if (!rl.focus()) return;
+    const { threadId } = data || {};
+    setUserActiveThread(userId, threadId || null, socket.id);
+    if (threadId) {
+      try {
+        await markThreadAsRead(threadId);
+      } catch (err) {
+        console.error('[socket] thread:focus read error', err.message);
+      }
+    }
+  });
+
+  // ─── Owner: Live Socket Stats (subscribe/unsubscribe) ────────────────────
+  let _statsInterval = null;
+  socket.on('system:socket-stats:subscribe', () => {
+    // Only owner (role_id 1 or role 'owner') can subscribe
+    const role = socket.user.role || socket.user.role_key;
+    const roleId = socket.user.role_id;
+    if (roleId !== 1 && role !== 'owner') return;
+    if (_statsInterval) clearInterval(_statsInterval);
+    // Send immediately, then every 10 seconds
+    socket.emit('system:socket-stats', getSocketStats());
+    _statsInterval = setInterval(() => {
+      if (!socket.connected) { clearInterval(_statsInterval); return; }
+      socket.emit('system:socket-stats', getSocketStats());
+    }, 10_000);
+  });
+
+  socket.on('system:socket-stats:unsubscribe', () => {
+    if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+  });
+
+  // ─── Disconnect ───────────────────────────────────────────────────────────
+  socket.on('disconnect', (reason) => {
+    if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+    socketActiveThread.delete(socket.id);
+    removeUserSocket(userId, socket.id);
+    // Clear org mapping on disconnect (only when ALL tabs closed)
+    if (!isUserOnline(userId)) {
+      userOrgMap.delete(userId);
+      // Remove from org online set
+      if (orgId) {
+        const orgSet = orgOnlineUsers.get(orgId);
+        if (orgSet) {
+          orgSet.delete(userId);
+          if (orgSet.size === 0) orgOnlineUsers.delete(orgId);
+        }
+      }
+    }
+    console.log(`[socket] disconnected user=${userId} sid=${socket.id} reason=${reason}`);
+    // Broadcast offline only when ALL tabs/devices closed (respects indicators control)
+    if (!isUserOnline(userId) && orgId) {
+      getOrgControl(orgId, 'indicators').then((ctrl) => {
+        if (!ctrl || ctrl.enabled) {
+          io.to(`org:${orgId}`).emit('user:offline', { userId, status: 'Offline' });
+        }
+      }).catch(() => {
+        io.to(`org:${orgId}`).emit('user:offline', { userId, status: 'Offline' });
+      });
+    }
+  });
+};
+
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+/** Fetch message created_at/send_time for time-limit checks */
+const getMessageCreatedAt = async (messageId, threadId) => {
+  try {
+    if (threadId?.startsWith('group-')) {
+      const { rows } = await db.query(
+        'SELECT created_at FROM group_messages WHERE group_message_id = $1 LIMIT 1',
+        [messageId]
+      );
+      return rows[0]?.created_at || null;
+    }
+    const { rows } = await db.query(
+      'SELECT send_time FROM messages WHERE message_id = $1 LIMIT 1',
+      [messageId]
+    );
+    return rows[0]?.send_time || null;
+  } catch { return null; }
+};
+
+// Cache group members for 30 seconds — avoids repeated DB hits for typing, reactions, etc.
+const _groupMembersCache = new Map(); // groupId → { data: number[], ts: number }
+const GROUP_MEMBERS_CACHE_TTL = 30_000; // 30 seconds
+
+const getGroupMemberIds = async (groupId) => {
+  const cached = _groupMembersCache.get(groupId);
+  if (cached && Date.now() - cached.ts < GROUP_MEMBERS_CACHE_TTL) {
+    return cached.data;
+  }
+  const { rows } = await db.query(
+    `SELECT user_id FROM group_members WHERE group_id = $1 AND status = 'active'`,
+    [groupId]
+  );
+  const ids = rows.map((r) => r.user_id);
+  _groupMembersCache.set(groupId, { data: ids, ts: Date.now() });
+  return ids;
+};
+
+const recallDMMessage = async (messageId, orgId, senderId) => {
+  // Verify message exists and belongs to sender
+  const { rows } = await db.query(
+    `SELECT message_id, sender_id, receiver_id FROM messages
+     WHERE message_id = $1 AND organization_id = $2 AND sender_id = $3`,
+    [messageId, orgId, senderId]
+  );
+  if (!rows.length) return null;
+  // Log recall action — fetch queries hide messages with a 'recall' action from ALL users
+  await db.query(
+    `INSERT INTO message_actions (message_id, user_id, action_type) VALUES ($1, $2, 'recall')`,
+    [messageId, senderId]
+  );
+  return rows[0];
+};
+
+const recallGroupMessage = async (messageId, orgId, groupId, senderId) => {
+  // Verify message exists and belongs to sender
+  const { rows } = await db.query(
+    `SELECT group_message_id, sender_id FROM group_messages
+     WHERE group_message_id = $1 AND organization_id = $2 AND group_id = $3 AND sender_id = $4`,
+    [messageId, orgId, groupId, senderId]
+  );
+  if (!rows.length) return null;
+  // Log recall action — fetch queries hide messages with a 'recall' action from ALL users
+  await db.query(
+    `INSERT INTO group_message_actions (group_message_id, user_id, action_type) VALUES ($1, $2, 'recall')`,
+    [messageId, senderId]
+  );
+  return rows[0];
+};
+
+const editGroupMessage = async (messageId, orgId, groupId, senderId, newText) => {
+  const encryptedText = encryptMessage(newText);
+  // Read existing metadata, decrypt, add edited flag, re-encrypt
+  const { rows: metaRows } = await db.query(
+    `SELECT message_metadata FROM group_messages WHERE group_message_id = $1 AND organization_id = $2 AND group_id = $3 AND sender_id = $4`,
+    [messageId, orgId, groupId, senderId]
+  );
+  const existingMeta = metaRows[0]?.message_metadata
+    ? decryptMetadata(metaRows[0].message_metadata)
+    : {};
+  const grpEditHistory = Array.isArray(existingMeta.editHistory) ? existingMeta.editHistory : [];
+  grpEditHistory.push({ editedAt: new Date().toISOString() });
+  const mergedMeta = { ...existingMeta, edited: true, editHistory: grpEditHistory };
+  const encMeta = encryptMetadata(mergedMeta);
+  const { rows } = await db.query(
+    `WITH updated AS (
+      UPDATE group_messages SET message = $1, updated_at = NOW(), message_metadata = $2::jsonb
+      WHERE group_message_id = $3 AND organization_id = $4 AND group_id = $5 AND sender_id = $6
+      RETURNING *
+    )
+    SELECT updated.*, u.name AS sender_name, u.profile_url AS sender_avatar
+    FROM updated JOIN users u ON u.user_id = updated.sender_id`,
+    [encryptedText, encMeta, messageId, orgId, groupId, senderId]
+  );
+  if (rows[0]) {
+    rows[0].message = decryptMessage(rows[0].message);
+    rows[0].message_metadata = decryptMetadata(rows[0].message_metadata);
+  }
+  return rows[0] || null;
+};
+
+/** Log an action (pin, delete, react) into message_actions / group_message_actions */
+const logMessageAction = async (messageId, threadId, userId, actionType, actionValue = 1) => {
+  const isGroup = threadId?.startsWith('group-');
+  const table = isGroup ? 'group_message_actions' : 'message_actions';
+  const idCol = isGroup ? 'group_message_id' : 'message_id';
+  await db.query(
+    `INSERT INTO ${table} (${idCol}, user_id, action_type) VALUES ($1, $2, $3)`,
+    [messageId, userId, actionType === 'react' ? `react:${actionValue}` : actionType]
+  );
+};
+
+const toggleReaction = async (messageId, threadId, userId, emoji) => {
+  const isGroup = threadId?.startsWith('group-');
+  const table = isGroup ? 'group_message_actions' : 'message_actions';
+  const idCol = isGroup ? 'group_message_id' : 'message_id';
+  const actionType = `react:${String(emoji).slice(0, 32)}`;
+
+  // Atomic toggle: DELETE returns row if existed, otherwise INSERT
+  const { rows: deleted } = await db.query(
+    `DELETE FROM ${table} WHERE ${idCol} = $1 AND user_id = $2 AND action_type = $3 RETURNING action_id`,
+    [messageId, userId, actionType]
+  );
+  if (deleted.length > 0) {
+    return { emoji, userId, action: 'removed' };
+  }
+  await db.query(
+    `INSERT INTO ${table} (${idCol}, user_id, action_type) VALUES ($1, $2, $3)`,
+    [messageId, userId, actionType]
+  );
+  return { emoji, userId, action: 'added' };
+};
+
+// ─── Message normalizers ──────────────────────────────────────────────────────
+
+const normalizeDMMessage = (row, currentUserId) => {
+  const meta = row.message_metadata || {};
+  const sentAt = row.send_time?.toISOString?.() ?? String(row.send_time || new Date().toISOString());
+  const editedAt = row.edit_time ? (row.edit_time?.toISOString?.() ?? String(row.edit_time)) : null;
+  return {
+    id: String(row.message_id),
+    type: (row.message_type || 'text').toLowerCase(),
+    direction: Number(row.sender_id) === Number(currentUserId) ? 'outgoing' : 'incoming',
+    author: {
+      id: String(row.sender_id),
+      name: row.sender_name || '',
+      avatar: row.sender_avatar || null,
+    },
+    content: buildContent(row),
+    metadata: {
+      ...meta,
+      sentAt,
+      ...(editedAt ? { editedAt } : {}),
+      ...(meta.forwarded ? { forwarded: true, forwardedBy: meta.forwardedBy || '', isForwarded: true } : {}),
+    },
+    createdAt: sentAt,
+    editedAt,
+    status: row.read_time ? 'read' : row.delivered_at ? 'delivered' : 'sent',
+  };
+};
+
+const normalizeGroupMessage = (row, currentUserId) => {
+  const meta = row.message_metadata || {};
+  const sentAt = row.created_at?.toISOString?.() ?? String(row.created_at || new Date().toISOString());
+  // Compare by timestamp value, not by reference — Date objects are never === even with same time
+  const updatedMs = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+  const createdMs = row.created_at ? new Date(row.created_at).getTime() : 0;
+  const editedAt = row.updated_at && updatedMs > createdMs
+    ? (row.updated_at?.toISOString?.() ?? String(row.updated_at))
+    : null;
+  return {
+    id: String(row.group_message_id),
+    type: (row.message_type || 'text').toLowerCase(),
+    direction: Number(row.sender_id) === Number(currentUserId) ? 'outgoing' : 'incoming',
+    author: {
+      id: String(row.sender_id),
+      name: row.sender_name || '',
+      avatar: row.sender_avatar || null,
+    },
+    content: buildContent(row),
+    metadata: {
+      ...meta,
+      sentAt,
+      ...(editedAt ? { editedAt } : {}),
+      ...(meta.forwarded ? { forwarded: true, forwardedBy: meta.forwardedBy || '', isForwarded: true } : {}),
+    },
+    createdAt: sentAt,
+    editedAt,
+    status: 'delivered',
+  };
+};
+
+const humanFileSize = (bytes) => {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+  const val = n / Math.pow(1024, i);
+  return `${i === 0 ? val : val.toFixed(val < 10 ? 2 : 1)} ${units[i]}`;
+};
+
+const buildContent = (row) => {
+  const meta = row.message_metadata || {};
+  if (meta.deleted) return { text: '', deleted: true };
+  if (meta.recalled) return { text: '', recalled: true };
+  // File/media types need ALL metadata fields (fileKey, mimeType, caption, thumbnail, duration, etc.)
+  const fileTypes = ['file', 'image', 'video', 'audio'];
+  if (fileTypes.includes(row.message_type)) {
+    const { sentFrom, editHistory, html, ...fileFields } = meta;
+    // Format fileSize to human-readable (6264 → "6.12 KB")
+    const rawSize = Number(meta.fileSize || meta.file_size || 0);
+    const formattedSize = rawSize > 0 ? humanFileSize(rawSize) : (meta.fileSize || '');
+    return { fileName: meta.fileName || '', fileUrl: meta.fileUrl || row.message, ...fileFields, fileSize: formattedSize, rawSize };
+  }
+  // Link messages — preserve preview metadata (title, description, thumbnail)
+  if (row.message_type === 'link') {
+    const { sentFrom, editHistory, ...linkFields } = meta;
+    return {
+      url: meta.url || row.message || '',
+      title: meta.title || '',
+      description: meta.description || '',
+      thumbnail: meta.thumbnail || meta.image || '',
+      caption: meta.caption || '',
+      displayHost: meta.displayHost || '',
+      ...linkFields,
+    };
+  }
+  // Text messages — text + html (formatting) + emoji flags, no metadata leak
+  return {
+    text: row.message || '',
+    ...(typeof meta.html === 'string' && meta.html ? { html: meta.html } : {}),
+    ...(meta.edited ? { edited: true } : {}),
+    ...(meta.isEmojiOnly ? { isEmojiOnly: true, emojiCount: meta.emojiCount || 0 } : {}),
+  };
+};
+
+const getIO = () => io;
+
+/** Force disconnect all sockets for a user (called on logout) */
+const disconnectUser = (userId) => {
+  const uid = String(userId);
+  const sockets = userSockets.get(uid);
+  if (!sockets || !io) return;
+  for (const sid of sockets) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.disconnect(true);
+  }
+  // cleanup is handled by the disconnect handler automatically
+};
+
+// ─── Socket Stats (for owner dashboard) ──────────────────────────────────────
+const getSocketStats = () => {
+  // Total connections & unique users
+  let totalConnections = 0;
+  const usersOnline = [];
+  for (const [uid, sockets] of userSockets) {
+    totalConnections += sockets.size;
+    usersOnline.push({
+      userId: uid,
+      tabs: sockets.size,
+      activeThread: getUserActiveThread(uid) || null,
+    });
+  }
+
+  // Org-wise breakdown from socket rooms
+  const connectionsByOrg = {};
+  const roomStats = { orgRooms: 0, userRooms: 0, groupRooms: 0, totalRooms: 0 };
+  if (io) {
+    const rooms = io.sockets.adapter.rooms;
+    for (const [roomName, sids] of rooms) {
+      // Skip rooms that are just socket IDs (every socket auto-joins its own ID room)
+      if (io.sockets.sockets.has(roomName)) continue;
+      roomStats.totalRooms++;
+      if (roomName.startsWith('org:')) {
+        roomStats.orgRooms++;
+        const orgId = roomName.replace('org:', '');
+        connectionsByOrg[orgId] = (connectionsByOrg[orgId] || 0) + sids.size;
+      } else if (roomName.startsWith('user:')) {
+        roomStats.userRooms++;
+      } else if (roomName.startsWith('group:')) {
+        roomStats.groupRooms++;
+      }
+    }
+  }
+
+  // System stats
+  const mem = process.memoryUsage();
+  const system = {
+    serverUptime: process.uptime(),
+    serverUptimeFormatted: formatUptime(process.uptime()),
+    memoryUsage: {
+      rss: formatBytes(mem.rss),
+      heapUsed: formatBytes(mem.heapUsed),
+      heapTotal: formatBytes(mem.heapTotal),
+      external: formatBytes(mem.external),
+      rssBytes: mem.rss,
+      heapUsedBytes: mem.heapUsed,
+    },
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    pid: process.pid,
+    cpuUsage: process.cpuUsage(),
+  };
+
+  return {
+    socket: {
+      totalConnections,
+      uniqueUsersOnline: userSockets.size,
+      connectionsByOrg,
+      usersList: usersOnline,
+      roomStats,
+    },
+    system,
+    timestamp: new Date().toISOString(),
+  };
+};
+
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${(bytes / 1073741824).toFixed(2)} GB`;
+};
+
+const formatUptime = (seconds) => {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const parts = [];
+  if (d) parts.push(`${d}d`);
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
+};
+
+/** Invalidate group members cache (call from controller when members are added/removed/updated) */
+const invalidateGroupMembersCache = (groupId) => {
+  _groupMembersCache.delete(Number(groupId));
+};
+
+module.exports = { initSocket, getIO, emitToUser, isUserOnline, disconnectUser, invalidateOrgControlsCache, invalidateGroupMembersCache, getSocketStats };

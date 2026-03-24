@@ -1,0 +1,111 @@
+{
+  "expo": {
+    "name": "TeamChatX",
+    "slug": "teamchatx",
+    "scheme": "teamchatx",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.teamchatx.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "TeamChatX needs camera access to take photos and videos for sharing in chats.",
+        "NSPhotoLibraryUsageDescription": "TeamChatX needs photo library access to share images and videos in chats.",
+        "NSMicrophoneUsageDescription": "TeamChatX needs microphone access to record voice messages.",
+        "NSLocationWhenInUseUsageDescription": "TeamChatX needs your location to share it in chats.",
+        "NSContactsUsageDescription": "TeamChatX needs contacts access to share contact information in chats.",
+        "NSFaceIDUsageDescription": "TeamChatX uses Face ID for quick and secure login.",
+        "NSPhotoLibraryAddUsageDescription": "TeamChatX needs permission to save photos and files to your device."
+      }
+    },
+    "android": {
+      "package": "com.teamchatx.app",
+      "windowSoftInputMode": "adjustResize",
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_CONTACTS",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "USE_FINGERPRINT",
+        "USE_BIOMETRIC",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_MEDIA_AUDIO",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "TeamChatX needs microphone access to record voice messages."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TeamChatX needs photo library access to share images in chats.",
+          "cameraPermission": "TeamChatX needs camera access to take photos for chats."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TeamChatX needs your location to share it in chats."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "TeamChatX needs contacts access to share contact information."
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "TeamChatX uses Face ID for secure login."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ea4c89"
+        }
+      ]
+    ]
+  }
+}
