@@ -507,6 +507,9 @@ const onConnection = (socket) => {
     recall:  createRateLimiter(5, 10_000),    // 5 recalls per 10s
     del:     createRateLimiter(10, 10_000),   // 10 deletes per 10s
     forward: createRateLimiter(10, 10_000),   // 10 forwards per 10s
+    screenshare: createRateLimiter(10, 10_000), // 10 screenshare actions per 10s
+    signal:      createRateLimiter(50, 10_000), // 50 WebRTC signaling msgs per 10s
+    annotate:    createRateLimiter(60, 1_000),  // 60 annotation strokes per 1s
   };
 
   // Preload organization controls into cache on connect (non-blocking)
@@ -1321,6 +1324,159 @@ const onConnection = (socket) => {
       }
     } catch (err) {
       console.error('[socket] typing:stop error', err.message);
+    }
+  });
+
+  // ─── Screen Share (WebRTC signaling relay) ───────────────────────────────────
+
+  socket.on('screenshare:request', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      if (String(targetUserId) === userId) return ack?.({ error: 'Cannot share screen with yourself' });
+      if (!isUserOnline(String(targetUserId))) return ack?.({ error: 'User is offline' });
+      emitToUser(String(targetUserId), 'screenshare:incoming_request', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+        timestamp: new Date().toISOString(),
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] screenshare:request error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:accept', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:accepted', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:reject', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, reason } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:rejected', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+        reason: reason || 'declined',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:signal', async (data, ack) => {
+    if (!rl.signal()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, signalData } = data || {};
+      if (!targetUserId || !signalData) return ack?.({ error: 'targetUserId and signalData required' });
+      emitToUser(String(targetUserId), 'screenshare:signal', {
+        fromUserId: userId,
+        signalData,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:stop', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, reason } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:stopped', {
+        fromUserId: userId,
+        reason: reason || 'ended',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:annotate', async (data) => {
+    if (!rl.annotate()) return;
+    try {
+      const { targetUserId, annotation } = data || {};
+      if (!targetUserId || !annotation) return;
+      emitToUser(String(targetUserId), 'screenshare:annotate', {
+        fromUserId: userId,
+        annotation,
+      });
+    } catch (err) {
+      console.error('[socket] screenshare:annotate error', err.message);
+    }
+  });
+
+  socket.on('screenshare:pointer', async (data) => {
+    if (!rl.annotate()) return;
+    try {
+      const { targetUserId, position } = data || {};
+      if (!targetUserId || !position) return;
+      emitToUser(String(targetUserId), 'screenshare:pointer', {
+        fromUserId: userId,
+        position,
+      });
+    } catch (err) {
+      console.error('[socket] screenshare:pointer error', err.message);
+    }
+  });
+
+  socket.on('screenshare:control-request', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:control-request', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:control-grant', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:control-granted', {
+        fromUserId: userId,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('screenshare:control-revoke', async (data, ack) => {
+    if (!rl.screenshare()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'screenshare:control-revoked', {
+        fromUserId: userId,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
     }
   });
 

@@ -8,6 +8,9 @@ import { SocketProvider } from "../../contexts/SocketContext.jsx";
 import PresenceProvider from "../../contexts/PresenceProvider.jsx";
 import { ChatLockProvider } from "../../contexts/ChatLockContext.jsx";
 import { TypingIndicatorProvider } from "../../contexts/TypingIndicatorContext.jsx";
+import { ScreenShareProvider } from "../../contexts/ScreenShareContext.jsx";
+import ScreenShareRequestDialog from "../../components/screenshare/ScreenShareRequestDialog.jsx";
+import ScreenShareOverlay from "../../components/screenshare/ScreenShareOverlay.jsx";
 import { appBrandingAssets } from "../../data/CommonData.js";
 
 const OutletFallback = () => {
@@ -141,23 +144,27 @@ const DashboardLayout = () => {
         <PresenceProvider>
           <ChatLockProvider>
             <TypingIndicatorProvider>
-              <Stack direction="column">
-                <TopBar />
-                <Stack
-                  direction="row"
-                  height={`calc(100vh - 39px)`}
-                  overflow={"hidden"}
-                >
-                  {/* sidebar  */}
-                  <SideBar />
-                  <Suspense fallback={<OutletFallback />}>
-                    <KeepAliveOutlet
-                      keepAlivePaths={["/app"]}
-                      containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
-                    />
-                  </Suspense>
+              <ScreenShareProvider>
+                <Stack direction="column">
+                  <TopBar />
+                  <Stack
+                    direction="row"
+                    height={`calc(100vh - 39px)`}
+                    overflow={"hidden"}
+                  >
+                    {/* sidebar  */}
+                    <SideBar />
+                    <Suspense fallback={<OutletFallback />}>
+                      <KeepAliveOutlet
+                        keepAlivePaths={["/app"]}
+                        containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
+                      />
+                    </Suspense>
+                  </Stack>
                 </Stack>
-              </Stack>
+                <ScreenShareRequestDialog />
+                <ScreenShareOverlay />
+              </ScreenShareProvider>
             </TypingIndicatorProvider>
           </ChatLockProvider>
         </PresenceProvider>

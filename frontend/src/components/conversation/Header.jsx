@@ -20,6 +20,7 @@ import { getInitials } from "../../utils/initials.js";
 import { agentSelfId } from "../../data/CommonData.js";
 import { useTypingIndicator } from "../../contexts/TypingIndicatorContext.jsx";
 import { usePresence } from "../../contexts/PresenceProvider.jsx";
+import { useScreenShareContext } from "../../contexts/ScreenShareContext.jsx";
 import { closeSidebar, openSidebar } from "../../redux/slices/app.js";
 import {
   PiCopySimple,
@@ -66,6 +67,7 @@ const ConversationHeader = ({
   const navigate = useNavigate();
   const sidebarOpen = useSelector((state) => state.app.sidebar.open);
   const { status: presenceStatus } = usePresence();
+  const { requestScreenShare, status: screenShareStatus } = useScreenShareContext();
   const { isActive: isTyping, summary: typingSummary } = useTypingIndicator(
     thread?.id
   );
@@ -176,9 +178,18 @@ const ConversationHeader = ({
     setMenuAnchorEl(null);
   };
 
+  const canScreenShare =
+    !isSelfThread &&
+    !isGroupThread &&
+    screenShareStatus === "idle" &&
+    thread?.id?.startsWith?.("dm-");
+
   const handleMenuAction = (label) => {
     if (label === "View Profile") {
       handleOpenSidebar();
+    } else if (label === "Screen Share" && canScreenShare) {
+      const targetUserId = thread.id.replace("dm-", "");
+      requestScreenShare(targetUserId);
     }
     closeMenu();
   };
@@ -416,7 +427,10 @@ const ConversationHeader = ({
             </Box>
             View Profile
           </MenuItem>
-          <MenuItem onClick={() => handleMenuAction("Screen Share")}>
+          <MenuItem
+            onClick={() => handleMenuAction("Screen Share")}
+            disabled={!canScreenShare}
+          >
             <Box
               component="span"
               sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}
