@@ -385,7 +385,7 @@ Last updated: 2026-03-13
   - Configure: API key + model selection
   - Activate/Deactivate: One active at a time, auto-deactivates others
 - **Access:** GET = any user, PATCH = owner only (role_id=1)
-- **Used by:** All AI features — Translate, Summarize, Smart Reply, Grammar, Smart Search, AI Assistant
+- **Used by:** All AI features — Translate, Summarize, Smart Reply, Grammar, Smart Search, AI Assistant, Tone Adjuster, Semantic Search, Call Notes, Smart Composer
 - **Cache:** Active provider cached 60 seconds to avoid DB hit per AI call
 
 ### User Timezone
@@ -564,6 +564,51 @@ All notifications follow the same pattern: only sent when receiver is **online**
 - **Safe area** — proper insets for all devices (notch, gesture nav)
 - **WhatsApp-style chat bubbles** — green own/white other, notch tail, forwarded label, reply context
 - **Performance** — FlatList optimization (removeClippedSubviews, maxToRenderPerBatch, windowSize, getItemLayout)
+
+### AI Tone Adjuster
+- **What:** Rewrite any message in Formal, Friendly, Diplomatic, or Professional tone.
+- **How:** Right-click message → "Adjust Tone" → select tone → AI rewrites → Copy result.
+- **API:** `POST /translate/tone-adjust` — `{ text, tone }` → `{ adjusted, original, tone, provider }`
+- **Language Aware:** Keeps same language (English stays English, Hindi stays Hindi, Hinglish stays Hinglish).
+- **UI:** `ToneAdjusterDialog.jsx` — color-coded tone chips, original vs adjusted text, copy button.
+
+### AI Semantic Search
+- **What:** Search messages by meaning, not exact keywords. "meetings about deployment last week" → finds relevant messages even without exact word match.
+- **How:** Search bar → enable "Semantic" toggle → type query → AI expands into keywords + synonyms + date hints → filters from full DB.
+- **API:** `POST /translate/semantic-search` — `{ query, threadId, limit }` → `{ results, interpretation, expandedTerms, dateHint }`
+- **UI:** Purple "Semantic" toggle next to "Smart" toggle in search bar. Mutually exclusive with Smart Search.
+
+### AI Call Transcription & Notes
+- **What:** Auto-generate meeting notes after audio/video call ends.
+- **How:** Call ends (>10 seconds) → `CallNotesDialog` auto-opens → AI generates structured notes from chat context.
+- **API:** `POST /translate/call-notes` — `{ callDuration, participants, chatContext }` → `{ notes: { summary, keyPoints, actionItems } }`
+- **UI:** `CallNotesDialog.jsx` — Summary section (blue accent), Key Points (numbered), Action Items (checkmarks), Copy Notes button.
+
+### AI Smart Composer
+- **What:** Real-time autocomplete suggestions as user types in the chat composer.
+- **How:** Enable lightning bolt toggle in footer toolbar → type 10+ characters → wait 2 seconds → AI suggests 3 completions → click chip to insert.
+- **API:** `POST /translate/smart-compose` — `{ partialText, context, threadType }` → `{ completions: [string, string, string] }`
+- **UI:** Orange lightning icon toggle in footer toolbar. Completion chips appear above editor (same style as Smart Reply chips). Click to accept.
+
+### Screen Share (WebRTC)
+- **What:** 1:1 screen sharing via WebRTC peer-to-peer.
+- **How:** Header → Screen Share icon → select screen/window → peer accepts → live stream.
+- **Socket Events:** `screenshare:request`, `screenshare:accept`, `screenshare:reject`, `screenshare:signal`, `screenshare:stop`
+- **Features:** Annotation canvas, remote control (request/grant/revoke), data channel messaging.
+
+### Audio/Video Call (WebRTC)
+- **What:** 1:1 audio and video calls via WebRTC.
+- **How:** Header → Phone/Video icon → peer accepts → bidirectional call with mute/camera toggle.
+- **Socket Events:** `call:request`, `call:accept`, `call:reject`, `call:signal`, `call:stop`
+- **Features:** Call timer, mute audio, toggle camera, minimize/fullscreen, calling/connecting/active states.
+- **Sounds:** Web Audio API — incoming ringtone, outgoing ring, connected chime, ended tone.
+- **Call Notes:** Auto-generate AI meeting notes after call ends (>10 seconds).
+
+### Export Chat
+- **What:** Download DM conversation as text (.txt) or PDF (.pdf).
+- **How:** Header → three-dot menu → Export Chat → choose format → file downloads.
+- **Text:** Backend endpoint `GET /chat/threads/:threadId/export?format=txt`.
+- **PDF:** Client-side jsPDF generation with message formatting.
 
 ### Socket Connection
 - **Singleton global socket** — shared across all screens

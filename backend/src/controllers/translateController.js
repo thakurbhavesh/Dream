@@ -733,4 +733,407 @@ Text: ${text}`;
   }
 };
 
-module.exports = { translate, summarize, smartReply, grammarCorrect };
+// ─── AI Tone Adjuster ─────────────────────────────────────────────────────────
+// POST /translate/tone-adjust
+// Body: { text, tone: 'formal'|'friendly'|'diplomatic'|'professional' }
+const TONE_DESCRIPTIONS = {
+  formal: 'formal and professional corporate tone',
+  friendly: 'warm, friendly, and approachable tone',
+  diplomatic: 'diplomatic, tactful, and politically sensitive tone',
+  professional: 'clear, concise, and business-professional tone',
+};
+
+const toneAdjust = async (req, res, next) => {
+  try {
+    const { text, tone = 'formal' } = req.body;
+    if (!text) {
+      const e = new Error('text is required');
+      e.status = 400;
+      throw e;
+    }
+    const toneDesc = TONE_DESCRIPTIONS[tone] || TONE_DESCRIPTIONS.formal;
+    const prompt = `Rewrite the following message in a ${toneDesc}. Keep the same language (if Hindi, keep Hindi; if English, keep English; if Hinglish, keep Hinglish). Return ONLY the rewritten text, nothing else.\n\n${text}`;
+
+    const ai = await resolveAIProvider();
+    let adjusted;
+
+    if (ai.provider === 'openai') {
+      const model = ai.model || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: `You rewrite messages in a ${toneDesc}. Return ONLY the rewritten text.` },
+            { role: 'user', content: text },
+          ],
+          temperature: 0.4,
+          max_tokens: 2000,
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`OpenAI API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      adjusted = data?.choices?.[0]?.message?.content?.trim();
+    } else if (ai.provider === 'anthropic') {
+      const model = ai.model || 'claude-sonnet-4-6';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model, max_tokens: 2000,
+          system: `You rewrite messages in a ${toneDesc}. Return ONLY the rewritten text.`,
+          messages: [{ role: 'user', content: text }],
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Anthropic API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      adjusted = data?.content?.[0]?.text?.trim();
+    } else {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Gemini API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      adjusted = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    }
+
+    if (!adjusted) throw Object.assign(new Error('Empty response from AI'), { status: 502 });
+    return success(res, { adjusted, original: text, tone, provider: ai.provider }, 'Tone adjusted');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// ─── AI Semantic Search ───────────────────────────────────────────────────────
+// POST /translate/semantic-search
+// Body: { query, threadId?, limit? }
+const semanticSearch = async (req, res, next) => {
+  try {
+    const { query, threadId, limit = 50 } = req.body;
+    if (!query) {
+      const e = new Error('query is required');
+      e.status = 400;
+      throw e;
+    }
+
+    const ai = await resolveAIProvider();
+    const expandPrompt = `You are a search query expander for a workplace chat application. Given a natural language search query, generate an expanded set of search terms including synonyms, related words, and alternate phrasings that would help find relevant messages.
+
+Return a JSON object with:
+- "interpretation": a brief one-line explanation of what the user is looking for
+- "keywords": array of 5-10 expanded search terms/phrases
+- "messageTypes": array of relevant types if mentioned (from: text, image, video, file, link, code, audio) or empty array
+- "dateHint": "today"|"yesterday"|"last7"|"last30"|null
+
+Query: "${query}"
+
+Return ONLY valid JSON, no markdown, no explanation.`;
+
+    let parsed;
+    if (ai.provider === 'openai') {
+      const model = ai.model || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You expand search queries. Return ONLY valid JSON.' },
+            { role: 'user', content: expandPrompt },
+          ],
+          temperature: 0.3, max_tokens: 500,
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`OpenAI API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      const raw = data?.choices?.[0]?.message?.content?.trim() || '{}';
+      parsed = JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, ''));
+    } else if (ai.provider === 'anthropic') {
+      const model = ai.model || 'claude-sonnet-4-6';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model, max_tokens: 500,
+          system: 'You expand search queries. Return ONLY valid JSON.',
+          messages: [{ role: 'user', content: expandPrompt }],
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Anthropic API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      const raw = data?.content?.[0]?.text?.trim() || '{}';
+      parsed = JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, ''));
+    } else {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: expandPrompt }] }] }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Gemini API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '{}';
+      parsed = JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, ''));
+    }
+
+    const interpretation = parsed.interpretation || query;
+    const keywords = Array.isArray(parsed.keywords) ? parsed.keywords : [query];
+    const messageTypes = Array.isArray(parsed.messageTypes) ? parsed.messageTypes : [];
+    const dateHint = parsed.dateHint || null;
+
+    // Build date filter
+    let dateFilter = null;
+    if (dateHint === 'today') dateFilter = new Date(Date.now() - 86400000).toISOString();
+    else if (dateHint === 'yesterday') dateFilter = new Date(Date.now() - 2 * 86400000).toISOString();
+    else if (dateHint === 'last7') dateFilter = new Date(Date.now() - 7 * 86400000).toISOString();
+    else if (dateHint === 'last30') dateFilter = new Date(Date.now() - 30 * 86400000).toISOString();
+
+    // Search DB with expanded keywords (reuse existing search pattern)
+    const userId = req.user?.sub;
+    const orgId = req.user?.org_id;
+    const searchTerms = keywords.join(' | ');
+
+    let sql, params;
+    if (threadId && threadId.startsWith('dm-')) {
+      const peerId = threadId.replace('dm-', '');
+      sql = `SELECT m.message_id AS id, m.message, m.message_type, m.message_metadata, m.send_time AS "createdAt",
+                    m.sender_id, m.receiver_id
+             FROM messages m
+             WHERE m.organization_id = $1
+               AND ((m.sender_id = $2 AND m.receiver_id = $3) OR (m.sender_id = $3 AND m.receiver_id = $2))
+               AND m.message IS NOT NULL
+               ${dateFilter ? `AND m.send_time >= $4` : ''}
+             ORDER BY m.send_time DESC LIMIT $${dateFilter ? 5 : 4}`;
+      params = dateFilter ? [orgId, userId, peerId, dateFilter, limit] : [orgId, userId, peerId, limit];
+    } else if (threadId && threadId.startsWith('group-')) {
+      const groupId = threadId.replace('group-', '');
+      sql = `SELECT gm.group_message_id AS id, gm.message, gm.message_type, gm.message_metadata, gm.created_at AS "createdAt",
+                    gm.sender_id
+             FROM group_messages gm
+             WHERE gm.group_id = $1 AND gm.message IS NOT NULL
+               ${dateFilter ? `AND gm.created_at >= $2` : ''}
+             ORDER BY gm.created_at DESC LIMIT $${dateFilter ? 3 : 2}`;
+      params = dateFilter ? [groupId, dateFilter, limit] : [groupId, limit];
+    } else {
+      return success(res, { results: [], interpretation, expandedTerms: keywords, provider: ai.provider }, 'Semantic search complete');
+    }
+
+    const { rows } = await db.query(sql, params);
+
+    // Decrypt and filter by keywords
+    const { decryptMessage, decryptMetadata } = require('../utils/messageCipher');
+    const results = [];
+    for (const row of rows) {
+      let text = row.message;
+      try { text = decryptMessage(row.message) || row.message; } catch {}
+      let meta = row.message_metadata;
+      try { meta = decryptMetadata(row.message_metadata) || meta; } catch {}
+      if (typeof meta === 'string') try { meta = JSON.parse(meta); } catch {}
+
+      // Check if message type matches filter
+      if (messageTypes.length && !messageTypes.includes(row.message_type)) continue;
+
+      // Check keyword match (case-insensitive)
+      const searchable = [text, meta?.fileName, meta?.caption, meta?.title, meta?.description, meta?.url].filter(Boolean).join(' ').toLowerCase();
+      const matched = keywords.some(kw => searchable.includes(kw.toLowerCase()));
+      if (!matched && keywords.length) continue;
+
+      results.push({
+        id: row.id,
+        message: text,
+        message_type: row.message_type,
+        metadata: meta,
+        createdAt: row.createdAt,
+        sender_id: row.sender_id,
+        receiver_id: row.receiver_id,
+      });
+
+      if (results.length >= limit) break;
+    }
+
+    return success(res, { results, interpretation, expandedTerms: keywords, dateHint, provider: ai.provider }, 'Semantic search complete');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// ─── AI Call Notes ────────────────────────────────────────────────────────────
+// POST /translate/call-notes
+// Body: { callDuration, participants, chatContext }
+const generateCallNotes = async (req, res, next) => {
+  try {
+    const { callDuration, participants = [], chatContext = [] } = req.body;
+
+    const contextText = chatContext.map(m => `[${m.sender || 'User'}]: ${m.text || ''}`).join('\n');
+    const participantNames = participants.join(', ') || 'Unknown participants';
+    const durationStr = callDuration ? `${Math.floor(callDuration / 60)}m ${callDuration % 60}s` : 'Unknown duration';
+
+    const prompt = `You are a meeting notes assistant. Based on the following call information and recent chat context, generate structured meeting notes.
+
+Call Duration: ${durationStr}
+Participants: ${participantNames}
+Recent Chat Context (messages before/during the call):
+${contextText || 'No chat context available'}
+
+Generate notes in this exact JSON format:
+{
+  "summary": "One paragraph summary of likely discussion topics",
+  "keyPoints": ["point 1", "point 2", "point 3"],
+  "actionItems": ["action 1", "action 2"]
+}
+
+If chat context is limited, infer likely topics from participant names and duration. Keep language same as chat context. Return ONLY valid JSON.`;
+
+    const ai = await resolveAIProvider();
+    let raw;
+
+    if (ai.provider === 'openai') {
+      const model = ai.model || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You generate meeting notes. Return ONLY valid JSON.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.4, max_tokens: 1000,
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`OpenAI API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.choices?.[0]?.message?.content?.trim() || '{}';
+    } else if (ai.provider === 'anthropic') {
+      const model = ai.model || 'claude-sonnet-4-6';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model, max_tokens: 1000,
+          system: 'You generate meeting notes. Return ONLY valid JSON.',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Anthropic API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.content?.[0]?.text?.trim() || '{}';
+    } else {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Gemini API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '{}';
+    }
+
+    const notes = JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, ''));
+
+    return success(res, {
+      notes: {
+        summary: notes.summary || 'Call completed.',
+        keyPoints: Array.isArray(notes.keyPoints) ? notes.keyPoints : [],
+        actionItems: Array.isArray(notes.actionItems) ? notes.actionItems : [],
+      },
+      callDuration: durationStr,
+      participants: participantNames,
+      provider: ai.provider,
+    }, 'Call notes generated');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// ─── AI Smart Composer ────────────────────────────────────────────────────────
+// POST /translate/smart-compose
+// Body: { partialText, context?, threadType? }
+const smartCompose = async (req, res, next) => {
+  try {
+    const { partialText, context = [], threadType = 'dm' } = req.body;
+    if (!partialText || partialText.trim().length < 5) {
+      return success(res, { completions: [] }, 'Text too short');
+    }
+
+    const contextStr = context.slice(-5).map(m => `${m.sender || 'User'}: ${m.text || ''}`).join('\n');
+    const prompt = `You are an autocomplete assistant for a workplace chat app. Given the partial message and recent chat context, suggest 3 short completions for the message.
+
+${contextStr ? `Recent chat:\n${contextStr}\n` : ''}
+Partial message: "${partialText}"
+
+Rules:
+- Complete the sentence naturally (10-30 words each)
+- Match the language and tone of the partial text
+- Keep it professional but natural
+- Return ONLY a JSON array of 3 strings: ["completion1", "completion2", "completion3"]
+- Each completion should include the original partial text as prefix
+- No markdown, no explanation`;
+
+    const ai = await resolveAIProvider();
+    let raw;
+
+    if (ai.provider === 'openai') {
+      const model = ai.model || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey}` },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You autocomplete chat messages. Return ONLY a JSON array of 3 strings.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2, max_tokens: 300,
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`OpenAI API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.choices?.[0]?.message?.content?.trim() || '[]';
+    } else if (ai.provider === 'anthropic') {
+      const model = ai.model || 'claude-sonnet-4-6';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model, max_tokens: 300,
+          system: 'You autocomplete chat messages. Return ONLY a JSON array of 3 strings.',
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Anthropic API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.content?.[0]?.text?.trim() || '[]';
+    } else {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      if (!response.ok) throw Object.assign(new Error(`Gemini API error: ${response.status}`), { status: 502 });
+      const data = await response.json();
+      raw = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
+    }
+
+    const completions = JSON.parse(raw.replace(/```json?\n?/g, '').replace(/```/g, ''));
+
+    return success(res, {
+      completions: Array.isArray(completions) ? completions.slice(0, 3) : [],
+      provider: ai.provider,
+    }, 'Smart compose complete');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { translate, summarize, smartReply, grammarCorrect, toneAdjust, semanticSearch, generateCallNotes, smartCompose };

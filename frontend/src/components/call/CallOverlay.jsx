@@ -27,6 +27,7 @@ import {
   playEndedSound,
   stopAllCallSounds,
 } from "../../utils/callSounds.js";
+import CallNotesDialog from "./CallNotesDialog.jsx";
 
 const formatDuration = (seconds) => {
   const m = Math.floor(seconds / 60);
@@ -53,6 +54,8 @@ const CallOverlay = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const [minimized, setMinimized] = useState(false);
+  const [callNotesOpen, setCallNotesOpen] = useState(false);
+  const lastCallRef = useRef({ duration: 0, peerName: "" });
 
   const isActive = status === "active";
   const isConnecting = status === "connecting" || status === "accepted";
@@ -80,6 +83,14 @@ const CallOverlay = () => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
 
+    // Track call info for notes
+    if (status === "active") {
+      lastCallRef.current = { duration: callDuration, peerName: peerUserName || "" };
+    }
+    if (status === "active" && callDuration > 0) {
+      lastCallRef.current.duration = callDuration;
+    }
+
     if (status === "calling") {
       startOutgoingRing();
     } else if (status === "active" && prev && prev !== "active") {
@@ -87,7 +98,13 @@ const CallOverlay = () => {
       playConnectedSound();
     } else if (status === "idle" && prev && prev !== "idle") {
       stopAllCallSounds();
-      if (prev === "active") playEndedSound();
+      if (prev === "active") {
+        playEndedSound();
+        // Auto-open call notes if call was > 10 seconds
+        if (lastCallRef.current.duration > 10) {
+          setCallNotesOpen(true);
+        }
+      }
     } else if (status !== "calling") {
       stopOutgoingRing();
     }
@@ -477,6 +494,19 @@ const CallOverlay = () => {
         </Box>
       </Box>,
       document.body
+    );
+  }
+
+  // Show call notes dialog even when overlay is hidden (call ended)
+  if (callNotesOpen) {
+    return (
+      <CallNotesDialog
+        open={callNotesOpen}
+        onClose={() => setCallNotesOpen(false)}
+        callDuration={lastCallRef.current.duration}
+        peerUserName={lastCallRef.current.peerName}
+        chatContext={[]}
+      />
     );
   }
 

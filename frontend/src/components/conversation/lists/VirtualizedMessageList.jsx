@@ -52,8 +52,8 @@ import {
 import { PiXBold } from "react-icons/pi";
 import { FaRegFrownOpen } from "react-icons/fa";
 import { RiChatSearchFill } from "react-icons/ri";
-import { searchMessages as apiSearchMessages, smartSearchMessages } from "../../../services/chatApi.js";
-import { PiMagicWandBold } from "react-icons/pi";
+import { searchMessages as apiSearchMessages, smartSearchMessages, semanticSearchMessages } from "../../../services/chatApi.js";
+import { PiMagicWandBold, PiBrainBold } from "react-icons/pi";
 
 const EMPTY_SELECTION = Object.freeze(new Set());
 const DATE_FILTERS = [
@@ -224,6 +224,8 @@ const VirtualizedMessageList = ({
   const apiSearchTimerRef = useRef(null);
   const [smartSearchMode, setSmartSearchMode] = useState(false);
   const [smartSearchIntent, setSmartSearchIntent] = useState("");
+  const [semanticSearchMode, setSemanticSearchMode] = useState(false);
+  const [semanticInterpretation, setSemanticInterpretation] = useState("");
 
   const searchQuery = searchValue.trim();
   const hasDateRange =
@@ -249,17 +251,34 @@ const VirtualizedMessageList = ({
       setApiSearchResults(null);
       setApiSearchLoading(false);
       setSmartSearchIntent("");
+      setSemanticInterpretation("");
       return;
     }
     setApiSearchLoading(true);
     apiSearchTimerRef.current = setTimeout(() => {
-      if (smartSearchMode && hasTextQuery) {
+      if (semanticSearchMode && hasTextQuery) {
+        // AI Semantic Search — search by meaning
+        semanticSearchMessages(searchQuery, { threadId, limit: 100 })
+          .then((data) => {
+            const results = (data?.results ?? []).map((r) => ({ ...r, id: String(r.id), _apiResult: true }));
+            setApiSearchResults(results);
+            setSemanticInterpretation(data?.interpretation || "");
+            setSmartSearchIntent("");
+          })
+          .catch((err) => {
+            console.error("[semantic-search] error:", err?.message);
+            setApiSearchResults([]);
+            setSemanticInterpretation("");
+          })
+          .finally(() => setApiSearchLoading(false));
+      } else if (smartSearchMode && hasTextQuery) {
         // AI Smart Search — natural language query
         smartSearchMessages(searchQuery, { threadId, limit: 100 })
           .then((data) => {
             const results = (data?.results ?? []).map((r) => ({ ...r, id: String(r.id), _apiResult: true }));
             setApiSearchResults(results);
             setSmartSearchIntent(data?.filters?.intent || "");
+            setSemanticInterpretation("");
           })
           .catch((err) => {
             console.error("[smart-search] error:", err?.message);
@@ -282,11 +301,11 @@ const VirtualizedMessageList = ({
           })
           .finally(() => setApiSearchLoading(false));
       }
-    }, smartSearchMode ? 600 : 400);
+    }, (smartSearchMode || semanticSearchMode) ? 600 : 400);
     return () => {
       if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
     };
-  }, [searchQuery, searchEnabled, threadId, currentUserId, typeFiltersKey, smartSearchMode]);
+  }, [searchQuery, searchEnabled, threadId, currentUserId, typeFiltersKey, smartSearchMode, semanticSearchMode]);
 
   const [olderToast, setOlderToast] = useState("");
 
@@ -1063,7 +1082,7 @@ const VirtualizedMessageList = ({
                   direction="row"
                   spacing={0.5}
                   alignItems="center"
-                  onClick={() => setSmartSearchMode((prev) => !prev)}
+                  onClick={() => { setSmartSearchMode((prev) => !prev); if (!smartSearchMode) setSemanticSearchMode(false); }}
                   sx={{ cursor: "pointer", userSelect: "none" }}
                 >
                   <PiMagicWandBold
@@ -1082,10 +1101,42 @@ const VirtualizedMessageList = ({
                   <Switch
                     size="small"
                     checked={smartSearchMode}
-                    onChange={(event) => setSmartSearchMode(event.target.checked)}
+                    onChange={(event) => { setSmartSearchMode(event.target.checked); if (event.target.checked) setSemanticSearchMode(false); }}
                     sx={smartSearchMode ? {
                       "& .MuiSwitch-switchBase.Mui-checked": { color: theme.palette.primary.main },
                       "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { backgroundColor: theme.palette.primary.main },
+                    } : {}}
+                  />
+                </Stack>
+              </Tooltip>
+              <Tooltip title={semanticSearchMode ? "AI Semantic Search: ON — Search by meaning" : "AI Semantic Search: OFF — Click to enable"} arrow>
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  alignItems="center"
+                  onClick={() => { setSemanticSearchMode((prev) => !prev); if (!semanticSearchMode) setSmartSearchMode(false); }}
+                  sx={{ cursor: "pointer", userSelect: "none" }}
+                >
+                  <PiBrainBold
+                    size={14}
+                    color={semanticSearchMode ? "#7b1fa2" : theme.palette.text.secondary}
+                  />
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      fontWeight: 600,
+                      color: semanticSearchMode ? "#7b1fa2" : theme.palette.text.secondary,
+                    }}
+                  >
+                    Semantic
+                  </Typography>
+                  <Switch
+                    size="small"
+                    checked={semanticSearchMode}
+                    onChange={(event) => { setSemanticSearchMode(event.target.checked); if (event.target.checked) setSmartSearchMode(false); }}
+                    sx={semanticSearchMode ? {
+                      "& .MuiSwitch-switchBase.Mui-checked": { color: "#7b1fa2" },
+                      "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": { backgroundColor: "#7b1fa2" },
                     } : {}}
                   />
                 </Stack>

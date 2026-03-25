@@ -269,6 +269,66 @@ export const translateText = async (text, targetLanguage = "English") => {
   return payload?.data?.translated ?? text;
 };
 
+// ─── AI Tone Adjuster ────────────────────────────────────────────────────────
+
+export const toneAdjustText = async (text, tone = "formal") => {
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/translate/tone-adjust`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, tone }),
+    }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Tone adjustment failed");
+  return payload?.data ?? {};
+};
+
+// ─── AI Semantic Search ──────────────────────────────────────────────────────
+
+export const semanticSearchMessages = async (query, { threadId, limit = 50 } = {}) => {
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/translate/semantic-search`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, threadId, limit }),
+    }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Semantic search failed");
+  return payload?.data ?? { results: [], interpretation: "", expandedTerms: [] };
+};
+
+// ─── AI Call Notes ───────────────────────────────────────────────────────────
+
+export const generateCallNotes = async ({ callDuration, participants = [], chatContext = [] } = {}) => {
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/translate/call-notes`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callDuration, participants, chatContext }),
+    }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Call notes generation failed");
+  return payload?.data ?? {};
+};
+
+// ─── AI Smart Composer ───────────────────────────────────────────────────────
+
+export const fetchSmartCompose = async (partialText, { context = [], threadType = "dm" } = {}) => {
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/translate/smart-compose`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ partialText, context, threadType }),
+    }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Smart compose failed");
+  return payload?.data?.completions ?? [];
+};
+
 // ─── File Upload ─────────────────────────────────────────────────────────────
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB

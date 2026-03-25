@@ -17,6 +17,7 @@ import {
   PiShareFatBold,
   PiPushPinBold,
   PiCheckSquareOffsetBold,
+  PiPenNibBold,
 } from "react-icons/pi";
 import { RiReplyLine } from "react-icons/ri";
 import { getMenuOptions } from "./helpers.js";
@@ -29,6 +30,7 @@ const iconRegistry = {
   copy: PiCopySimpleBold,
   translate: PiTranslateBold,
   summarize: PiMagicWandBold,
+  "tone-adjust": PiPenNibBold,
   info: PiInfoBold,
   reply: RiReplyLine,
   forward: PiShareFatBold,

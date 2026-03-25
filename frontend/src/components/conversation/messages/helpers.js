@@ -1910,6 +1910,7 @@ export const getMenuOptions = (message, currentUserId) => {
     { key: "copy", label: "Copy", scope: "any" },
     { key: "translate", label: "Translate", scope: "any" },
     { key: "summarize", label: "Summarize", scope: "any" },
+    { key: "tone-adjust", label: "Adjust Tone", scope: "any" },
     { key: "info", label: "Info", scope: "any" },
     { key: "reply", label: "Reply", scope: "any" },
     { key: "forward", label: "Forward", scope: "any" },

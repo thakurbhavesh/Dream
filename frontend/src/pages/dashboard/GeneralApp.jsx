@@ -26,6 +26,7 @@ import LiveAssistant from "../../components/LiveAssistant/index.jsx";
 import { appBrandingAssets, agentSelfId, setRealUserId } from "../../data/CommonData.js";
 import TranslateDialog from "../../components/conversation/messages/TranslateDialog.jsx";
 import SummarizeDialog from "../../components/conversation/messages/SummarizeDialog.jsx";
+import ToneAdjusterDialog from "../../components/conversation/messages/ToneAdjusterDialog.jsx";
 import ChatList from "../../components/chats/ChatList.jsx";
 import ChatListActionsMenu from "../../components/chats/ChatListActionsMenu.jsx";
 import { useChatLockContext } from "../../contexts/ChatLockContext.jsx";
@@ -451,6 +452,10 @@ const GeneralApp = () => {
     threadId: null,
   });
   const [summarizeDialogState, setSummarizeDialogState] = useState({
+    open: false,
+    message: null,
+  });
+  const [toneAdjustDialogState, setToneAdjustDialogState] = useState({
     open: false,
     message: null,
   });
@@ -2688,6 +2693,12 @@ const GeneralApp = () => {
         setSummarizeDialogState({ open: true, message });
         return;
       }
+      if (actionKey === "tone-adjust") {
+        const text = getMessagePlainText(message);
+        if (!text) { showMessageToast("Nothing to adjust", "info"); return; }
+        setToneAdjustDialogState({ open: true, message });
+        return;
+      }
       if (actionKey === "reply") {
         clearEditingReference();
         const replyPayload = buildReplyContextPayload(
@@ -3033,6 +3044,11 @@ const GeneralApp = () => {
                       open={summarizeDialogState.open}
                       message={summarizeDialogState.message}
                       onClose={() => setSummarizeDialogState({ open: false, message: null })}
+                    />
+                    <ToneAdjusterDialog
+                      open={toneAdjustDialogState.open}
+                      messageText={getMessagePlainText(toneAdjustDialogState.message) || ""}
+                      onClose={() => setToneAdjustDialogState({ open: false, message: null })}
                     />
                   </Box>
                 </>

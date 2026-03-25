@@ -32,6 +32,7 @@ import {
   PiTextItalic,
   PiTextUnderline,
   PiVideoCamera,
+  PiLightningBold,
 } from "react-icons/pi";
 import { TbDragDrop } from "react-icons/tb";
 import useComposerActions from "./useComposerActions.js";
@@ -355,6 +356,9 @@ const ConversationFooter = ({
   const [grammarCorrected, setGrammarCorrected] = useState("");
   const [grammarOriginal, setGrammarOriginal] = useState("");
   const grammarTimerRef = useRef(null);
+  const [smartComposeEnabled, setSmartComposeEnabled] = useState(false);
+  const [composeSuggestions, setComposeSuggestions] = useState([]);
+  const composeTimerRef = useRef(null);
   const [isMessageEmpty, setIsMessageEmpty] = useState(true);
   const [isComposerDragActive, setIsComposerDragActive] = useState(false);
   const {
@@ -1043,7 +1047,25 @@ const ConversationFooter = ({
         } catch { /* ignore */ }
       }, 1500);
     }
-  }, [scheduleEditorSync, updateMentionState, emitTypingStart, grammarEnabled]);
+
+    // Debounced smart compose when enabled
+    if (smartComposeEnabled) {
+      if (composeTimerRef.current) clearTimeout(composeTimerRef.current);
+      composeTimerRef.current = setTimeout(async () => {
+        const text = editorRef.current?.innerText?.trim() || '';
+        if (text.length < 10) { setComposeSuggestions([]); return; }
+        try {
+          const { fetchSmartCompose } = await import("../../services/chatApi.js");
+          const completions = await fetchSmartCompose(text, {});
+          if (Array.isArray(completions) && completions.length) {
+            setComposeSuggestions(completions);
+          } else {
+            setComposeSuggestions([]);
+          }
+        } catch { setComposeSuggestions([]); }
+      }, 2000);
+    }
+  }, [scheduleEditorSync, updateMentionState, emitTypingStart, grammarEnabled, smartComposeEnabled]);
 
   // Pick a short label for attachments (mime subtype or extension).
   const deriveFileLabel = useCallback((file, fallbackLabel = "File") => {
@@ -2293,6 +2315,60 @@ const ConversationFooter = ({
             />
           </Stack>
         ) : null}
+        {composeSuggestions.length > 0 ? (
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{
+              px: 1.5,
+              py: 0.75,
+              overflowX: "auto",
+              "&::-webkit-scrollbar": { display: "none" },
+            }}
+          >
+            <PiLightningBold size={16} style={{ flexShrink: 0, marginTop: 4, color: "#ed6c02" }} />
+            {composeSuggestions.map((suggestion, idx) => (
+              <Chip
+                key={`compose-${idx}`}
+                label={suggestion}
+                onClick={() => {
+                  if (editorRef.current) {
+                    editorRef.current.focus();
+                    editorRef.current.innerText = '';
+                  }
+                  insertPlainText(suggestion);
+                  setComposeSuggestions([]);
+                }}
+                size="small"
+                variant="outlined"
+                sx={{
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  borderColor: "#ed6c02",
+                  color: "#ed6c02",
+                  fontWeight: 500,
+                  fontSize: 12,
+                  maxWidth: 250,
+                  "&:hover": {
+                    bgcolor: "#ed6c02",
+                    color: "#fff",
+                  },
+                }}
+              />
+            ))}
+            <Chip
+              label="✕"
+              size="small"
+              onClick={() => setComposeSuggestions([])}
+              sx={{
+                flexShrink: 0,
+                fontSize: 11,
+                cursor: "pointer",
+                color: theme.palette.text.secondary,
+              }}
+            />
+          </Stack>
+        ) : null}
         <Box
           sx={{
             display: "flex",
@@ -2462,6 +2538,22 @@ const ConversationFooter = ({
                 }}
               >
                 <PiMagicWand size={20} />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title={smartComposeEnabled ? "AI Smart Compose: ON" : "AI Smart Compose: OFF"}>
+              <IconButton
+                disableRipple
+                sx={smartComposeEnabled
+                  ? { ...iconButtonStyles, color: "#ed6c02", bgcolor: theme.palette.action.hover }
+                  : iconButtonStyles
+                }
+                onClick={() => {
+                  setSmartComposeEnabled((prev) => !prev);
+                  setComposeSuggestions([]);
+                }}
+              >
+                <PiLightningBold size={20} />
               </IconButton>
             </Tooltip>
             <Tooltip title="Record video">
