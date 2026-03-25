@@ -290,15 +290,23 @@ const ManageGroupMembersDialog = ({ open, group, users = [], onClose, onSaved })
                     headerName: "Status",
                     minWidth: 130,
                     flex: 0.45,
-                    renderCell: ({ row }) => (
-                      <Chip
-                        label={row.status}
-                        size="small"
-                        color={normalize(row.status) === "active" ? "success" : "default"}
-                        variant="outlined"
-                        sx={{ textTransform: "capitalize" }}
-                      />
-                    ),
+                    renderCell: ({ row }) => {
+                      const statusLabel =
+                        normalize(row.status) === "kicked"
+                          ? "Removed"
+                          : normalize(row.status) === "left"
+                            ? "Left"
+                            : row.status;
+                      return (
+                        <Chip
+                          label={statusLabel}
+                          size="small"
+                          color={normalize(row.status) === "active" ? "success" : "default"}
+                          variant="outlined"
+                          sx={{ textTransform: "capitalize" }}
+                        />
+                      );
+                    },
                   },
                   {
                     field: "admin",
@@ -346,7 +354,7 @@ const ManageGroupMembersDialog = ({ open, group, users = [], onClose, onSaved })
                             onClick={() =>
                               setMemberPatch(
                                 row.group_member_id,
-                                { status: normalize(row.status) === "active" ? "left" : "active" },
+                                { status: normalize(row.status) === "active" ? "kicked" : "active" },
                                 normalize(row.status) === "active"
                                   ? "Member removed from active group list."
                                   : "Member added back to active group list.",

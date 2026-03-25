@@ -118,6 +118,12 @@ const getThreads = async (req, res, next) => {
       lastMessageAt: row.last_message_at || null,
       lastActivityAt: row.last_message_at || null,
       lastSenderName: row.last_sender_name || null,
+      lastMessageStatus: row.last_sender_id
+        ? (row.last_message_delivery_status || 'sent')
+        : null,
+      lastMessageDirection: row.last_sender_id
+        ? (Number(row.last_sender_id) === Number(userId) ? 'outgoing' : 'incoming')
+        : null,
       isPinned: false,
       isSelfThread: false,
       createdBy: row.created_by ? {
@@ -129,6 +135,7 @@ const getThreads = async (req, res, next) => {
       isAdmin: Boolean(row.current_user_is_admin),
       membershipStatus: row.membership_status || 'active',
       hasLeft: row.membership_status === 'left',
+      leftAt: row.membership_status === 'left' ? row.membership_updated_at : null,
       canChat: row.membership_status === 'active' && (!row.is_airtime || Boolean(row.current_user_is_admin)),
     }));
 
@@ -179,7 +186,17 @@ const getMessages = async (req, res, next) => {
     } else if (threadId.startsWith('group-')) {
       const groupId = Number(threadId.replace('group-', ''));
       if (!groupId) { const e = new Error('Invalid thread id'); e.status = 400; throw e; }
-      const rows = await model.getGroupMessages(orgId, groupId, { limit, before, userId });
+
+      // Check if user has left the group — if so, only show messages up to leave time
+      const memberResult = await db.query(
+        `SELECT status, updated_at FROM group_members
+         WHERE group_id = $1 AND user_id = $2 AND organization_id = $3`,
+        [groupId, userId, orgId]
+      );
+      const member = memberResult.rows[0];
+      const leftAt = member?.status === 'left' ? member.updated_at : null;
+
+      const rows = await model.getGroupMessages(orgId, groupId, { limit, before, userId, leftAt });
       await signProfileFieldsArray(rows);
       messages = rows.map((row) => normalizeGroupMessage(row, userId));
     } else {
@@ -410,7 +427,7 @@ const normalizeGroupMessage = (row, currentUserId) => {
     },
     createdAt: sentAt,
     editedAt,
-    status: 'delivered',
+    status: row.delivery_status || (Number(row.sender_id) === Number(currentUserId) ? 'sent' : null),
   };
 };
 

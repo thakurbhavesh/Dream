@@ -89,8 +89,8 @@ const chat = async (req, res, next) => {
     res.setHeader('x-ratelimit-limit', rateCheck.limit);
     return success(res, { reply, responseMs }, 'Assistant responded');
   } catch (err) {
-    if (err?.status && err?.error) {
-      return failure(res, err.error?.error?.message || 'AI API error', err.status);
+    if (err?.status) {
+      return failure(res, err.message || 'AI API error', err.status);
     }
     return next(err);
   }
@@ -124,8 +124,9 @@ const chatWithGemini = async (provider, messages, systemPrompt) => {
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw Object.assign(new Error(`Gemini API error: ${response.status} ${body}`), { status: 502 });
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `Gemini API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
   }
 
   const data = await response.json();
@@ -148,8 +149,9 @@ const chatWithOpenAI = async (provider, messages, systemPrompt) => {
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw Object.assign(new Error(`OpenAI API error: ${response.status} ${body}`), { status: 502 });
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `OpenAI API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
   }
 
   const data = await response.json();
@@ -176,8 +178,9 @@ const chatWithAnthropic = async (provider, messages, systemPrompt) => {
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw Object.assign(new Error(`Anthropic API error: ${response.status} ${body}`), { status: 502 });
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `Anthropic API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
   }
 
   const data = await response.json();

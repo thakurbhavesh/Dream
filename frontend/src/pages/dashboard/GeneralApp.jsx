@@ -1631,9 +1631,19 @@ const GeneralApp = () => {
       }
 
       emitGroupSystemEvent(thread, { action: "member_left" });
-      removeThread(activeOrganizationId, thread.id, { removeMessages: true });
+
+      // Keep the thread in sidebar but mark as left (don't remove)
+      upsertThread(activeOrganizationId, {
+        id: thread.id,
+        hasLeft: true,
+        canChat: false,
+        membershipStatus: "left",
+        leftAt: new Date().toISOString(),
+        unreadCount: 0,
+        readStatus: "read",
+      });
+
       invalidate(thread.id);
-      removeActiveSelection(thread.id);
       dispatch(closeSidebar());
       showMessageToast("You left the group", "success");
       return true;
@@ -1643,8 +1653,7 @@ const GeneralApp = () => {
       dispatch,
       emitGroupSystemEvent,
       invalidate,
-      removeActiveSelection,
-      removeThread,
+      upsertThread,
       showMessageToast,
     ]
   );

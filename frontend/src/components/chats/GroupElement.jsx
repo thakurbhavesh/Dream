@@ -291,6 +291,14 @@ const GroupElement = ({
             }}
           >
             <HiOutlineUserGroup size={16} /> {label}
+            {thread?.hasLeft && (
+              <Chip
+                label="Left"
+                size="small"
+                variant="outlined"
+                sx={{ ml: 0.5, height: 18, fontSize: "0.65rem", fontWeight: 600 }}
+              />
+            )}
           </Typography>
           <Typography
             variant="caption"

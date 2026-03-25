@@ -130,6 +130,7 @@ const getGroupThreads = async (orgId, userId) => {
       g.is_airtime,
       gm.is_admin AS current_user_is_admin,
       gm.status AS membership_status,
+      gm.updated_at AS membership_updated_at,
       creator.name AS creator_name,
       (
         SELECT COUNT(*)
@@ -142,20 +143,32 @@ const getGroupThreads = async (orgId, userId) => {
       lm.created_at           AS last_message_at,
       lm.sender_id            AS last_sender_id,
       sender.name             AS last_sender_name,
-      (
+      lm.sender_id            AS last_sender_id,
+      CASE WHEN lm.sender_id = $2 THEN (
+        SELECT CASE
+          WHEN COUNT(*) = 0 THEN 'sent'
+          WHEN bool_and(gmr2.delivery_status = 'read') THEN 'read'
+          WHEN bool_and(gmr2.delivery_status IN ('read', 'delivered')) THEN 'delivered'
+          ELSE 'sent'
+        END
+        FROM group_message_recipients gmr2
+        WHERE gmr2.group_message_id = lm.group_message_id
+      ) ELSE NULL END AS last_message_delivery_status,
+      CASE WHEN gm.status = 'left' THEN 0 ELSE (
         SELECT COUNT(*)
         FROM group_message_recipients gmr
         JOIN group_messages gm3 ON gm3.group_message_id = gmr.group_message_id
         WHERE gm3.group_id = g.group_id
           AND gmr.user_id = $2
           AND gmr.delivery_status != 'read'
-      ) AS unread_count
+      ) END AS unread_count
     FROM group_members gm
     JOIN groups g ON g.group_id = gm.group_id
     LEFT JOIN LATERAL (
-      SELECT message, message_type, message_metadata, created_at, sender_id
+      SELECT message, message_type, message_metadata, created_at, sender_id, group_message_id
       FROM group_messages
       WHERE group_id = g.group_id AND organization_id = $1
+        AND (gm.status = 'active' OR created_at <= gm.updated_at)
       ORDER BY created_at DESC
       LIMIT 1
     ) lm ON TRUE
@@ -370,7 +383,7 @@ const getDMMessages = async (orgId, userId, otherUserId, { limit = 50, before } 
 /**
  * Fetch paginated group messages.
  */
-const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId } = {}) => {
+const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId, leftAt } = {}) => {
   const values = [orgId, groupId, limit];
   let beforeClause = '';
 
@@ -378,6 +391,15 @@ const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId } =
     values.push(before);
     beforeClause = `AND gm.created_at < $${values.length}`;
   }
+
+  if (leftAt) {
+    values.push(leftAt);
+    beforeClause += ` AND gm.created_at <= $${values.length}`;
+  }
+
+  // Add userId parameter for delivery status subquery
+  values.push(userId || 0);
+  const userIdParam = values.length;
 
   const query = `
     SELECT
@@ -390,7 +412,17 @@ const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId } =
       gm.created_at,
       gm.updated_at,
       u.name        AS sender_name,
-      u.profile_url AS sender_avatar
+      u.profile_url AS sender_avatar,
+      CASE WHEN gm.sender_id = $${userIdParam} THEN (
+        SELECT CASE
+          WHEN COUNT(*) = 0 THEN 'sent'
+          WHEN bool_and(gmr.delivery_status = 'read') THEN 'read'
+          WHEN bool_and(gmr.delivery_status IN ('read', 'delivered')) THEN 'delivered'
+          ELSE 'sent'
+        END
+        FROM group_message_recipients gmr
+        WHERE gmr.group_message_id = gm.group_message_id
+      ) ELSE NULL END AS delivery_status
     FROM group_messages gm
     JOIN users u ON u.user_id = gm.sender_id
     WHERE gm.organization_id = $1

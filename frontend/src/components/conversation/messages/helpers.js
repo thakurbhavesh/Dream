@@ -1548,6 +1548,57 @@ export const isOwnMessage = (message, currentUserId) => {
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
+// ─── Dynamic org controls cache (edit / recall / status time limits) ────────
+let _cachedOrgControls = null;
+let _orgControlsFetchPromise = null;
+
+export const fetchOrgControls = async () => {
+  if (_cachedOrgControls) return _cachedOrgControls;
+  if (_orgControlsFetchPromise) return _orgControlsFetchPromise;
+  _orgControlsFetchPromise = (async () => {
+    try {
+      const { fetchWithAuth } = await import("../../../utils/authApi.js");
+      const { API_BASE_URL } = await import("../../../config/apiBaseUrl.js");
+      const { response, payload } = await fetchWithAuth(
+        `${API_BASE_URL}/organization-controls`
+      );
+      if (response?.ok) {
+        const rows = payload?.data?.rows || (Array.isArray(payload?.data) ? payload.data : []);
+        const map = {};
+        for (const row of rows) {
+          if (row.feature_key) map[row.feature_key] = row;
+        }
+        _cachedOrgControls = map;
+        return _cachedOrgControls;
+      }
+    } catch {}
+    _orgControlsFetchPromise = null;
+    return null;
+  })();
+  return _orgControlsFetchPromise;
+};
+
+// Preload org controls on import
+fetchOrgControls().catch(() => {});
+
+export const getOrgControlsCache = () => _cachedOrgControls;
+
+const getRecallTimeLimitMs = () => {
+  const recall = _cachedOrgControls?.recall;
+  if (!recall) return FIVE_MINUTES_MS;
+  if (!recall.enabled) return 0; // recall disabled
+  if (recall.time_limit_minutes == null) return Infinity; // anyTime
+  return recall.time_limit_minutes * 60 * 1000;
+};
+
+const getEditTimeLimitMs = () => {
+  const edit = _cachedOrgControls?.edit;
+  if (!edit) return FIVE_MINUTES_MS;
+  if (!edit.enabled) return 0; // edit disabled
+  if (edit.time_limit_minutes == null) return Infinity; // anyTime
+  return edit.time_limit_minutes * 60 * 1000;
+};
+
 const isBeforeNow = (value) => {
   const date = toDate(value);
   if (!date) return false;
@@ -1555,6 +1606,9 @@ const isBeforeNow = (value) => {
 };
 
 export const isUnsendAvailable = (message) => {
+  const limitMs = getRecallTimeLimitMs();
+  if (limitMs <= 0) return false; // recall disabled by org control
+
   const explicitDeadline = message?.metadata?.unsendAvailableUntil;
   if (explicitDeadline) {
     return isBeforeNow(explicitDeadline);
@@ -1562,8 +1616,9 @@ export const isUnsendAvailable = (message) => {
   if (!message?.createdAt) return false;
   const createdAt = toDate(message.createdAt);
   if (!createdAt) return false;
-  const fallbackDeadline = createdAt.getTime() + FIVE_MINUTES_MS;
-  return fallbackDeadline > Date.now();
+  if (!Number.isFinite(limitMs)) return true; // anyTime mode
+  const deadline = createdAt.getTime() + limitMs;
+  return deadline > Date.now();
 };
 
 export const getMessagePlainText = (message) => {
@@ -1632,11 +1687,16 @@ export const getEditableField = (message) => {
 export const canEditMessage = (message) => {
   if (!message) return false;
   if (message.direction?.toLowerCase?.() !== "outgoing") return false;
+
+  const limitMs = getEditTimeLimitMs();
+  if (limitMs <= 0) return false; // edit disabled by org control
+
   const editable = getEditableField(message);
   if (!editable) return false;
   const createdAt = toDate(message.createdAt);
   if (!createdAt) return false;
-  return createdAt.getTime() + FIVE_MINUTES_MS > Date.now();
+  if (!Number.isFinite(limitMs)) return true; // anyTime mode
+  return createdAt.getTime() + limitMs > Date.now();
 };
 
 const canEditPollMessage = (message, currentUserId) => {
@@ -1786,10 +1846,10 @@ export const fetchMenuItems = async () => {
         fetchWithAuth(`${API_BASE_URL}/organization-message-menu-permissions?limit=100`).catch(() => ({ response: { ok: false } })),
       ]);
       if (itemsRes.response?.ok) {
-        const itemsData = itemsRes.data?.data || itemsRes.data;
+        const itemsData = itemsRes.payload?.data || itemsRes.payload;
         const items = itemsData?.rows || (Array.isArray(itemsData) ? itemsData : []);
         // Build hidden set from org permissions
-        const permsData = permsRes.data?.data || permsRes.data;
+        const permsData = permsRes.payload?.data || permsRes.payload;
         const perms = permsData?.rows || (Array.isArray(permsData) ? permsData : []);
         const hiddenIds = new Set(
           perms.filter((p) => p.permission_type === "hide" && p.status === "active")

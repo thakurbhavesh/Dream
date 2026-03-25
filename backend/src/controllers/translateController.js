@@ -41,6 +41,8 @@ const translate = async (req, res, next) => {
 
     if (provider === 'openai') {
       translated = await translateWithOpenAI(text, targetLanguage, ai.apiKey, ai.model);
+    } else if (provider === 'anthropic') {
+      translated = await translateWithAnthropic(text, targetLanguage, ai.apiKey, ai.model);
     } else {
       translated = await translateWithGemini(text, targetLanguage, ai.apiKey, ai.model);
     }
@@ -112,6 +114,35 @@ const translateWithOpenAI = async (text, targetLanguage, apiKeyOverride, modelOv
 
   const data = await response.json();
   const translated = data?.choices?.[0]?.message?.content?.trim();
+  if (!translated) throw Object.assign(new Error('Empty translation response'), { status: 502 });
+  return translated;
+};
+
+// ─── Anthropic Claude (translate) ─────────────────────────────────────────────
+const translateWithAnthropic = async (text, targetLanguage, apiKey, modelOverride) => {
+  if (!apiKey) throw Object.assign(new Error('Anthropic API key not configured'), { status: 500 });
+  const model = modelOverride || 'claude-sonnet-4-6';
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2000,
+      system: `You are a translator. Translate the user's text to ${targetLanguage}. Return ONLY the translated text.`,
+      messages: [{ role: 'user', content: text }],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `Anthropic API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
+  }
+  const data = await response.json();
+  const translated = data?.content?.[0]?.text?.trim();
   if (!translated) throw Object.assign(new Error('Empty translation response'), { status: 502 });
   return translated;
 };
@@ -325,6 +356,8 @@ const summarize = async (req, res, next) => {
 
     if (provider === 'openai') {
       summary = await summarizeWithOpenAI(typeof prompt === 'string' ? prompt : prompt.textPrompt, ai.apiKey, ai.model);
+    } else if (provider === 'anthropic') {
+      summary = await summarizeWithAnthropic(typeof prompt === 'string' ? prompt : prompt.textPrompt, ai.apiKey, ai.model);
     } else {
       summary = await summarizeWithGemini(prompt, ai.apiKey, ai.model);
     }
@@ -411,6 +444,34 @@ const summarizeWithOpenAI = async (prompt, apiKeyOverride, modelOverride) => {
   return summary;
 };
 
+const summarizeWithAnthropic = async (prompt, apiKey, modelOverride) => {
+  if (!apiKey) throw Object.assign(new Error('Anthropic API key not configured'), { status: 500 });
+  const model = modelOverride || 'claude-sonnet-4-6';
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1000,
+      system: 'You are a summarizer. Provide concise summaries in 3-5 bullet points.',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `Anthropic API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
+  }
+  const data = await response.json();
+  const summary = data?.content?.[0]?.text?.trim();
+  if (!summary) throw Object.assign(new Error('Empty summary response'), { status: 502 });
+  return summary;
+};
+
 // ─── AI Smart Reply Suggestions ──────────────────────────────────────────────
 const smartReply = async (req, res, next) => {
   try {
@@ -472,6 +533,8 @@ ${senderName || 'Colleague'}: "${message}"`;
     let suggestions;
     if (ai.provider === 'openai') {
       suggestions = await smartReplyWithOpenAI(prompt, ai.apiKey, ai.model);
+    } else if (ai.provider === 'anthropic') {
+      suggestions = await smartReplyWithAnthropic(prompt, ai.apiKey, ai.model);
     } else {
       suggestions = await smartReplyWithGemini(prompt, ai.apiKey, ai.model);
     }
@@ -550,6 +613,34 @@ const smartReplyWithOpenAI = async (prompt, apiKeyOverride, modelOverride) => {
   return parseSmartReplies(text);
 };
 
+const smartReplyWithAnthropic = async (prompt, apiKey, modelOverride) => {
+  if (!apiKey) throw Object.assign(new Error('Anthropic API key not configured'), { status: 500 });
+  const model = modelOverride || 'claude-sonnet-4-6';
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 200,
+      system: 'You generate short smart reply suggestions for team chat. Always return a JSON array of exactly 3 strings.',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const msg = body?.error?.message || `Anthropic API error (${response.status})`;
+    throw Object.assign(new Error(msg), { status: 502 });
+  }
+  const data = await response.json();
+  const text = data?.content?.[0]?.text?.trim();
+  if (!text) throw Object.assign(new Error('Empty response'), { status: 502 });
+  return parseSmartReplies(text);
+};
+
 // ─── Grammar / Autocorrect ───────────────────────────────────────────────────
 const grammarCorrect = async (req, res, next) => {
   try {
@@ -562,10 +653,7 @@ const grammarCorrect = async (req, res, next) => {
     const apiKey = ai.apiKey;
     if (!apiKey) throw Object.assign(new Error('AI API key not configured'), { status: 500 });
 
-    const model = ai.model || 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    const prompt = `You are a grammar and spelling correction tool for a workplace chat app.
+    const grammarPrompt = `You are a grammar and spelling correction tool for a workplace chat app.
 
 Fix grammar, spelling, and punctuation errors in the text below. Keep the SAME language (English stays English, Hinglish stays Hinglish, Hindi stays Hindi).
 
@@ -580,21 +668,60 @@ Rules:
 
 Text: ${text}`;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 500 },
-      }),
-    });
+    let corrected;
 
-    if (!response.ok) {
-      return success(res, { corrected: text, changed: false }, 'Correction unavailable');
+    if (ai.provider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: ai.model || 'claude-sonnet-4-6',
+          max_tokens: 500,
+          messages: [{ role: 'user', content: grammarPrompt }],
+        }),
+      });
+      if (!response.ok) {
+        return success(res, { corrected: text, changed: false }, 'Correction unavailable');
+      }
+      const data = await response.json();
+      corrected = (data?.content?.[0]?.text || '').trim();
+    } else if (ai.provider === 'openai') {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: ai.model || 'gpt-4o-mini',
+          messages: [{ role: 'user', content: grammarPrompt }],
+          temperature: 0.1,
+          max_tokens: 500,
+        }),
+      });
+      if (!response.ok) {
+        return success(res, { corrected: text, changed: false }, 'Correction unavailable');
+      }
+      const data = await response.json();
+      corrected = (data?.choices?.[0]?.message?.content || '').trim();
+    } else {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: grammarPrompt }] }],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 500 },
+        }),
+      });
+      if (!response.ok) {
+        return success(res, { corrected: text, changed: false }, 'Correction unavailable');
+      }
+      const data = await response.json();
+      corrected = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
     }
-
-    const data = await response.json();
-    const corrected = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
 
     if (!corrected || corrected === text.trim()) {
       return success(res, { corrected: text.trim(), changed: false }, 'No correction needed');
