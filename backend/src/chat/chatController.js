@@ -1099,6 +1099,74 @@ const getExchangeInfo = async (req, res, next) => {
   }
 };
 
+// ─── Export Chat ──────────────────────────────────────────────────────────────
+const exportChat = async (req, res, next) => {
+  try {
+    const { userId, orgId } = resolveUser(req);
+    const threadId = req.params.id;
+
+    let messages = [];
+    let chatLabel = 'Chat';
+
+    if (threadId.startsWith('dm-')) {
+      const otherUserId = Number(threadId.replace('dm-', ''));
+      if (!otherUserId) { const e = new Error('Invalid thread id'); e.status = 400; throw e; }
+
+      // Get other user's name
+      const userRes = await db.query('SELECT name FROM users WHERE user_id = $1', [otherUserId]);
+      chatLabel = userRes.rows[0]?.name || `User ${otherUserId}`;
+
+      // Fetch all messages (large limit for export)
+      const rows = await model.getDMMessages(orgId, userId, otherUserId, { limit: 10000 });
+      messages = rows.map((row) => ({
+        sender: Number(row.sender_id) === userId ? 'You' : (row.sender_name || chatLabel),
+        content: row.message || '',
+        type: row.message_type || 'text',
+        time: row.created_at ? new Date(row.created_at).toLocaleString() : '',
+      }));
+    } else if (threadId.startsWith('group-')) {
+      const groupId = Number(threadId.replace('group-', ''));
+      if (!groupId) { const e = new Error('Invalid thread id'); e.status = 400; throw e; }
+
+      const groupRes = await db.query('SELECT group_name FROM groups WHERE group_id = $1', [groupId]);
+      chatLabel = groupRes.rows[0]?.group_name || `Group ${groupId}`;
+
+      const rows = await model.getGroupMessages(orgId, groupId, { limit: 10000, userId });
+      messages = rows.map((row) => ({
+        sender: Number(row.sender_id) === userId ? 'You' : (row.sender_name || 'Unknown'),
+        content: row.message || '',
+        type: row.message_type || 'text',
+        time: row.created_at ? new Date(row.created_at).toLocaleString() : '',
+      }));
+    } else {
+      const e = new Error('Unknown thread type'); e.status = 400; throw e;
+    }
+
+    const lines = [
+      `# Chat Export: ${chatLabel}`,
+      `Exported: ${new Date().toLocaleString()}`,
+      `Messages: ${messages.length}`,
+      '',
+      '---',
+      '',
+    ];
+
+    for (const msg of messages) {
+      const typeTag = msg.type !== 'text' ? ` [${msg.type}]` : '';
+      lines.push(`**${msg.sender}** (${msg.time})${typeTag}:`);
+      lines.push(msg.content || `[${msg.type}]`);
+      lines.push('');
+    }
+
+    const text = lines.join('\n');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="chat-export-${threadId}.txt"`);
+    return res.send(text);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   getOrganizations,
   getThreads,
@@ -1116,4 +1184,5 @@ module.exports = {
   getGroupTimeline,
   getGroupInfo,
   getExchangeInfo,
+  exportChat,
 };

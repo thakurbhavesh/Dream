@@ -11,6 +11,9 @@ import { TypingIndicatorProvider } from "../../contexts/TypingIndicatorContext.j
 import { ScreenShareProvider } from "../../contexts/ScreenShareContext.jsx";
 import ScreenShareRequestDialog from "../../components/screenshare/ScreenShareRequestDialog.jsx";
 import ScreenShareOverlay from "../../components/screenshare/ScreenShareOverlay.jsx";
+import { CallProvider } from "../../contexts/CallContext.jsx";
+import CallRequestDialog from "../../components/call/CallRequestDialog.jsx";
+import CallOverlay from "../../components/call/CallOverlay.jsx";
 import { appBrandingAssets } from "../../data/CommonData.js";
 
 const OutletFallback = () => {
@@ -145,25 +148,29 @@ const DashboardLayout = () => {
           <ChatLockProvider>
             <TypingIndicatorProvider>
               <ScreenShareProvider>
-                <Stack direction="column">
-                  <TopBar />
-                  <Stack
-                    direction="row"
-                    height={`calc(100vh - 39px)`}
-                    overflow={"hidden"}
-                  >
-                    {/* sidebar  */}
-                    <SideBar />
-                    <Suspense fallback={<OutletFallback />}>
-                      <KeepAliveOutlet
-                        keepAlivePaths={["/app"]}
-                        containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
-                      />
-                    </Suspense>
+                <CallProvider>
+                  <Stack direction="column">
+                    <TopBar />
+                    <Stack
+                      direction="row"
+                      height={`calc(100vh - 39px)`}
+                      overflow={"hidden"}
+                    >
+                      {/* sidebar  */}
+                      <SideBar />
+                      <Suspense fallback={<OutletFallback />}>
+                        <KeepAliveOutlet
+                          keepAlivePaths={["/app"]}
+                          containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
+                        />
+                      </Suspense>
+                    </Stack>
                   </Stack>
-                </Stack>
-                <ScreenShareRequestDialog />
-                <ScreenShareOverlay />
+                  <ScreenShareRequestDialog />
+                  <ScreenShareOverlay />
+                  <CallRequestDialog />
+                  <CallOverlay />
+                </CallProvider>
               </ScreenShareProvider>
             </TypingIndicatorProvider>
           </ChatLockProvider>

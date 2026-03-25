@@ -33,6 +33,9 @@ router.post('/groups/:groupId/leave',    auth, controller.leaveGroup);
 router.get('/groups/:groupId/timeline',  auth, controller.getGroupTimeline);
 router.get('/groups/:groupId/info',      auth, controller.getGroupInfo);
 
+// Export chat as text file
+router.get('/threads/:id/export',   auth, controller.exportChat);
+
 // Exchange info — message/file/image/video counts with date filter
 router.get('/exchange-info',             auth, controller.getExchangeInfo);
 

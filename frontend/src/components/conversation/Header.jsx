@@ -21,6 +21,7 @@ import { agentSelfId } from "../../data/CommonData.js";
 import { useTypingIndicator } from "../../contexts/TypingIndicatorContext.jsx";
 import { usePresence } from "../../contexts/PresenceProvider.jsx";
 import { useScreenShareContext } from "../../contexts/ScreenShareContext.jsx";
+import { useCallContext } from "../../contexts/CallContext.jsx";
 import { closeSidebar, openSidebar } from "../../redux/slices/app.js";
 import {
   PiCopySimple,
@@ -31,6 +32,9 @@ import {
   PiUserCircle,
   PiMonitor,
   PiUsersThreeBold,
+  PiPhone,
+  PiVideoCamera,
+  PiExport,
 } from "react-icons/pi";
 import { BsSearch } from "react-icons/bs";
 import {
@@ -40,6 +44,7 @@ import {
   FaRegWindowMaximize,
 } from "react-icons/fa";
 import { resolveLatestDeviceIndicator } from "../../utils/deviceDetect.js";
+import ExportChatDialog from "./ExportChatDialog.jsx";
 
 const SELF_THREAD_ID = "thread-self";
 const SELF_INITIALS = "MY";
@@ -68,6 +73,9 @@ const ConversationHeader = ({
   const sidebarOpen = useSelector((state) => state.app.sidebar.open);
   const { status: presenceStatus } = usePresence();
   const { requestScreenShare, status: screenShareStatus } = useScreenShareContext();
+  const { startCall, status: callStatus } = useCallContext();
+
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const { isActive: isTyping, summary: typingSummary } = useTypingIndicator(
     thread?.id
   );
@@ -178,11 +186,13 @@ const ConversationHeader = ({
     setMenuAnchorEl(null);
   };
 
+  const isDmThread = !isSelfThread && !isGroupThread && thread?.id?.startsWith?.("dm-");
+
   const canScreenShare =
-    !isSelfThread &&
-    !isGroupThread &&
-    screenShareStatus === "idle" &&
-    thread?.id?.startsWith?.("dm-");
+    isDmThread && screenShareStatus === "idle";
+
+  const canCall =
+    isDmThread && callStatus === "idle";
 
   const handleMenuAction = (label) => {
     if (label === "View Profile") {
@@ -190,6 +200,8 @@ const ConversationHeader = ({
     } else if (label === "Screen Share" && canScreenShare) {
       const targetUserId = thread.id.replace("dm-", "");
       requestScreenShare(targetUserId);
+    } else if (label === "Export Chat") {
+      setExportDialogOpen(true);
     }
     closeMenu();
   };
@@ -380,7 +392,33 @@ const ConversationHeader = ({
         selectionToolbar
       ) : (
         // render all elements in header right side by default
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          {canCall && (
+            <>
+              <Tooltip title="Audio Call" placement="bottom">
+                <IconButton
+                  onClick={() => {
+                    const targetUserId = thread.id.replace("dm-", "");
+                    startCall(targetUserId, "audio", displayLabel);
+                  }}
+                  sx={{ color: theme.palette.text.primary }}
+                >
+                  <PiPhone size={18} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Video Call" placement="bottom">
+                <IconButton
+                  onClick={() => {
+                    const targetUserId = thread.id.replace("dm-", "");
+                    startCall(targetUserId, "video", displayLabel);
+                  }}
+                  sx={{ color: theme.palette.text.primary }}
+                >
+                  <PiVideoCamera size={18} />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
           <Tooltip title="Press Ctrl+F" placement="bottom">
             <IconButton
               onClick={() => onSearchToggle?.()}
@@ -439,6 +477,15 @@ const ConversationHeader = ({
             </Box>
             Screen Share
           </MenuItem>
+          <MenuItem onClick={() => handleMenuAction("Export Chat")}>
+            <Box
+              component="span"
+              sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}
+            >
+              <PiExport size={16} />
+            </Box>
+            Export Chat
+          </MenuItem>
         </Stack>
       </Popover>
 
@@ -480,6 +527,13 @@ const ConversationHeader = ({
           </Stack>
         </Stack>
       </Popover>
+
+      <ExportChatDialog
+        open={exportDialogOpen}
+        onClose={() => setExportDialogOpen(false)}
+        threadId={thread?.id}
+        threadLabel={displayLabel}
+      />
     </Stack>
   );
 };

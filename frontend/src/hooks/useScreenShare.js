@@ -348,12 +348,28 @@ const useScreenShare = () => {
     [socket, createPeerConnection]
   );
 
-  // ─── Socket event listeners ────────────────────────────────────────────────
+  // Keep refs to latest callbacks so socket listeners don't need to re-attach
+  const startSenderFlowRef = useRef(startSenderFlow);
+  const handleSignalRef = useRef(handleSignal);
+  const cleanupRef = useRef(cleanup);
+  useEffect(() => { startSenderFlowRef.current = startSenderFlow; }, [startSenderFlow]);
+  useEffect(() => { handleSignalRef.current = handleSignal; }, [handleSignal]);
+  useEffect(() => { cleanupRef.current = cleanup; }, [cleanup]);
+
+  // ─── Socket event listeners (only re-attach when socket changes) ──────────
   useEffect(() => {
-    if (!socket) return;
+    if (!socket) {
+      console.log("[screenshare] no socket, skipping listeners");
+      return;
+    }
+    console.log("[screenshare] attaching socket listeners, socket.id=", socket.id);
 
     const onIncomingRequest = (data) => {
-      if (statusRef.current !== "idle") return; // busy
+      console.log("[screenshare] incoming_request received:", data, "current status:", statusRef.current);
+      if (statusRef.current !== "idle") {
+        console.log("[screenshare] ignoring incoming — not idle");
+        return;
+      }
       setStatus("incoming");
       setRole("viewer");
       setPeerUserId(String(data.fromUserId));
@@ -362,22 +378,22 @@ const useScreenShare = () => {
 
     const onAccepted = (data) => {
       if (statusRef.current !== "requesting") return;
-      startSenderFlow(String(data.fromUserId), data.fromUserName || "Unknown");
+      startSenderFlowRef.current(String(data.fromUserId), data.fromUserName || "Unknown");
     };
 
     const onRejected = () => {
       if (statusRef.current === "requesting") {
         setError("Screen share request declined");
-        cleanup();
+        cleanupRef.current();
       }
     };
 
     const onSignal = (data) => {
-      handleSignal(String(data.fromUserId), data.signalData);
+      handleSignalRef.current(String(data.fromUserId), data.signalData);
     };
 
     const onStopped = () => {
-      cleanup();
+      cleanupRef.current();
     };
 
     const onControlRequest = (data) => {
@@ -416,7 +432,7 @@ const useScreenShare = () => {
       socket.off("screenshare:control-granted", onControlGranted);
       socket.off("screenshare:control-revoked", onControlRevoked);
     };
-  }, [socket, startSenderFlow, handleSignal, cleanup]);
+  }, [socket]); // Only re-attach when socket itself changes
 
   // Cleanup on unmount
   useEffect(() => cleanup, [cleanup]);

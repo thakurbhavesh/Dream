@@ -11,16 +11,16 @@ import {
   Typography,
   useTheme,
 } from "@mui/material";
-import { PiMonitor } from "react-icons/pi";
-import { useScreenShareContext } from "../../contexts/ScreenShareContext.jsx";
-import { playScreenShareAlert } from "../../utils/callSounds.js";
+import { PiPhone, PiVideoCamera } from "react-icons/pi";
+import { useCallContext } from "../../contexts/CallContext.jsx";
+import { startIncomingRingtone, stopIncomingRingtone } from "../../utils/callSounds.js";
 
 const AUTO_DISMISS_MS = 30_000;
 
-const ScreenShareRequestDialog = () => {
+const CallRequestDialog = () => {
   const theme = useTheme();
-  const { status, peerUserName, acceptScreenShare, rejectScreenShare } =
-    useScreenShareContext();
+  const { status, callType, peerUserName, acceptCall, rejectCall } =
+    useCallContext();
 
   const open = status === "incoming";
   const timerRef = useRef(null);
@@ -41,24 +41,32 @@ const ScreenShareRequestDialog = () => {
       setProgress(remaining);
       if (remaining <= 0) {
         clearInterval(timerRef.current);
-        rejectScreenShare();
+        rejectCall();
       }
     }, 100);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [open, rejectScreenShare]);
+  }, [open, rejectCall]);
 
-  // Play screen share alert sound
+  // Play incoming call ringtone
   useEffect(() => {
-    if (open) playScreenShareAlert();
+    if (open) {
+      startIncomingRingtone();
+    } else {
+      stopIncomingRingtone();
+    }
+    return () => stopIncomingRingtone();
   }, [open]);
+
+  const isVideo = callType === "video";
+  const Icon = isVideo ? PiVideoCamera : PiPhone;
 
   return (
     <Dialog
       open={open}
-      onClose={rejectScreenShare}
+      onClose={rejectCall}
       maxWidth="xs"
       fullWidth
       PaperProps={{
@@ -74,7 +82,9 @@ const ScreenShareRequestDialog = () => {
         sx={{
           height: 3,
           "& .MuiLinearProgress-bar": {
-            backgroundColor: theme.palette.primary.main,
+            backgroundColor: isVideo
+              ? theme.palette.info.main
+              : theme.palette.success.main,
           },
         }}
       />
@@ -82,38 +92,45 @@ const ScreenShareRequestDialog = () => {
         <Stack spacing={2} alignItems="center">
           <Avatar
             sx={{
-              width: 64,
-              height: 64,
-              bgcolor: theme.palette.primary.main,
+              width: 72,
+              height: 72,
+              bgcolor: isVideo
+                ? theme.palette.info.main
+                : theme.palette.success.main,
               color: "#fff",
-              fontSize: 28,
+              fontSize: 32,
+              animation: "pulse 1.5s ease-in-out infinite",
+              "@keyframes pulse": {
+                "0%": { boxShadow: `0 0 0 0 ${isVideo ? "rgba(33,150,243,0.4)" : "rgba(76,175,80,0.4)"}` },
+                "70%": { boxShadow: `0 0 0 16px ${isVideo ? "rgba(33,150,243,0)" : "rgba(76,175,80,0)"}` },
+                "100%": { boxShadow: `0 0 0 0 ${isVideo ? "rgba(33,150,243,0)" : "rgba(76,175,80,0)"}` },
+              },
             }}
           >
-            <PiMonitor />
+            <Icon />
           </Avatar>
           <Typography variant="h6" fontWeight={600}>
-            Screen Share Request
+            Incoming {isVideo ? "Video" : "Audio"} Call
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <strong>{peerUserName || "Someone"}</strong> wants to share their
-            screen with you
+            <strong>{peerUserName || "Someone"}</strong> is calling you
           </Typography>
         </Stack>
       </DialogContent>
       <DialogActions sx={{ justifyContent: "center", pb: 3, gap: 2 }}>
         <Button
-          variant="outlined"
-          color="inherit"
-          onClick={rejectScreenShare}
-          sx={{ minWidth: 110 }}
+          variant="contained"
+          color="error"
+          onClick={rejectCall}
+          sx={{ minWidth: 110, borderRadius: 6 }}
         >
           Decline
         </Button>
         <Button
           variant="contained"
-          color="primary"
-          onClick={acceptScreenShare}
-          sx={{ minWidth: 110 }}
+          color="success"
+          onClick={acceptCall}
+          sx={{ minWidth: 110, borderRadius: 6 }}
         >
           Accept
         </Button>
@@ -122,4 +139,4 @@ const ScreenShareRequestDialog = () => {
   );
 };
 
-export default ScreenShareRequestDialog;
+export default CallRequestDialog;

@@ -507,6 +507,7 @@ const onConnection = (socket) => {
     recall:  createRateLimiter(5, 10_000),    // 5 recalls per 10s
     del:     createRateLimiter(10, 10_000),   // 10 deletes per 10s
     forward: createRateLimiter(10, 10_000),   // 10 forwards per 10s
+    call:        createRateLimiter(10, 10_000), // 10 call actions per 10s
     screenshare: createRateLimiter(10, 10_000), // 10 screenshare actions per 10s
     signal:      createRateLimiter(50, 10_000), // 50 WebRTC signaling msgs per 10s
     annotate:    createRateLimiter(60, 1_000),  // 60 annotation strokes per 1s
@@ -1324,6 +1325,88 @@ const onConnection = (socket) => {
       }
     } catch (err) {
       console.error('[socket] typing:stop error', err.message);
+    }
+  });
+
+  // ─── Audio/Video Call (WebRTC signaling relay) ──────────────────────────────
+
+  socket.on('call:request', async (data, ack) => {
+    if (!rl.call()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, callType } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      if (String(targetUserId) === userId) return ack?.({ error: 'Cannot call yourself' });
+      if (!isUserOnline(String(targetUserId))) return ack?.({ error: 'User is offline' });
+      emitToUser(String(targetUserId), 'call:incoming_request', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+        callType: callType || 'audio',
+        timestamp: new Date().toISOString(),
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] call:request error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('call:accept', async (data, ack) => {
+    if (!rl.call()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'call:accepted', {
+        fromUserId: userId,
+        fromUserName: socket.user.name || 'Unknown',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('call:reject', async (data, ack) => {
+    if (!rl.call()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, reason } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'call:rejected', {
+        fromUserId: userId,
+        reason: reason || 'declined',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('call:signal', async (data, ack) => {
+    if (!rl.signal()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, signalData } = data || {};
+      if (!targetUserId || !signalData) return ack?.({ error: 'targetUserId and signalData required' });
+      emitToUser(String(targetUserId), 'call:signal', {
+        fromUserId: userId,
+        signalData,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('call:stop', async (data, ack) => {
+    if (!rl.call()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { targetUserId, reason } = data || {};
+      if (!targetUserId) return ack?.({ error: 'targetUserId required' });
+      emitToUser(String(targetUserId), 'call:stopped', {
+        fromUserId: userId,
+        reason: reason || 'ended',
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
     }
   });
 
