@@ -1,11 +1,14 @@
-import { Box, IconButton, Stack, Typography, useTheme } from "@mui/material";
+import { Box, CircularProgress, IconButton, Stack, Tooltip, Typography, useTheme } from "@mui/material";
 import { alpha, lighten } from "@mui/material/styles";
 import { useEffect, useRef, useState } from "react";
 import {
   PiArrowSquareOutBold,
+  PiCopySimpleBold,
   PiPauseFill,
   PiPlayFill,
+  PiTextAaBold,
 } from "react-icons/pi";
+import { transcribeAudio } from "../../../services/chatApi.js";
 
 const formatDuration = (value = 0) => {
   if (!Number.isFinite(value)) return "00:00";
@@ -72,6 +75,9 @@ const AudioMsg = ({ message }) => {
   );
   const [currentTime, setCurrentTime] = useState(0);
   const [seeking, setSeeking] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcription, setTranscription] = useState(null);
+  const [transcriptError, setTranscriptError] = useState(null);
   const trackRef = useRef(null);
   const wasPlayingRef = useRef(false);
 
@@ -149,8 +155,41 @@ const AudioMsg = ({ message }) => {
   const progressFill = theme.palette.success.main;
 
   const playButtonInner = lighten(theme.palette.error.light, 0.3);
-    
   const playButtonIcon = theme.palette.error.dark;
+
+  const handleTranscribe = async () => {
+    if (transcription) {
+      setTranscription(null);
+      return;
+    }
+    setTranscribing(true);
+    setTranscriptError(null);
+    try {
+      const fileKey =
+        message?.content?.fileKey ||
+        message?.content?.file_key ||
+        message?.content?.files?.[0]?.file_key ||
+        message?.content?.files?.[0]?.fileKey ||
+        message?.files?.[0]?.file_key ||
+        null;
+      const result = await transcribeAudio({
+        fileUrl: audioUrl,
+        fileKey,
+        fileName: message?.content?.fileName || "audio.webm",
+      });
+      setTranscription(result.transcription || "No speech detected");
+    } catch (err) {
+      setTranscriptError(err.message || "Transcription failed");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const handleCopyTranscript = () => {
+    if (transcription) {
+      navigator.clipboard.writeText(transcription).catch(() => {});
+    }
+  };
 
   const updateFromClientX = (clientX) => {
     if (!trackRef.current || !audioRef.current) return;
@@ -317,6 +356,35 @@ const AudioMsg = ({ message }) => {
               }}
             />
           </Box>
+          <Tooltip title={transcription ? "Hide text" : "Convert to Text"}>
+            <IconButton
+              onClick={handleTranscribe}
+              disabled={transcribing}
+              size="small"
+              sx={{
+                width: 32,
+                height: 32,
+                color: transcription ? "#fff" : theme.palette.text.secondary,
+                backgroundColor: transcription
+                  ? theme.palette.primary.main
+                  : alpha(theme.palette.common.white, 0.6),
+                border: transcription
+                  ? "none"
+                  : `1px solid ${alpha(theme.palette.divider, 0.5)}`,
+                "&:hover": {
+                  backgroundColor: transcription
+                    ? theme.palette.primary.dark
+                    : alpha(theme.palette.common.white, 0.8),
+                },
+              }}
+            >
+              {transcribing ? (
+                <CircularProgress size={14} color="inherit" />
+              ) : (
+                <PiTextAaBold size={16} />
+              )}
+            </IconButton>
+          </Tooltip>
           <IconButton
             component="a"
             href={audioUrl}
@@ -334,6 +402,41 @@ const AudioMsg = ({ message }) => {
             <PiArrowSquareOutBold size={16} />
           </IconButton>
         </Stack>
+
+        {/* Transcription result */}
+        {transcription && (
+          <Stack
+            spacing={0.5}
+            sx={{
+              mt: 1,
+              p: 1.5,
+              borderRadius: 1,
+              backgroundColor: alpha(theme.palette.primary.main, 0.08),
+              border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+            }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Typography variant="caption" sx={{ fontWeight: 600, color: theme.palette.primary.main }}>
+                Transcription
+              </Typography>
+              <Tooltip title="Copy">
+                <IconButton onClick={handleCopyTranscript} size="small" sx={{ width: 24, height: 24 }}>
+                  <PiCopySimpleBold size={13} />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+            <Typography variant="body2" sx={{ color: "text.primary", lineHeight: 1.5 }}>
+              {transcription}
+            </Typography>
+          </Stack>
+        )}
+
+        {/* Transcription error */}
+        {transcriptError && (
+          <Typography variant="caption" sx={{ mt: 0.5, color: "error.main", display: "block" }}>
+            {transcriptError}
+          </Typography>
+        )}
       </Stack>
     </Box>
   );

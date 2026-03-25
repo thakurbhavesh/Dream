@@ -385,7 +385,7 @@ Last updated: 2026-03-13
   - Configure: API key + model selection
   - Activate/Deactivate: One active at a time, auto-deactivates others
 - **Access:** GET = any user, PATCH = owner only (role_id=1)
-- **Used by:** All AI features — Translate, Summarize, Smart Reply, Grammar, Smart Search, AI Assistant, Tone Adjuster, Semantic Search, Call Notes, Smart Composer
+- **Used by:** All AI features — Translate, Summarize, Smart Reply, Grammar, Smart Search, AI Assistant, Tone Adjuster, Semantic Search, Call Notes, Smart Composer, Voice-to-Text, Auto-Translate
 - **Cache:** Active provider cached 60 seconds to avoid DB hit per AI call
 
 ### User Timezone
@@ -589,6 +589,27 @@ All notifications follow the same pattern: only sent when receiver is **online**
 - **How:** Enable lightning bolt toggle in footer toolbar → type 10+ characters → wait 2 seconds → AI suggests 3 completions → click chip to insert.
 - **API:** `POST /translate/smart-compose` — `{ partialText, context, threadType }` → `{ completions: [string, string, string] }`
 - **UI:** Orange lightning icon toggle in footer toolbar. Completion chips appear above editor (same style as Smart Reply chips). Click to accept.
+
+### AI Voice-to-Text (Audio Transcription)
+- **What:** Convert any audio/voice message to polished text using AI.
+- **How:** Audio message → click "Convert to Text" button (Aa icon) → AI transcribes audio → text appears below player with copy button.
+- **API:** `POST /translate/transcribe-audio` — `{ fileUrl, fileKey, fileName }` → `{ transcription, provider }`
+- **Providers:** OpenAI (Whisper API) for accurate speech-to-text, Gemini (inline audio) for transcription. Anthropic not supported for audio.
+- **UI:** Blue Aa icon button on audio player. Transcription box with primary accent, copy button. Click again to hide.
+
+### AI Translate & Send
+- **What:** Translate typed message to any language before sending. User sees the translated text in the composer, can review/edit, then send normally.
+- **How:** Footer toolbar → green Globe icon → pick language → type message → click **Convert** chip → translated text replaces input → click **Original** to revert → send when ready.
+- **API:** Uses existing `POST /translate` endpoint with selected target language.
+- **UI Flow:**
+  1. Globe icon in toolbar → language picker menu (14 languages)
+  2. Indicator bar appears: `{Language}` | `Change` | `Convert` | `OFF`
+  3. Type any message → click **Convert** → input text replaced with translation
+  4. **Convert** chip becomes **Original** chip (orange) → click to revert to original text
+  5. **Translating...** spinner shown during API call
+  6. Send button works instantly (no delay — translation already done)
+- **Languages:** English, Hindi, Spanish, French, German, Arabic, Chinese, Japanese, Korean, Portuguese, Russian, Italian, Turkish, Urdu.
+- **Persistence:** Selected language saved in localStorage across sessions.
 
 ### Screen Share (WebRTC)
 - **What:** 1:1 screen sharing via WebRTC peer-to-peer.

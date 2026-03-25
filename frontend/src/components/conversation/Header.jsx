@@ -35,6 +35,7 @@ import {
   PiPhone,
   PiVideoCamera,
   PiExport,
+  PiArrowCounterClockwiseBold,
 } from "react-icons/pi";
 import { BsSearch } from "react-icons/bs";
 import {
@@ -66,6 +67,7 @@ const ConversationHeader = ({
   onSelectionCancel,
   onSearchToggle,
   searchOpen = false,
+  onReloadChat,
 }) => {
   const theme = useTheme();
   const dispatch = useDispatch();
@@ -202,6 +204,8 @@ const ConversationHeader = ({
       requestScreenShare(targetUserId);
     } else if (label === "Export Chat") {
       setExportDialogOpen(true);
+    } else if (label === "Reload Chat") {
+      onReloadChat?.();
     }
     closeMenu();
   };
@@ -485,6 +489,15 @@ const ConversationHeader = ({
               <PiExport size={16} />
             </Box>
             Export Chat
+          </MenuItem>
+          <MenuItem onClick={() => handleMenuAction("Reload Chat")}>
+            <Box
+              component="span"
+              sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}
+            >
+              <PiArrowCounterClockwiseBold size={16} />
+            </Box>
+            Reload Chat
           </MenuItem>
         </Stack>
       </Popover>

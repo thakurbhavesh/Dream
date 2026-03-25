@@ -1136,4 +1136,120 @@ Rules:
   }
 };
 
-module.exports = { translate, summarize, smartReply, grammarCorrect, toneAdjust, semanticSearch, generateCallNotes, smartCompose };
+// ─── Transcribe Audio (Voice-to-Text) ─────────────────────────────────────────
+const transcribeAudio = async (req, res, next) => {
+  try {
+    const { fileUrl, fileKey, fileName } = req.body;
+    if (!fileUrl && !fileKey) {
+      const e = new Error('fileUrl or fileKey is required');
+      e.status = 400;
+      throw e;
+    }
+
+    // Resolve audio URL
+    let resolvedUrl = fileUrl;
+    if (fileKey && !resolvedUrl) {
+      const { getPresignedUrl } = require('../config/s3');
+      resolvedUrl = await getPresignedUrl(fileKey);
+    }
+    if (!resolvedUrl) {
+      const e = new Error('Could not resolve audio file URL');
+      e.status = 400;
+      throw e;
+    }
+
+    // Fetch audio as buffer
+    const audioResponse = await fetch(resolvedUrl);
+    if (!audioResponse.ok) {
+      throw Object.assign(new Error(`Failed to fetch audio file: ${audioResponse.status}`), { status: 502 });
+    }
+    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    const contentType = audioResponse.headers.get('content-type') || 'audio/webm';
+    const safeName = fileName || 'audio.webm';
+
+    const ai = await resolveAIProvider();
+
+    let transcription;
+    if (ai.provider === 'openai') {
+      transcription = await transcribeWithOpenAI(audioBuffer, safeName, ai.apiKey);
+    } else if (ai.provider === 'anthropic') {
+      throw Object.assign(new Error('Audio transcription is not supported with Anthropic. Please switch to OpenAI or Gemini in AI Provider settings.'), { status: 400 });
+    } else {
+      transcription = await transcribeWithGemini(audioBuffer, contentType, ai.apiKey, ai.model);
+    }
+
+    return success(res, { transcription, provider: ai.provider }, 'Audio transcribed');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// OpenAI Whisper transcription
+const transcribeWithOpenAI = async (audioBuffer, fileName, apiKey) => {
+  // Build multipart form data manually
+  const boundary = '----FormBoundary' + Date.now().toString(36);
+  const ext = (fileName || '').split('.').pop()?.toLowerCase() || 'webm';
+  const mimeMap = { webm: 'audio/webm', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', flac: 'audio/flac' };
+  const mime = mimeMap[ext] || 'audio/webm';
+
+  const parts = [];
+  // model field
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1`);
+  // file field
+  parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName || 'audio.webm'}"\r\nContent-Type: ${mime}\r\n\r\n`);
+
+  const header = Buffer.from(parts.join('\r\n') + '', 'utf-8');
+  // We need: header bytes + audio buffer + closing boundary
+  const closing = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8');
+  // Actually build proper multipart with Buffer.concat
+  const preFile = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n` +
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName || 'audio.webm'}"\r\nContent-Type: ${mime}\r\n\r\n`,
+    'utf-8'
+  );
+  const postFile = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8');
+  const body = Buffer.concat([preFile, audioBuffer, postFile]);
+
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body,
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw Object.assign(new Error(`OpenAI Whisper API error: ${response.status} ${errText}`), { status: 502 });
+  }
+  const data = await response.json();
+  return (data.text || '').trim();
+};
+
+// Gemini audio transcription (inline audio data)
+const transcribeWithGemini = async (audioBuffer, mimeType, apiKey, modelOverride) => {
+  const model = modelOverride || 'gemini-2.0-flash';
+  const base64 = audioBuffer.toString('base64');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { inline_data: { mime_type: mimeType, data: base64 } },
+          { text: 'Transcribe this audio accurately. Return only the transcribed text, clean and well-punctuated. Do not add any prefix or explanation.' },
+        ],
+      }],
+    }),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw Object.assign(new Error(`Gemini API error: ${response.status} ${errText}`), { status: 502 });
+  }
+  const data = await response.json();
+  return (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+};
+
+module.exports = { translate, summarize, smartReply, grammarCorrect, toneAdjust, semanticSearch, generateCallNotes, smartCompose, transcribeAudio };

@@ -11,9 +11,12 @@ import {
   Box,
   Button,
   Chip,
+  CircularProgress,
   Collapse,
   Divider,
   IconButton,
+  Menu,
+  MenuItem,
   Snackbar,
   Stack,
   Typography,
@@ -22,6 +25,7 @@ import {
 } from "@mui/material";
 import {
   PiCode,
+  PiGlobeSimpleBold,
   PiMagicWand,
   PiMicrophone,
   PiPaperPlaneRight,
@@ -359,6 +363,17 @@ const ConversationFooter = ({
   const [smartComposeEnabled, setSmartComposeEnabled] = useState(false);
   const [composeSuggestions, setComposeSuggestions] = useState([]);
   const composeTimerRef = useRef(null);
+  // Translate before send
+  const [autoTranslateLang, setAutoTranslateLang] = useState(() => {
+    try { return localStorage.getItem("tc_auto_translate_lang") || ""; } catch { return ""; }
+  });
+  const [langMenuAnchor, setLangMenuAnchor] = useState(null);
+  const [translatingNow, setTranslatingNow] = useState(false);
+  const [originalBeforeTranslate, setOriginalBeforeTranslate] = useState(null);
+  const AUTO_TRANSLATE_LANGUAGES = [
+    "English", "Hindi", "Spanish", "French", "German", "Arabic", "Chinese",
+    "Japanese", "Korean", "Portuguese", "Russian", "Italian", "Turkish", "Urdu",
+  ];
   const [isMessageEmpty, setIsMessageEmpty] = useState(true);
   const [isComposerDragActive, setIsComposerDragActive] = useState(false);
   const {
@@ -1902,6 +1917,9 @@ const ConversationFooter = ({
       let attachmentCaption = "";
       let attachmentCaptionHtml = "";
 
+      // Clear translate original state on send
+      setOriginalBeforeTranslate(null);
+
       if (linkSnapshot?.url) {
         const matches = Array.from(
           pendingText.matchAll(LINK_CANDIDATE_REGEX) || []
@@ -2369,6 +2387,83 @@ const ConversationFooter = ({
             />
           </Stack>
         ) : null}
+        {autoTranslateLang ? (
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={0.5}
+            sx={{ px: 1.5, py: 0.5 }}
+          >
+            <PiGlobeSimpleBold size={14} style={{ color: "#2e7d32" }} />
+            <Typography variant="caption" sx={{ color: "#2e7d32", fontWeight: 600 }}>
+              {autoTranslateLang}
+            </Typography>
+            <Chip
+              label="Change"
+              size="small"
+              onClick={(e) => setLangMenuAnchor(e.currentTarget)}
+              sx={{ fontSize: 10, height: 20, cursor: "pointer", color: "#2e7d32", borderColor: "#2e7d32" }}
+              variant="outlined"
+            />
+            {translatingNow ? (
+              <Chip
+                label="Translating..."
+                size="small"
+                icon={<CircularProgress size={10} sx={{ color: "#2e7d32" }} />}
+                sx={{ fontSize: 10, height: 20, color: "#2e7d32", borderColor: "#2e7d32" }}
+                variant="outlined"
+              />
+            ) : originalBeforeTranslate ? (
+              <Chip
+                label="Original"
+                size="small"
+                onClick={() => {
+                  if (editorRef.current) {
+                    editorRef.current.innerText = originalBeforeTranslate;
+                    handleComposerPlainUpdate(originalBeforeTranslate);
+                    handleComposerHtmlUpdate(originalBeforeTranslate);
+                  }
+                  setOriginalBeforeTranslate(null);
+                }}
+                sx={{ fontSize: 10, height: 20, cursor: "pointer", color: theme.palette.warning.main, borderColor: theme.palette.warning.main }}
+                variant="outlined"
+              />
+            ) : (
+              <Chip
+                label="Convert"
+                size="small"
+                onClick={async () => {
+                  const text = editorRef.current?.innerText?.trim() || "";
+                  if (!text || text.length < 2) return;
+                  setTranslatingNow(true);
+                  try {
+                    const { translateText } = await import("../../services/chatApi.js");
+                    const result = await translateText(text, autoTranslateLang);
+                    if (result && result !== text) {
+                      setOriginalBeforeTranslate(text);
+                      editorRef.current.innerText = result;
+                      handleComposerPlainUpdate(result);
+                      handleComposerHtmlUpdate(result);
+                    }
+                  } catch { /* ignore */ }
+                  setTranslatingNow(false);
+                }}
+                sx={{ fontSize: 10, height: 20, cursor: "pointer", color: "#2e7d32", borderColor: "#2e7d32", fontWeight: 600 }}
+                variant="outlined"
+              />
+            )}
+            <Chip
+              label="OFF"
+              size="small"
+              onClick={() => {
+                setAutoTranslateLang("");
+                setOriginalBeforeTranslate(null);
+                try { localStorage.setItem("tc_auto_translate_lang", ""); } catch {}
+              }}
+              sx={{ fontSize: 10, height: 20, cursor: "pointer", color: theme.palette.text.secondary }}
+            />
+          </Stack>
+        ) : null}
         <Box
           sx={{
             display: "flex",
@@ -2556,6 +2651,44 @@ const ConversationFooter = ({
                 <PiLightningBold size={20} />
               </IconButton>
             </Tooltip>
+            <Tooltip title={autoTranslateLang ? `Translate: ${autoTranslateLang}` : "Translate"}>
+              <IconButton
+                disableRipple
+                sx={autoTranslateLang
+                  ? { ...iconButtonStyles, color: "#2e7d32", bgcolor: theme.palette.action.hover }
+                  : iconButtonStyles
+                }
+                onClick={(e) => setLangMenuAnchor(e.currentTarget)}
+              >
+                <PiGlobeSimpleBold size={20} />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              anchorEl={langMenuAnchor}
+              open={Boolean(langMenuAnchor)}
+              onClose={() => setLangMenuAnchor(null)}
+              anchorOrigin={{ vertical: "top", horizontal: "center" }}
+              transformOrigin={{ vertical: "bottom", horizontal: "center" }}
+              slotProps={{ paper: { sx: { maxHeight: 300, minWidth: 160 } } }}
+            >
+              {AUTO_TRANSLATE_LANGUAGES.map((lang) => (
+                <MenuItem
+                  key={lang}
+                  selected={autoTranslateLang === lang}
+                  onClick={() => {
+                    setAutoTranslateLang(lang);
+                    setOriginalBeforeTranslate(null);
+                    setLangMenuAnchor(null);
+                    try {
+                      localStorage.setItem("tc_auto_translate_lang", lang);
+                    } catch {}
+                  }}
+                  sx={{ fontSize: 14 }}
+                >
+                  {lang}
+                </MenuItem>
+              ))}
+            </Menu>
             <Tooltip title="Record video">
               <IconButton
                 disableRipple

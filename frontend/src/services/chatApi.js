@@ -329,6 +329,20 @@ export const fetchSmartCompose = async (partialText, { context = [], threadType 
   return payload?.data?.completions ?? [];
 };
 
+// ─── AI Voice-to-Text (Audio Transcription) ─────────────────────────────────
+export const transcribeAudio = async ({ fileUrl, fileKey, fileName } = {}) => {
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/translate/transcribe-audio`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileUrl, fileKey, fileName }),
+    }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Audio transcription failed");
+  return payload?.data ?? {};
+};
+
 // ─── File Upload ─────────────────────────────────────────────────────────────
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB

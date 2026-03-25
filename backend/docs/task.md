@@ -3,7 +3,8 @@
 - ✅ AI Semantic Search — Search by meaning, not keywords
 - ✅ AI Call Transcription & Notes — Auto meeting notes from calls
 - ✅ AI Smart Composer — Real-time autocomplete as you type
-- ✅ features.md updated with all 4 features + Screen Share + Audio/Video Call + Export Chat
+- ✅ AI Voice-to-Text — Convert audio messages to text using AI (OpenAI Whisper / Gemini)
+- ✅ features.md updated with all 5 features + Screen Share + Audio/Video Call + Export Chat
 
 ---
 

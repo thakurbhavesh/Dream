@@ -1422,6 +1422,12 @@ const GeneralApp = () => {
     loadThread(activeThreadId ?? null);
   }, [activeThreadId, loadThread]);
 
+  const handleReloadChat = useCallback(() => {
+    if (!activeThreadId) return;
+    invalidate(activeThreadId);
+    loadThread(activeThreadId);
+  }, [activeThreadId, invalidate, loadThread]);
+
   useEffect(() => {
     const previousThreadId = previousThreadIdRef.current;
     if (previousThreadId !== activeThreadId && sidebar.open) {
@@ -2938,6 +2944,7 @@ const GeneralApp = () => {
                     onSelectionCancel={exitMultiCopyMode}
                     onSearchToggle={() => setSearchOpen((prev) => !prev)}
                     searchOpen={searchOpen}
+                    onReloadChat={handleReloadChat}
                   />
                   <Box
                     data-conversation-overlay-root="true"
