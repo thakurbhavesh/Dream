@@ -639,7 +639,7 @@ const LiveAssistant = () => {
           </>
           )}
         </Paper>
-      </Slide>
+      )}
     </>
   );
 };

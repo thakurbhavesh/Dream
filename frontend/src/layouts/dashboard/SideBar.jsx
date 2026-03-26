@@ -269,37 +269,54 @@ const SideBar = () => {
 
         <Stack alignItems={"center"} spacing={2.5}>
           <Tooltip title="AI Assistant" placement="right">
-            {assistantOpen ? (
-              <Box
-                sx={{
-                  borderRadius: "50%",
+            <Box
+              sx={{
+                borderRadius: "50%",
+                position: "relative",
+                ...(assistantOpen && {
                   backgroundColor: theme.palette.primary.main,
-                }}
-              >
-                <IconButton
-                  onClick={() => {
-                    setAssistantOpen(false);
-                    window.dispatchEvent(new CustomEvent("teamchatx:assistant", { detail: { open: false } }));
-                  }}
-                  sx={{ color: "#fff" }}
-                >
-                  <PiSparkle size={20} />
-                </IconButton>
-              </Box>
-            ) : (
+                }),
+              }}
+            >
               <IconButton
                 onClick={() => {
-                  setAssistantOpen(true);
-                  window.dispatchEvent(new CustomEvent("teamchatx:assistant", { detail: { open: true } }));
+                  const next = !assistantOpen;
+                  setAssistantOpen(next);
+                  window.dispatchEvent(new CustomEvent("teamchatx:assistant", { detail: { open: next } }));
                 }}
                 sx={{
-                  width: "max-content",
-                  color: theme.palette.mode === "light" ? "#000" : theme.palette.text.primary,
+                  color: assistantOpen ? "#fff" : theme.palette.mode === "light" ? "#000" : theme.palette.text.primary,
+                  transition: "all 0.3s ease",
+                  ...(assistantOpen && {
+                    animation: "sidebar-lamp-active 2s ease-in-out infinite",
+                    "@keyframes sidebar-lamp-active": {
+                      "0%, 100%": { filter: "drop-shadow(0 0 4px rgba(251,191,36,0.4))" },
+                      "50%": { filter: "drop-shadow(0 0 10px rgba(251,191,36,0.7))" },
+                    },
+                  }),
                 }}
               >
                 <PiSparkle size={20} />
               </IconButton>
-            )}
+              {/* Golden lamp glow ring when opening */}
+              {assistantOpen && (
+                <Box
+                  sx={{
+                    position: "absolute",
+                    inset: -4,
+                    borderRadius: "50%",
+                    border: "2px solid rgba(251,191,36,0.5)",
+                    animation: "sidebar-glow-ring 1s ease-out forwards",
+                    "@keyframes sidebar-glow-ring": {
+                      "0%": { transform: "scale(0.5)", opacity: 1, borderColor: "rgba(251,191,36,0.8)" },
+                      "50%": { transform: "scale(1.3)", opacity: 0.6 },
+                      "100%": { transform: "scale(1.6)", opacity: 0, borderColor: "rgba(139,92,246,0)" },
+                    },
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </Box>
           </Tooltip>
           <ToggleButton
             notDefault={true}
