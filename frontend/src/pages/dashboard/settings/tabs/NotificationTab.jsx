@@ -28,6 +28,11 @@ const NotificationTab = ({
   selectedSound,
   onSoundChange,
   onSoundPreview,
+  dndEnabled,
+  onDNDToggle,
+  dndSchedule,
+  onDNDScheduleToggle,
+  onDNDScheduleChange,
 }) => {
   const theme = useTheme();
   const normalizedBrowser = (browserPermission || "unknown").toLowerCase();
@@ -262,6 +267,75 @@ const NotificationTab = ({
               </Stack>
             );
           })}
+        </Stack>
+      </Paper>
+
+      {/* ─── Do Not Disturb ─────────────────────────────────────────── */}
+      <Paper sx={{ p: 2.5, borderRadius: 2 }}>
+        <Stack spacing={2}>
+          <Typography variant="subtitle1" fontWeight={700}>
+            Do Not Disturb
+          </Typography>
+
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack>
+              <Typography fontWeight={600}>DND Mode</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Silence all notification sounds and popups
+              </Typography>
+            </Stack>
+            <Switch
+              checked={!!dndEnabled}
+              onChange={() => onDNDToggle?.(!dndEnabled)}
+              color="error"
+              inputProps={{ "aria-label": "Do Not Disturb" }}
+            />
+          </Stack>
+
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Stack>
+              <Typography fontWeight={600}>Scheduled DND</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Automatically enable DND during set hours
+              </Typography>
+            </Stack>
+            <Switch
+              checked={!!dndSchedule?.active}
+              onChange={() => onDNDScheduleToggle?.(!dndSchedule?.active)}
+              color="primary"
+              inputProps={{ "aria-label": "Scheduled DND" }}
+            />
+          </Stack>
+
+          {dndSchedule?.active && (
+            <Stack direction="row" spacing={2} alignItems="center">
+              <FormControl size="small" sx={{ minWidth: 110 }}>
+                <InputLabel>Start</InputLabel>
+                <Select
+                  value={dndSchedule?.startTime || "22:00"}
+                  label="Start"
+                  onChange={(e) => onDNDScheduleChange?.({ ...dndSchedule, startTime: e.target.value })}
+                >
+                  {Array.from({ length: 24 }, (_, h) => [`${String(h).padStart(2, "0")}:00`, `${String(h).padStart(2, "0")}:30`]).flat().map((t) => (
+                    <MenuItem key={t} value={t}>{t}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Typography variant="body2">to</Typography>
+              <FormControl size="small" sx={{ minWidth: 110 }}>
+                <InputLabel>End</InputLabel>
+                <Select
+                  value={dndSchedule?.endTime || "07:00"}
+                  label="End"
+                  onChange={(e) => onDNDScheduleChange?.({ ...dndSchedule, endTime: e.target.value })}
+                >
+                  {Array.from({ length: 24 }, (_, h) => [`${String(h).padStart(2, "0")}:00`, `${String(h).padStart(2, "0")}:30`]).flat().map((t) => (
+                    <MenuItem key={t} value={t}>{t}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+          )}
         </Stack>
       </Paper>
     </Stack>

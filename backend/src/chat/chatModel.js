@@ -290,6 +290,7 @@ const getDMMessages = async (orgId, userId, otherUserId, { limit = 50, before } 
       JOIN users s ON s.user_id = m.sender_id
       WHERE m.organization_id = $1 AND m.sender_id = $2 AND m.receiver_id = $3
         AND m.message IS NOT NULL
+        AND (m.expires_at IS NULL OR m.expires_at > NOW())
         ${beforeClause}
       ORDER BY m.send_time DESC
       LIMIT $4
@@ -306,6 +307,7 @@ const getDMMessages = async (orgId, userId, otherUserId, { limit = 50, before } 
         JOIN users r ON r.user_id = m.receiver_id
         WHERE m.organization_id = $1 AND m.sender_id = $2 AND m.receiver_id = $3
           AND m.message IS NOT NULL
+          AND (m.expires_at IS NULL OR m.expires_at > NOW())
           ${beforeClause}
         UNION ALL
         SELECT
@@ -318,6 +320,7 @@ const getDMMessages = async (orgId, userId, otherUserId, { limit = 50, before } 
         JOIN users r ON r.user_id = m.receiver_id
         WHERE m.organization_id = $1 AND m.sender_id = $3 AND m.receiver_id = $2
           AND m.message IS NOT NULL
+          AND (m.expires_at IS NULL OR m.expires_at > NOW())
           ${beforeClause}
       ) combined
       ORDER BY send_time DESC
@@ -428,6 +431,7 @@ const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId, le
     WHERE gm.organization_id = $1
       AND gm.group_id = $2
       AND gm.message IS NOT NULL
+      AND (gm.expires_at IS NULL OR gm.expires_at > NOW())
       ${beforeClause}
     ORDER BY gm.created_at DESC
     LIMIT $3
@@ -666,36 +670,51 @@ const markGroupMessagesRead = async (orgId, groupId, userId) => {
 
 const editDMMessage = async (messageId, orgId, senderId, newMessage) => {
   const encryptedMsg = encryptMessage(newMessage);
-  // Read existing metadata, decrypt, add edited flag, re-encrypt
-  const { rows: metaRows } = await db.query(
-    `SELECT message_metadata FROM messages WHERE message_id = $1 AND organization_id = $2 AND sender_id = $3`,
-    [messageId, orgId, senderId]
-  );
-  const existingMeta = metaRows[0]?.message_metadata
-    ? decryptMetadata(metaRows[0].message_metadata)
-    : {};
-  const editHistory = Array.isArray(existingMeta.editHistory) ? existingMeta.editHistory : [];
-  editHistory.push({ editedAt: new Date().toISOString() });
-  const mergedMeta = { ...existingMeta, edited: true, editHistory };
-  const encMeta = encryptMetadata(mergedMeta);
+  // Use transaction with row lock to prevent edit history race condition
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: metaRows } = await client.query(
+      `SELECT message_metadata FROM messages
+       WHERE message_id = $1 AND organization_id = $2 AND sender_id = $3
+       FOR UPDATE`,
+      [messageId, orgId, senderId]
+    );
+    if (!metaRows[0]) { await client.query('ROLLBACK'); return null; }
 
-  const { rows } = await db.query(
-    `WITH updated AS (
-      UPDATE messages
-      SET message = $1, message_metadata = $2::jsonb, edit_time = NOW(), updated_at = NOW()
-      WHERE message_id = $3 AND organization_id = $4 AND sender_id = $5
-      RETURNING *
-    )
-    SELECT updated.*, u.name AS sender_name, u.profile_url AS sender_avatar
-    FROM updated
-    JOIN users u ON u.user_id = updated.sender_id`,
-    [encryptedMsg, encMeta, messageId, orgId, senderId]
-  );
-  if (rows[0]) {
-    rows[0].message = decryptMessage(rows[0].message);
-    rows[0].message_metadata = decryptMetadata(rows[0].message_metadata);
+    const existingMeta = metaRows[0].message_metadata
+      ? decryptMetadata(metaRows[0].message_metadata)
+      : {};
+    const editHistory = Array.isArray(existingMeta.editHistory) ? existingMeta.editHistory : [];
+    editHistory.push({ editedAt: new Date().toISOString() });
+    const mergedMeta = { ...existingMeta, edited: true, editHistory };
+    const encMeta = encryptMetadata(mergedMeta);
+
+    const { rows } = await client.query(
+      `WITH updated AS (
+        UPDATE messages
+        SET message = $1, message_metadata = $2::jsonb, edit_time = NOW(), updated_at = NOW()
+        WHERE message_id = $3 AND organization_id = $4 AND sender_id = $5
+        RETURNING *
+      )
+      SELECT updated.*, u.name AS sender_name, u.profile_url AS sender_avatar
+      FROM updated
+      JOIN users u ON u.user_id = updated.sender_id`,
+      [encryptedMsg, encMeta, messageId, orgId, senderId]
+    );
+    await client.query('COMMIT');
+
+    if (rows[0]) {
+      rows[0].message = decryptMessage(rows[0].message);
+      rows[0].message_metadata = decryptMetadata(rows[0].message_metadata);
+    }
+    return rows[0] || null;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
-  return rows[0] || null;
 };
 
 const deleteDMMessage = async (messageId, orgId, userId) => {

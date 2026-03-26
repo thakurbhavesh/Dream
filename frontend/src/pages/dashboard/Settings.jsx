@@ -52,6 +52,7 @@ import { API_BASE_URL } from "../../config/apiBaseUrl";
 import authStore from "../../utils/auth";
 import { fetchWithAuth } from "../../utils/authApi";
 import { getClientDeviceId } from "../../utils/deviceId";
+import useDND from "../../hooks/useDND";
 
 // Keep the sidebar items declarative so adding a tab only requires updating this array.
 const TAB_ITEMS = [
@@ -348,6 +349,7 @@ const Settings = () => {
   const avatarInputRef = useRef(null);
   const passwordLogoutTimerRef = useRef(null);
   const [activeTab, setActiveTab] = useState("profile");
+  const { isDND, toggleDND, dndState, setDNDSchedule } = useDND();
   const storedPermissionsRaw = useSecureStorageValue(
     SETTINGS_STORAGE_KEYS.permissions,
     JSON.stringify(DEFAULT_PERMISSIONS)
@@ -1309,6 +1311,11 @@ const Settings = () => {
             selectedSound={notificationSound}
             onSoundChange={handleNotificationSoundChange}
             onSoundPreview={handleNotificationSoundPreview}
+            dndEnabled={isDND}
+            onDNDToggle={toggleDND}
+            dndSchedule={dndState.schedule}
+            onDNDScheduleToggle={(active) => setDNDSchedule(active ? (dndState.schedule || { active: true, startTime: "22:00", endTime: "07:00", days: [0,1,2,3,4,5,6] }) : null)}
+            onDNDScheduleChange={(field, value) => setDNDSchedule({ ...(dndState.schedule || {}), [field]: value })}
           />
         );
       default:

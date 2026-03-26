@@ -37,6 +37,9 @@ import {
   PiTextUnderline,
   PiVideoCamera,
   PiLightningBold,
+  PiGifBold,
+  PiMicrophoneBold,
+  PiClockBold,
 } from "react-icons/pi";
 import { TbDragDrop } from "react-icons/tb";
 import useComposerActions from "./useComposerActions.js";
@@ -69,6 +72,9 @@ import {
 } from "./messages/helpers.js";
 import { threadService } from "../../services/threadService.js";
 import { sanitizeComposerHtml } from "../../utils/richTextSanitizer.js";
+import GifPickerPanel from "./gif/GifPickerPanel.jsx";
+import ScheduleMessagePicker from "./ScheduleMessagePicker.jsx";
+import useSpeechToText from "../../hooks/useSpeechToText.js";
 
 const MemoizedAttachmentTray = React.memo(AttachmentTray);
 const MemoizedEmojiPickerPanel = React.memo(EmojiPickerPanel);
@@ -376,6 +382,35 @@ const ConversationFooter = ({
   ];
   const [isMessageEmpty, setIsMessageEmpty] = useState(true);
   const [isComposerDragActive, setIsComposerDragActive] = useState(false);
+  // GIF picker
+  const [isGifPickerOpen, setIsGifPickerOpen] = useState(false);
+  const [gifAvailable, setGifAvailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { fetchWithAuth } = await import("../../utils/authApi.js");
+        const { API_BASE_URL } = await import("../../config/apiBaseUrl.js");
+        const { payload } = await fetchWithAuth(`${API_BASE_URL}/gifs/status`);
+        if (!cancelled) setGifAvailable(!!payload?.available);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  // Schedule send
+  const [scheduleAnchor, setScheduleAnchor] = useState(null);
+  // Voice-to-text
+  const editorRefForSpeech = useRef(null);
+  const speechToText = useSpeechToText({
+    onResult: (text) => {
+      const editor = editorRefForSpeech.current;
+      if (editor && text) {
+        const current = editor.innerText || "";
+        editor.focus();
+        document.execCommand("insertText", false, (current ? " " : "") + text);
+      }
+    },
+  });
   const {
     isOpen: isEmojiPickerOpen,
     closePicker,
@@ -485,6 +520,8 @@ const ConversationFooter = ({
   );
 
   const editorRef = useRef(null);
+  // Keep speech-to-text in sync with editorRef
+  editorRefForSpeech.current = editorRef.current;
   const editorSyncRafRef = useRef(null);
   const fileInputRef = useRef(null);
   const handleAddMoreAttachments = useCallback(() => {
@@ -2149,6 +2186,43 @@ const ConversationFooter = ({
         onClose={closePicker}
         onSelectEmoji={handleEmojiInsert}
       />
+      <GifPickerPanel
+        open={isGifPickerOpen}
+        onClose={() => setIsGifPickerOpen(false)}
+        onSelect={(gif) => {
+          onSendMessages?.(threadId, [{
+            message: gif.gifUrl,
+            type: "gif",
+            metadata: gif,
+          }]);
+          setIsGifPickerOpen(false);
+        }}
+      />
+      <ScheduleMessagePicker
+        anchorEl={scheduleAnchor}
+        open={Boolean(scheduleAnchor)}
+        onClose={() => setScheduleAnchor(null)}
+        onSchedule={(sendAt) => {
+          const editor = editorRef.current;
+          const text = editor?.innerText?.trim() || "";
+          if (!text) {
+            showSnackbar?.("Type a message first", "warning");
+            return;
+          }
+          // Send as special scheduled message — GeneralApp will intercept metadata.sendAt
+          onSendMessages?.(threadId, [{
+            id: `sched-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            message: text,
+            content: { text },
+            type: "text",
+            direction: "outgoing",
+            status: "queued",
+            metadata: { scheduled: true, sendAt },
+          }]);
+          if (editor) { editor.innerHTML = ""; editor.dispatchEvent(new Event("input", { bubbles: true })); }
+          showSnackbar?.("Message scheduled!", "success");
+        }}
+      />
       <MemoizedAttachmentTray
         attachments={attachments}
         onAddMore={handleAddMoreAttachments}
@@ -2520,23 +2594,45 @@ const ConversationFooter = ({
             ) : null}
           </Box>
 
-          <IconButton
-            disableRipple
-            sx={{
-              alignSelf: "flex-start",
-              width: 45,
-              height: 45,
-              borderRadius: 1.5,
-              backgroundColor: "primary.main",
-              color: "#fff",
-              "&:hover": {
-                backgroundColor: "primary.dark",
-              },
-            }}
-            onClick={handleSendMessage}
-          >
-            <PiPaperPlaneRight size={20} />
-          </IconButton>
+          <Stack direction="row" spacing={0} alignItems="flex-start">
+            <IconButton
+              disableRipple
+              sx={{
+                alignSelf: "flex-start",
+                width: 45,
+                height: 45,
+                borderRadius: "6px 0 0 6px",
+                backgroundColor: "primary.main",
+                color: "#fff",
+                "&:hover": {
+                  backgroundColor: "primary.dark",
+                },
+              }}
+              onClick={handleSendMessage}
+            >
+              <PiPaperPlaneRight size={20} />
+            </IconButton>
+            <Tooltip title="Schedule send">
+              <IconButton
+                disableRipple
+                sx={{
+                  alignSelf: "flex-start",
+                  width: 24,
+                  height: 45,
+                  borderRadius: "0 6px 6px 0",
+                  backgroundColor: "primary.main",
+                  color: "#fff",
+                  "&:hover": {
+                    backgroundColor: "primary.dark",
+                  },
+                  borderLeft: "1px solid rgba(255,255,255,0.3)",
+                }}
+                onClick={(e) => setScheduleAnchor(e.currentTarget)}
+              >
+                <PiClockBold size={14} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Box>
         <Divider sx={{ borderColor: theme.palette.grey[500_56] }} />
 
@@ -2567,6 +2663,41 @@ const ConversationFooter = ({
                 <PiSmiley size={20} />
               </IconButton>
             </Tooltip>
+
+            {gifAvailable && (
+            <Tooltip title="GIF">
+              <IconButton
+                disableRipple
+                sx={getFormatButtonStyles(isGifPickerOpen)}
+                onClick={() => setIsGifPickerOpen((v) => !v)}
+              >
+                <PiGifBold size={20} />
+              </IconButton>
+            </Tooltip>
+            )}
+
+            {speechToText.isSupported && (
+              <Tooltip title={speechToText.isListening ? "Stop voice input" : "Voice to text"}>
+                <IconButton
+                  disableRipple
+                  sx={{
+                    ...iconButtonStyles,
+                    ...(speechToText.isListening && {
+                      color: theme.palette.error.main,
+                      animation: "pulse 1.5s infinite",
+                      "@keyframes pulse": {
+                        "0%": { opacity: 1 },
+                        "50%": { opacity: 0.5 },
+                        "100%": { opacity: 1 },
+                      },
+                    }),
+                  }}
+                  onClick={() => speechToText.isListening ? speechToText.stopListening() : speechToText.startListening()}
+                >
+                  <PiMicrophoneBold size={20} />
+                </IconButton>
+              </Tooltip>
+            )}
             {verticalDivider}
             <Tooltip title="Bold">
               <IconButton

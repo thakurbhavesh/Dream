@@ -1,5 +1,6 @@
-import { alpha, Avatar, Box, Stack, Typography, useTheme } from "@mui/material";
+import { alpha, Avatar, Box, Menu, MenuItem, ListItemIcon, ListItemText, Stack, Typography, useTheme } from "@mui/material";
 import React, { useCallback, useMemo, useState } from "react";
+import { PiBellSlashBold, PiBellBold } from "react-icons/pi";
 import { FiPaperclip } from "react-icons/fi";
 import { IoCheckmark, IoCheckmarkDone } from "react-icons/io5";
 import {
@@ -334,11 +335,20 @@ const ChatElement = ({
   disabled = false,
   isLocked = false,
   onDropFiles,
+  isMuted = false,
+  onMute,
+  onUnmute,
 }) => {
   const theme = useTheme();
   const { status: presenceStatus } = usePresence();
   const threadsArray = thread?.threads;
   const [isDragOver, setIsDragOver] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState(null);
+
+  const handleContextMenu = useCallback((e) => {
+    e.preventDefault();
+    setCtxMenu({ mouseX: e.clientX, mouseY: e.clientY });
+  }, []);
 
   const activeNestedThread = useMemo(() => {
     if (!Array.isArray(threadsArray) || threadsArray.length === 0) {
@@ -542,6 +552,7 @@ const ChatElement = ({
   return (
     <Box
       onClick={handleSelect}
+      onContextMenu={handleContextMenu}
       onDragEnter={handleDragOver}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -722,10 +733,42 @@ const ChatElement = ({
                   {unreadCount}
                 </Box>
               ) : null}
+              {isMuted && (
+                <PiBellSlashBold size={14} style={{ opacity: 0.5, marginTop: 2 }} />
+              )}
             </Stack>
           </>
         )}
       </Stack>
+
+      {/* Right-click context menu */}
+      <Menu
+        open={!!ctxMenu}
+        onClose={() => setCtxMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={ctxMenu ? { top: ctxMenu.mouseY, left: ctxMenu.mouseX } : undefined}
+        transitionDuration={0}
+        slotProps={{ paper: { sx: { borderRadius: 1, minWidth: 180 } } }}
+      >
+        {isMuted ? (
+          <MenuItem onClick={() => { onUnmute?.(thread?.id); setCtxMenu(null); }}>
+            <ListItemIcon><PiBellBold size={16} /></ListItemIcon>
+            <ListItemText>Unmute</ListItemText>
+          </MenuItem>
+        ) : (
+          [
+            { label: "Mute 1 hour", duration: "1h" },
+            { label: "Mute 8 hours", duration: "8h" },
+            { label: "Mute 1 week", duration: "1w" },
+            { label: "Mute forever", duration: "forever" },
+          ].map((opt) => (
+            <MenuItem key={opt.duration} onClick={() => { onMute?.(thread?.id, opt.duration); setCtxMenu(null); }}>
+              <ListItemIcon><PiBellSlashBold size={16} /></ListItemIcon>
+              <ListItemText>{opt.label}</ListItemText>
+            </MenuItem>
+          ))
+        )}
+      </Menu>
     </Box>
   );
 };

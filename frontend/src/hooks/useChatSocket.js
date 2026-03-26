@@ -64,9 +64,36 @@ if (typeof document !== "undefined") {
   document.addEventListener("touchstart", unlockAudio, true);
 }
 
-const playNotificationSound = async () => {
+// ─── Per-thread sound resolution ──────────────────────────────────────────────
+let _threadSoundsCache = null;
+let _threadSoundsCacheTime = 0;
+
+const readThreadSounds = async () => {
+  if (_threadSoundsCache && Date.now() - _threadSoundsCacheTime < SOUND_CACHE_TTL) {
+    return _threadSoundsCache;
+  }
   try {
-    const soundFile = await readStoredSound();
+    const { secureStorage } = await import("../utils/secureStorage.js");
+    const raw = await secureStorage.getItem("chatx.threadSounds");
+    _threadSoundsCache = raw ? JSON.parse(raw) : {};
+    _threadSoundsCacheTime = Date.now();
+    return _threadSoundsCache;
+  } catch {
+    _threadSoundsCache = {};
+    _threadSoundsCacheTime = Date.now();
+    return {};
+  }
+};
+
+const playNotificationSound = async (threadId = null) => {
+  try {
+    let soundFile;
+    if (threadId) {
+      const threadSounds = await readThreadSounds();
+      soundFile = threadSounds?.[threadId] || (await readStoredSound());
+    } else {
+      soundFile = await readStoredSound();
+    }
     const url = soundFile.startsWith("/")
       ? `${_basePath}${soundFile}`
       : `${_basePath}/sounds/${soundFile}`;
@@ -149,11 +176,11 @@ const useChatSocket = ({
         try {
           console.log("[socket] notification received:", JSON.stringify(data));
           callbacksRef.current.onNotification?.(data);
-          // Play selected notification sound
-          playNotificationSound().catch((err) =>
+          // Play per-thread or global notification sound
+          playNotificationSound(data?.threadId).catch((err) =>
             console.warn("[socket] notification sound error:", err)
           );
-          // Browser notification — show always (backend already filters same-thread)
+          // Browser notification — show always (backend already filters same-thread + mute + DND)
           if (data?.title) {
             showSystemNotification({
               title: data.title,
@@ -294,6 +321,72 @@ const useChatSocket = ({
     [socket]
   );
 
+  const scheduleMessage = useCallback(
+    (threadId, message, messageType, metadata, sendAt) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("message:schedule", { threadId, message, messageType, metadata, sendAt }, resolve);
+      }),
+    [socket]
+  );
+
+  const cancelScheduledMessage = useCallback(
+    (id) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("message:schedule:cancel", { id }, resolve);
+      }),
+    [socket]
+  );
+
+  const listScheduledMessages = useCallback(
+    () =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("scheduled:list", {}, resolve);
+      }),
+    [socket]
+  );
+
+  const broadcastMessage = useCallback(
+    (contactIds, message, messageType = "text", metadata = null) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("broadcast:send", { contactIds, message, messageType, metadata }, resolve);
+      }),
+    [socket]
+  );
+
+  const setThreadSound = useCallback(
+    (threadId, soundFile) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("thread:sound:set", { threadId, soundFile }, resolve);
+        // Also update local cache
+        _threadSoundsCache = null;
+        _threadSoundsCacheTime = 0;
+      }),
+    [socket]
+  );
+
+  const setDisappearTimer = useCallback(
+    (threadId, durationSeconds) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("thread:disappear:set", { threadId, durationSeconds }, resolve);
+      }),
+    [socket]
+  );
+
+  const getDisappearTimer = useCallback(
+    (threadId) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("thread:disappear:get", { threadId }, resolve);
+      }),
+    [socket]
+  );
+
   return useMemo(() => ({
     socket,
     isConnected: socket?.connected ?? false,
@@ -312,7 +405,14 @@ const useChatSocket = ({
     editPoll,
     joinGroup,
     focusThread,
-  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, editPoll, joinGroup, focusThread]);
+    scheduleMessage,
+    cancelScheduledMessage,
+    listScheduledMessages,
+    broadcastMessage,
+    setThreadSound,
+    setDisappearTimer,
+    getDisappearTimer,
+  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, editPoll, joinGroup, focusThread, scheduleMessage, cancelScheduledMessage, listScheduledMessages, broadcastMessage, setThreadSound, setDisappearTimer, getDisappearTimer]);
 };
 
 export default useChatSocket;

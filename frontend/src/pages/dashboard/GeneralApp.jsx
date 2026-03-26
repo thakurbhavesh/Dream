@@ -46,6 +46,9 @@ import useSettings from "../../hooks/useSettings.js";
 import { threadService } from "../../services/threadService.js";
 import { THREAD_NAVIGATE_EVENT } from "../../utils/threadNavigationEvents.js";
 import { toggleReactionOnMessage } from "../../components/conversation/messages/reactions.js";
+import useMutedThreads from "../../hooks/useMutedThreads.js";
+import ThreadSoundPicker from "../../components/conversation/ThreadSoundPicker.jsx";
+import DisappearingMessagesDialog from "../../components/conversation/DisappearingMessagesDialog.jsx";
 import {
   buildReplyContextPayload,
   canEditMessage,
@@ -459,6 +462,8 @@ const GeneralApp = () => {
     open: false,
     message: null,
   });
+  const [soundPickerState, setSoundPickerState] = useState({ open: false, threadId: null });
+  const [disappearDialogState, setDisappearDialogState] = useState({ open: false, threadId: null, currentTimer: 0 });
   const showMessageToast = useCallback((message, severity = "success") => {
     setMessageToast({ open: true, message, severity });
   }, []);
@@ -981,6 +986,60 @@ const GeneralApp = () => {
       });
     }, [upsertMessage]),
   });
+
+  // ─── Mute hook ────────────────────────────────────────────────────────────────
+  const { isMuted: isThreadMuted, muteThread, unmuteThread } = useMutedThreads();
+
+  // ─── Header menu action handler ─────────────────────────────────────────────
+  const handleHeaderMenuAction = useCallback(async (action, thread) => {
+    const tid = thread?.id || activeThreadId;
+    if (!tid) return;
+    switch (action) {
+      case "Mute":
+        muteThread(tid, "forever");
+        showMessageToast("Chat muted");
+        break;
+      case "Unmute":
+        unmuteThread(tid);
+        showMessageToast("Chat unmuted");
+        break;
+      case "NotificationSound":
+        setSoundPickerState({ open: true, threadId: tid });
+        break;
+      case "DisappearingMessages": {
+        const timer = await chatSocket.getDisappearTimer(tid).catch(() => ({}));
+        setDisappearDialogState({ open: true, threadId: tid, currentTimer: timer?.durationSeconds || 0 });
+        break;
+      }
+      default:
+        break;
+    }
+  }, [activeThreadId, muteThread, unmuteThread, showMessageToast, chatSocket]);
+
+  const handleSoundPickerSelect = useCallback((soundFile) => {
+    const tid = soundPickerState.threadId;
+    if (!tid) return;
+    chatSocket.setThreadSound(tid, soundFile);
+    // Update local secure storage
+    import("../../utils/secureStorage.js").then(({ secureStorage }) => {
+      secureStorage.getItem("chatx.threadSounds").then((raw) => {
+        const sounds = raw ? JSON.parse(raw) : {};
+        if (soundFile === "default") delete sounds[tid];
+        else sounds[tid] = soundFile;
+        secureStorage.setItem("chatx.threadSounds", JSON.stringify(sounds));
+      }).catch(() => {});
+    });
+    setSoundPickerState({ open: false, threadId: null });
+    showMessageToast("Notification sound updated");
+  }, [soundPickerState.threadId, chatSocket, showMessageToast]);
+
+  const handleDisappearSave = useCallback((durationSeconds) => {
+    const tid = disappearDialogState.threadId;
+    if (!tid) return;
+    chatSocket.setDisappearTimer(tid, durationSeconds);
+    setDisappearDialogState({ open: false, threadId: null, currentTimer: 0 });
+    showMessageToast(durationSeconds ? "Disappearing messages enabled" : "Disappearing messages disabled");
+  }, [disappearDialogState.threadId, chatSocket, showMessageToast]);
 
   // Emit thread:focus when active thread changes — tells backend which chat user is viewing
   useEffect(() => {
@@ -2014,6 +2073,15 @@ const GeneralApp = () => {
           // For real API threads, also send to backend
           if (isRealThread(targetThreadId)) {
             const socketThreadId = resolveThreadId(targetThreadId);
+
+            // Intercept scheduled messages — route to schedule emitter instead of send
+            if (message?.metadata?.scheduled && message?.metadata?.sendAt) {
+              const text = message?.content?.text ?? message?.message ?? "";
+              chatSocket.scheduleMessage(socketThreadId, text, message?.type ?? "text", null, message.metadata.sendAt)
+                .catch((err) => console.error("[schedule] failed:", err));
+              return; // Don't send immediately
+            }
+
             const isFileMsg = ["file", "image", "video"].includes(message?.type);
             const rawFile = message?.__file;
 
@@ -2841,6 +2909,9 @@ const GeneralApp = () => {
                 loading={threadsLoading}
                 isLocked={isLocked}
                 onDropFiles={handleThreadDropFiles}
+                isThreadMuted={isThreadMuted}
+                onMuteThread={muteThread}
+                onUnmuteThread={unmuteThread}
               />
             </Box>
             <ChatListActionsMenu
@@ -2945,6 +3016,8 @@ const GeneralApp = () => {
                     onSearchToggle={() => setSearchOpen((prev) => !prev)}
                     searchOpen={searchOpen}
                     onReloadChat={handleReloadChat}
+                    isMuted={isThreadMuted(activeThread?.id)}
+                    onMenuAction={handleHeaderMenuAction}
                   />
                   <Box
                     data-conversation-overlay-root="true"
@@ -3056,6 +3129,17 @@ const GeneralApp = () => {
                       open={toneAdjustDialogState.open}
                       messageText={getMessagePlainText(toneAdjustDialogState.message) || ""}
                       onClose={() => setToneAdjustDialogState({ open: false, message: null })}
+                    />
+                    <ThreadSoundPicker
+                      open={soundPickerState.open}
+                      onClose={() => setSoundPickerState({ open: false, threadId: null })}
+                      onSelect={handleSoundPickerSelect}
+                    />
+                    <DisappearingMessagesDialog
+                      open={disappearDialogState.open}
+                      onClose={() => setDisappearDialogState({ open: false, threadId: null, currentTimer: 0 })}
+                      currentTimer={disappearDialogState.currentTimer}
+                      onSave={handleDisappearSave}
                     />
                   </Box>
                 </>

@@ -36,6 +36,10 @@ import {
   PiVideoCamera,
   PiExport,
   PiArrowCounterClockwiseBold,
+  PiBellSlashBold,
+  PiBellBold,
+  PiSpeakerHighBold,
+  PiClockCountdownBold,
 } from "react-icons/pi";
 import { BsSearch } from "react-icons/bs";
 import {
@@ -68,6 +72,8 @@ const ConversationHeader = ({
   onSearchToggle,
   searchOpen = false,
   onReloadChat,
+  isMuted = false,
+  onMenuAction,
 }) => {
   const theme = useTheme();
   const dispatch = useDispatch();
@@ -206,6 +212,8 @@ const ConversationHeader = ({
       setExportDialogOpen(true);
     } else if (label === "Reload Chat") {
       onReloadChat?.();
+    } else if (label === "Mute" || label === "Unmute" || label === "NotificationSound" || label === "DisappearingMessages") {
+      onMenuAction?.(label, thread);
     }
     closeMenu();
   };
@@ -498,6 +506,24 @@ const ConversationHeader = ({
               <PiArrowCounterClockwiseBold size={16} />
             </Box>
             Reload Chat
+          </MenuItem>
+          <MenuItem onClick={() => { handleMenuAction(isMuted ? "Unmute" : "Mute"); closeMenu(); }}>
+            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}>
+              {isMuted ? <PiBellBold size={16} /> : <PiBellSlashBold size={16} />}
+            </Box>
+            {isMuted ? "Unmute Chat" : "Mute Chat"}
+          </MenuItem>
+          <MenuItem onClick={() => { handleMenuAction("NotificationSound"); closeMenu(); }}>
+            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}>
+              <PiSpeakerHighBold size={16} />
+            </Box>
+            Notification Sound
+          </MenuItem>
+          <MenuItem onClick={() => { handleMenuAction("DisappearingMessages"); closeMenu(); }}>
+            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}>
+              <PiClockCountdownBold size={16} />
+            </Box>
+            Disappearing Messages
           </MenuItem>
         </Stack>
       </Popover>

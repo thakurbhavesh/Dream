@@ -601,8 +601,9 @@ const getThreadMedia = async (req, res, next) => {
     const type = req.query.type || 'all'; // images, media, links, docs, pinned, all
     const limit = Math.min(Number(req.query.limit) || 100, 500);
 
+    const isDM = threadId.startsWith('dm-');
     let allRows = [];
-    if (threadId.startsWith('dm-')) {
+    if (isDM) {
       const otherUserId = Number(threadId.replace('dm-', ''));
       if (!otherUserId) { const e = new Error('Invalid thread id'); e.status = 400; throw e; }
       allRows = await model.searchDMMessages(orgId, userId, otherUserId, { limit: 2000 });
@@ -614,16 +615,28 @@ const getThreadMedia = async (req, res, next) => {
       const e = new Error('Unknown thread type'); e.status = 400; throw e;
     }
 
+    // Per-user pinned message IDs from message_actions table
+    let userPinnedIds = new Set();
+    if (allRows.length) {
+      const actionsTable = isDM ? 'message_actions' : 'group_message_actions';
+      const actionsIdCol = isDM ? 'message_id' : 'group_message_id';
+      const msgIds = allRows.map((r) => r[isDM ? 'message_id' : 'group_message_id']);
+      const { rows: pinRows } = await db.query(
+        `SELECT ${actionsIdCol} FROM ${actionsTable}
+         WHERE ${actionsIdCol} = ANY($1) AND user_id = $2 AND action_type = 'pin'`,
+        [msgIds, userId]
+      );
+      userPinnedIds = new Set(pinRows.map((r) => r[actionsIdCol]));
+    }
+
     // Filter by type
+    const idField = isDM ? 'message_id' : 'group_message_id';
     const typeMap = {
       images: (r) => r.message_type === 'image',
       media: (r) => ['video', 'audio'].includes(r.message_type),
       links: (r) => r.message_type === 'link',
       docs: (r) => ['file', 'code'].includes(r.message_type),
-      pinned: (r) => {
-        const meta = r.message_metadata || {};
-        return meta.pinned === true;
-      },
+      pinned: (r) => userPinnedIds.has(r[idField]),
       all: (r) => ['image', 'video', 'audio', 'link', 'file', 'code'].includes(r.message_type),
     };
 
@@ -637,7 +650,6 @@ const getThreadMedia = async (req, res, next) => {
       .slice(0, limit);
 
     // Normalize using same functions as getMessages
-    const isDM = threadId.startsWith('dm-');
     const messages = filtered.map((row) =>
       isDM ? normalizeDMMessage(row, userId) : normalizeGroupMessage(row, userId)
     );
@@ -656,7 +668,7 @@ const getThreadMedia = async (req, res, next) => {
       else if (['video', 'audio'].includes(row.message_type)) counts.media++;
       else if (row.message_type === 'link') counts.links++;
       else if (['file', 'code'].includes(row.message_type)) counts.docs++;
-      if (meta.pinned) counts.pinned++;
+      if (userPinnedIds.has(row[idField])) counts.pinned++;
     }
 
     return success(res, { messages, counts, type }, 'Thread media retrieved');

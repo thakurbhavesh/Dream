@@ -15,7 +15,9 @@ import {
   PiXBold,
 } from "react-icons/pi";
 import GroupMembersDialog from "./GroupMembersDialog.jsx";
+import BroadcastDialog from "./BroadcastDialog.jsx";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
+import { useSocket } from "../../contexts/SocketContext.jsx";
 
 const ChatListActionsMenu = ({
   members = [],
@@ -24,11 +26,13 @@ const ChatListActionsMenu = ({
   onCreateGroup,
 }) => {
   const authUser = useCurrentUser();
+  const socket = useSocket();
   const roleId = authUser ? Number(authUser.role || authUser.role_id || 3) : 3;
   const isOwner = roleId === 1;
   const isUser = roleId >= 4;
   const [anchorEl, setAnchorEl] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [toast, setToast] = useState({
     open: false,
     message: "",
@@ -80,12 +84,15 @@ const ChatListActionsMenu = ({
   };
 
   const handleBroadcast = () => {
-    setToast({
-      open: true,
-      message: "Broadcast coming soon",
-      severity: "info",
-    });
+    setBroadcastOpen(true);
     handleCloseMenu();
+  };
+
+  const handleBroadcastSend = (contactIds, message) => {
+    return new Promise((resolve) => {
+      if (!socket) return resolve({ error: "Not connected" });
+      socket.emit("broadcast:send", { contactIds, message, messageType: "text" }, resolve);
+    });
   };
   const handleCreateGroup = async (payload = {}) => {
     const trimmed = String(payload.name || "").trim();
@@ -212,6 +219,13 @@ const ChatListActionsMenu = ({
         onClose={handleCloseDialog}
         onSubmit={handleCreateGroup}
         submitLabel="Create"
+      />
+
+      <BroadcastDialog
+        open={broadcastOpen}
+        onClose={() => setBroadcastOpen(false)}
+        contacts={sortedMembers.filter((m) => !m.isSelf)}
+        onSend={handleBroadcastSend}
       />
 
       <Snackbar

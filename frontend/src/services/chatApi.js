@@ -343,6 +343,32 @@ export const transcribeAudio = async ({ fileUrl, fileKey, fileName } = {}) => {
   return payload?.data ?? {};
 };
 
+// ─── GIF Search (Tenor) ──────────────────────────────────────────────────────
+
+/**
+ * Search GIFs via backend Tenor proxy.
+ */
+export const searchGifs = async (query, { limit = 20 } = {}) => {
+  const params = new URLSearchParams({ q: query, limit });
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/gifs/search?${params}`
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "GIF search failed");
+  return payload?.data ?? { gifs: [], next: "" };
+};
+
+/**
+ * Fetch trending GIFs via backend Tenor proxy.
+ */
+export const fetchTrendingGifs = async ({ limit = 20 } = {}) => {
+  const params = new URLSearchParams({ limit });
+  const { response, payload } = await fetchWithAuth(
+    `${API_BASE_URL}/gifs/trending?${params}`
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "GIF fetch failed");
+  return payload?.data ?? { gifs: [], next: "" };
+};
+
 // ─── File Upload ─────────────────────────────────────────────────────────────
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2 GB

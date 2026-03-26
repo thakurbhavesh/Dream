@@ -103,6 +103,9 @@ const ChatList = ({
   loading = false,
   isLocked = false,
   onDropFiles,
+  isThreadMuted,
+  onMuteThread,
+  onUnmuteThread,
 }) => {
   const theme = useTheme();
   const [searchTerm, setSearchTerm] = useState("");
@@ -429,6 +432,9 @@ const ChatList = ({
                           disabled={isLocked}
                           isLocked={isLocked}
                           onDropFiles={handleThreadFilesDrop}
+                          isMuted={isThreadMuted?.(thread?.id)}
+                          onMute={onMuteThread}
+                          onUnmute={onUnmuteThread}
                         />
                       </Box>
                     );

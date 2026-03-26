@@ -6,6 +6,7 @@ import FileMsg from "./FileMsg.jsx";
 import CodeMsg from "./CodeMsg.jsx";
 import PollMsg from "./PollMsg.jsx";
 import SystemEventMsg from "./SystemEventMsg.jsx";
+import GifMsg from "./GifMsg.jsx";
 
 // Central registry that maps message types (from backend/normalizer) to
 // presentational components. Keep this tiny switchboard up to date whenever a
@@ -28,6 +29,7 @@ const registry = {
   audio: AudioMsg,
   voice: AudioMsg,
   poll: PollMsg,
+  gif: GifMsg,
   system: SystemEventMsg,
   event: SystemEventMsg,
   notice: SystemEventMsg,

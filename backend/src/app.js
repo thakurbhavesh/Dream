@@ -38,6 +38,7 @@ const organizationProfileRoutes = require('./routes/organizationProfileRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const translateRoutes = require('./routes/translateRoutes');
 const aiProviderRoutes = require('./routes/aiProviderRoutes');
+const gifRoutes = require('./routes/gifRoutes');
 
 const app = express();
 
@@ -110,6 +111,7 @@ app.use('/organization', organizationProfileRoutes);
 app.use('/upload', uploadRoutes);
 app.use('/translate', translateRoutes);
 app.use('/ai-providers', aiProviderRoutes);
+app.use('/gifs', gifRoutes);
 
 
 app.use((req, res, next) => {

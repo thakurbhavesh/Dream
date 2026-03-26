@@ -4,8 +4,26 @@ const chatModel = require('../chat/chatModel');
 const db = require('../config/database');
 const { signProfileFields } = require('../utils/signProfileUrls');
 const { signMessageFileUrls } = require('../utils/signFileUrls');
-const { encryptMessage, decryptMessage, encryptMetadata, decryptMetadata } = require('../utils/messageCipher');
+const { encryptMessage, decryptMessage: _rawDecryptMessage, encryptMetadata, decryptMetadata: _rawDecryptMetadata } = require('../utils/messageCipher');
 const controlModel = require('../models/organizationControlModel');
+const threadMuteModel = require('../models/threadMuteModel');
+const userSettingsModel = require('../models/userSettingsModel');
+const scheduledMessageModel = require('../models/scheduledMessageModel');
+const disappearingModel = require('../models/disappearingModel');
+
+// Safe decrypt wrappers — return fallback instead of crashing the socket handler
+const decryptMessage = (val) => {
+  try { return _rawDecryptMessage(val); } catch (err) {
+    console.error('[socket] decryptMessage failed:', err.message);
+    return typeof val === 'string' ? val : '';
+  }
+};
+const decryptMetadata = (val) => {
+  try { return _rawDecryptMetadata(val); } catch (err) {
+    console.error('[socket] decryptMetadata failed:', err.message);
+    return typeof val === 'object' && val !== null ? val : {};
+  }
+};
 
 /** @type {Server} */
 let io = null;
@@ -40,6 +58,78 @@ const getOrgControl = async (orgId, featureKey) => {
 /** Invalidate cache when admin updates a control (call from controller) */
 const invalidateOrgControlsCache = (orgId) => {
   _orgControlsCache.delete(orgId);
+};
+
+// ─── Mute cache (avoids per-notification DB lookups) ─────────────────────────
+const _muteCache = new Map(); // `${userId}:${orgId}` → { threads: Set<threadId>, ts }
+const MUTE_CACHE_TTL = 2 * 60_000; // 2 minutes
+
+const isThreadMuted = async (userId, orgId, threadId) => {
+  const cacheKey = `${userId}:${orgId}`;
+  const cached = _muteCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < MUTE_CACHE_TTL) {
+    return cached.threads.has(threadId);
+  }
+  try {
+    const mutes = await threadMuteModel.getMutedThreads(userId, orgId);
+    const set = new Set(mutes.map(m => m.thread_id));
+    _muteCache.set(cacheKey, { threads: set, ts: Date.now() });
+    return set.has(threadId);
+  } catch {
+    return false;
+  }
+};
+
+const invalidateMuteCache = (userId, orgId) => {
+  _muteCache.delete(`${userId}:${orgId}`);
+};
+
+// ─── DND check helper ────────────────────────────────────────────────────────
+const _dndCache = new Map(); // userId → { value, ts }
+const DND_CACHE_TTL = 60_000; // 1 minute
+
+const isUserDND = async (userId) => {
+  const cached = _dndCache.get(String(userId));
+  if (cached && Date.now() - cached.ts < DND_CACHE_TTL) {
+    return cached.value;
+  }
+  try {
+    const dnd = await userSettingsModel.getSetting(Number(userId), 'dnd');
+    if (!dnd || !dnd.enabled) {
+      _dndCache.set(String(userId), { value: false, ts: Date.now() });
+      return false;
+    }
+    // Check schedule if active
+    if (dnd.schedule?.active && dnd.schedule.startTime && dnd.schedule.endTime) {
+      const now = new Date();
+      const day = now.getDay();
+      if (dnd.schedule.days && !dnd.schedule.days.includes(day)) {
+        _dndCache.set(String(userId), { value: false, ts: Date.now() });
+        return false;
+      }
+      const [sh, sm] = dnd.schedule.startTime.split(':').map(Number);
+      const [eh, em] = dnd.schedule.endTime.split(':').map(Number);
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em;
+      let inWindow;
+      if (startMin <= endMin) {
+        inWindow = nowMin >= startMin && nowMin < endMin;
+      } else {
+        inWindow = nowMin >= startMin || nowMin < endMin;
+      }
+      _dndCache.set(String(userId), { value: inWindow, ts: Date.now() });
+      return inWindow;
+    }
+    _dndCache.set(String(userId), { value: true, ts: Date.now() });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const invalidateDndCache = (userId) => {
+  _dndCache.delete(String(userId));
 };
 
 /**
@@ -255,6 +345,88 @@ const initSocket = (httpServer) => {
   io.on('connection', onConnection);
 
   console.log('[socket] Socket.IO initialized');
+
+  // ─── Scheduled Messages Scheduler (every 30s) ──────────────────────────
+  setInterval(async () => {
+    try {
+      const dueMessages = await scheduledMessageModel.getDueMessages();
+      for (const sm of dueMessages) {
+        try {
+          const { id, user_id: sUserId, organization_id: sOrgId, thread_id: sThreadId, message: sMsg, message_type: sMsgType, metadata: sMeta } = sm;
+          if (sThreadId.startsWith('dm-')) {
+            const receiverId = Number(sThreadId.replace('dm-', ''));
+            const saved = await chatModel.sendDMMessage({
+              orgId: sOrgId, senderId: Number(sUserId), receiverId,
+              message: sMsg, messageType: sMsgType || 'text', metadata: { ...(sMeta || {}), scheduled: true },
+            });
+            if (saved) {
+              // Apply disappearing timer if set for this thread
+              const disappearTimer = await disappearingModel.getTimer(sThreadId, sOrgId).catch(() => null);
+              if (disappearTimer) {
+                const expiresAt = new Date(Date.now() + disappearTimer.duration_seconds * 1000);
+                await db.query('UPDATE messages SET expires_at = $1 WHERE message_id = $2', [expiresAt, saved.message_id]);
+                saved.expires_at = expiresAt;
+              }
+              const normalized = normalizeDMMessage(saved, Number(sUserId));
+              const senderThreadId = `dm-${receiverId}`;
+              emitToUser(String(sUserId), 'message:new', { threadId: senderThreadId, message: { ...normalized, direction: 'outgoing' } });
+              const receiverThread = getUserActiveThread(String(receiverId));
+              const receiverOnline = isUserOnline(String(receiverId));
+              await deliverDMToReceiver({
+                receiverId, userId: String(sUserId), orgId: sOrgId, normalized, senderThreadId,
+                receiverThread, receiverOnline, senderName: 'Scheduled Message', messageType: sMsgType || 'text', message: sMsg,
+              });
+            }
+          } else if (sThreadId.startsWith('group-')) {
+            const groupId = Number(sThreadId.replace('group-', ''));
+            const saved = await chatModel.sendGroupMessage({
+              orgId: sOrgId, senderId: Number(sUserId), groupId,
+              message: sMsg, messageType: sMsgType || 'text', metadata: { ...(sMeta || {}), scheduled: true },
+            });
+            if (saved) {
+              // Apply disappearing timer if set for this thread
+              const disappearTimerG = await disappearingModel.getTimer(sThreadId, sOrgId).catch(() => null);
+              if (disappearTimerG) {
+                const expiresAt = new Date(Date.now() + disappearTimerG.duration_seconds * 1000);
+                await db.query('UPDATE group_messages SET expires_at = $1 WHERE message_id = $2', [expiresAt, saved.message_id]);
+                saved.expires_at = expiresAt;
+              }
+              const normalized = normalizeGroupMessage(saved, Number(sUserId));
+              emitToUser(String(sUserId), 'message:new', { threadId: sThreadId, message: { ...normalized, direction: 'outgoing' } });
+              await deliverGroupToMembers({
+                groupId, orgId: sOrgId, userId: String(sUserId), normalized,
+                senderName: 'Scheduled Message', messageType: sMsgType || 'text', message: sMsg, threadId: sThreadId,
+              });
+            }
+          }
+          await scheduledMessageModel.markSent(id);
+          emitToUser(String(sUserId), 'scheduled:sent', { id, threadId: sThreadId });
+        } catch (err) {
+          console.error('[scheduler] failed to send scheduled message', sm.id, err.message);
+        }
+      }
+    } catch (err) {
+      console.error('[scheduler] scheduled messages check error:', err.message);
+    }
+  }, 30_000);
+
+  // ─── Disappearing Messages Cleanup (every 60s) ─────────────────────────
+  setInterval(async () => {
+    try {
+      const result = await disappearingModel.cleanupExpiredMessages();
+      if (result.dmDeleted || result.groupDeleted) {
+        console.log(`[scheduler] cleaned up ${result.dmDeleted} DM + ${result.groupDeleted} group expired messages`);
+      }
+    } catch (err) {
+      console.error('[scheduler] disappearing messages cleanup error:', err.message);
+    }
+  }, 60_000);
+
+  // ─── Mute Expiry Cleanup (every 5 min) ─────────────────────────────────
+  setInterval(async () => {
+    try { await threadMuteModel.cleanupExpired(); } catch {}
+  }, 5 * 60_000);
+
   return io;
 };
 
@@ -337,11 +509,11 @@ const resolveDMDelivery = ({ saved, receiverId, userId, orgId, threadId }) => {
   if (!receiverOnline) return { status: 'sent', receiverOnline, receiverThread, senderThreadId };
 
   if (receiverThread === senderThreadId) {
-    chatModel.markDMMessagesRead(orgId, receiverId, Number(userId)).catch(() => {});
+    chatModel.markDMMessagesRead(orgId, receiverId, Number(userId)).catch(err => console.error('[socket] markDMMessagesRead error:', err.message));
     db.query(
       `UPDATE messages SET delivered_at = NOW() WHERE message_id = $1 AND delivered_at IS NULL`,
       [saved.message_id]
-    ).catch(() => {});
+    ).catch(err => console.error('[socket] delivered_at update error:', err.message));
     emitToUser(userId, 'message:read_ack', {
       threadId, readBy: String(receiverId),
       readAt: new Date().toISOString(),
@@ -352,7 +524,7 @@ const resolveDMDelivery = ({ saved, receiverId, userId, orgId, threadId }) => {
   db.query(
     `UPDATE messages SET delivered_at = NOW() WHERE message_id = $1 AND delivered_at IS NULL`,
     [saved.message_id]
-  ).catch(() => {});
+  ).catch(err => console.error('[socket] delivered_at update error:', err.message));
   emitToUser(userId, 'message:delivered_ack', {
     threadId,
     deliveredBy: String(receiverId),
@@ -383,14 +555,18 @@ const deliverDMToReceiver = async ({ receiverId, userId, orgId, normalized, send
     });
 
     if (receiverOnline) {
-      emitToUser(String(receiverId), 'notification', {
-        type: 'message',
-        title: senderName || 'New message',
-        body: messageType === 'text' ? message : `Sent a ${messageType}`,
-        threadId: senderThreadId,
-        senderId: userId,
-        senderName,
-      });
+      const isDND = await isUserDND(receiverId);
+      const isMuted = isDND ? true : await isThreadMuted(receiverId, orgId, senderThreadId);
+      if (!isMuted) {
+        emitToUser(String(receiverId), 'notification', {
+          type: 'message',
+          title: senderName || 'New message',
+          body: messageType === 'text' ? message : `Sent a ${messageType}`,
+          threadId: senderThreadId,
+          senderId: userId,
+          senderName,
+        });
+      }
     }
   } else {
     // Thread is open — ensure unread badge stays at 0
@@ -443,14 +619,18 @@ const deliverGroupToMembers = async ({ groupId, orgId, userId, normalized, sende
       });
     }
     if (isUserOnline(String(memberId)) && memberThread !== threadId) {
-      emitToUser(String(memberId), 'notification', {
-        type: 'message',
-        title: 'Group message',
-        body: `${senderName}: ${messageType === 'text' ? message : `Sent a ${messageType}`}`,
-        threadId,
-        senderId: userId,
-        senderName,
-      });
+      const isDND = await isUserDND(memberId);
+      const isMuted = isDND ? true : await isThreadMuted(memberId, orgId, threadId);
+      if (!isMuted) {
+        emitToUser(String(memberId), 'notification', {
+          type: 'message',
+          title: 'Group message',
+          body: `${senderName}: ${messageType === 'text' ? message : `Sent a ${messageType}`}`,
+          threadId,
+          senderId: userId,
+          senderName,
+        });
+      }
     }
   }
 };
@@ -511,10 +691,27 @@ const onConnection = (socket) => {
     screenshare: createRateLimiter(10, 10_000), // 10 screenshare actions per 10s
     signal:      createRateLimiter(50, 10_000), // 50 WebRTC signaling msgs per 10s
     annotate:    createRateLimiter(60, 1_000),  // 60 annotation strokes per 1s
+    mute:        createRateLimiter(10, 10_000), // 10 mute/unmute per 10s
+    dnd:         createRateLimiter(5, 10_000),  // 5 DND toggles per 10s
+    schedule:    createRateLimiter(10, 10_000), // 10 scheduled msgs per 10s
+    disappear:   createRateLimiter(5, 10_000),  // 5 disappear toggles per 10s
+    broadcast:   createRateLimiter(2, 60_000),  // 2 broadcasts per minute
   };
 
   // Preload organization controls into cache on connect (non-blocking)
-  if (orgId) preloadOrgControls(orgId).catch(() => {});
+  if (orgId) preloadOrgControls(orgId).catch(err => console.error('[socket] preloadOrgControls error:', err.message));
+
+  // Sync muted threads to client on connect
+  if (orgId) {
+    threadMuteModel.getMutedThreads(Number(userId), orgId)
+      .then((mutes) => { if (mutes.length) emitToUser(userId, 'thread:mute_sync', mutes); })
+      .catch(err => console.error('[socket] mute sync error:', err.message));
+  }
+
+  // Sync DND state to client on connect
+  userSettingsModel.getSetting(Number(userId), 'dnd')
+    .then((dnd) => { if (dnd) emitToUser(userId, 'dnd:state', dnd); })
+    .catch(err => console.error('[socket] DND sync error:', err.message));
 
   // Cache user's device geo data for message metadata (non-blocking)
   loadUserGeo(Number(userId)).then((geo) => { socket.geo = geo || {}; }).catch(() => { socket.geo = {}; });
@@ -573,7 +770,7 @@ const onConnection = (socket) => {
             readStatus: Number(r.cnt) > 0 ? 'unread' : 'read',
           });
         }
-      }).catch(() => {});
+      }).catch(err => console.error('[socket] background task error:', err.message));
 
       // Sync group unread counts
       db.query(
@@ -591,7 +788,7 @@ const onConnection = (socket) => {
             readStatus: Number(r.cnt) > 0 ? 'unread' : 'read',
           });
         }
-      }).catch(() => {});
+      }).catch(err => console.error('[socket] background task error:', err.message));
     }
 
     // ─── Deliver undelivered messages when user comes online (first tab only) ──
@@ -621,7 +818,7 @@ const onConnection = (socket) => {
           messageIds,
         });
       }
-    }).catch(() => {});
+    }).catch(err => console.error('[socket] background task error:', err.message));
     }
   }
 
@@ -651,6 +848,9 @@ const onConnection = (socket) => {
       const sentFrom = buildSentFrom(socket);
       const metadata = sentFrom ? { ...(rawMeta || {}), sentFrom } : rawMeta;
 
+      // Check disappearing timer for this thread
+      const disappearTimer = await disappearingModel.getTimer(threadId, orgId).catch(() => null);
+
       if (threadId.startsWith('dm-')) {
         const receiverId = Number(threadId.replace('dm-', ''));
         const isSelfChat = receiverId === Number(userId);
@@ -658,6 +858,14 @@ const onConnection = (socket) => {
           orgId, senderId: Number(userId), receiverId,
           message, messageType: message_type, metadata,
         });
+
+        // Set expires_at if disappearing messages is enabled
+        if (saved && disappearTimer) {
+          const expiresAt = new Date(Date.now() + disappearTimer.duration_seconds * 1000);
+          await db.query('UPDATE messages SET expires_at = $1 WHERE message_id = $2', [expiresAt, saved.message_id]).catch(() => {});
+          saved.expires_at = expiresAt;
+        }
+
         await signProfileFields(saved);
         const normalized = normalizeDMMessage(saved, Number(userId));
         await signMessageFileUrls(normalized);
@@ -665,7 +873,7 @@ const onConnection = (socket) => {
         if (isSelfChat) {
           // Self-chat: mark as read immediately, no delivery to "other" user needed
           console.log(`[socket] self-chat message saved: user=${userId} message_id=${saved?.message_id} threadId=${threadId}`);
-          chatModel.markDMMessagesRead(orgId, Number(userId), Number(userId)).catch(() => {});
+          chatModel.markDMMessagesRead(orgId, Number(userId), Number(userId)).catch(err => console.error('[socket] background task error:', err.message));
           ack?.({ ok: true, message: { ...normalized, status: 'read' } });
         } else {
           const delivery = resolveDMDelivery({ saved, receiverId, userId, orgId, threadId });
@@ -687,6 +895,14 @@ const onConnection = (socket) => {
           orgId, groupId, senderId: Number(userId),
           message, messageType: message_type, metadata,
         });
+
+        // Set expires_at if disappearing messages is enabled
+        if (saved && disappearTimer) {
+          const expiresAt = new Date(Date.now() + disappearTimer.duration_seconds * 1000);
+          await db.query('UPDATE group_messages SET expires_at = $1 WHERE group_message_id = $2', [expiresAt, saved.group_message_id]).catch(() => {});
+          saved.expires_at = expiresAt;
+        }
+
         await signProfileFields(saved);
         const normalized = normalizeGroupMessage(saved, Number(userId));
         await signMessageFileUrls(normalized);
@@ -794,7 +1010,7 @@ const onConnection = (socket) => {
         const deleted = await chatModel.deleteDMMessage(messageId, orgId, Number(userId));
         if (!deleted) return ack?.({ error: 'Not found or no permission' });
         // Log delete action in message_actions
-        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(() => {});
+        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(err => console.error('[socket] background task error:', err.message));
         emitToUser(userId, 'message:deleted', { threadId, messageId: String(messageId) });
         ack?.({ ok: true });
 
@@ -802,7 +1018,7 @@ const onConnection = (socket) => {
         const groupId = Number(threadId.replace('group-', ''));
         const deleted = await chatModel.deleteGroupMessage(messageId, orgId, groupId, Number(userId));
         if (!deleted) return ack?.({ error: 'Not found or no permission' });
-        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(() => {});
+        logMessageAction(messageId, threadId, Number(userId), 'delete', 1).catch(err => console.error('[socket] background task error:', err.message));
         emitToUser(userId, 'message:deleted', { threadId, messageId: String(messageId) });
         ack?.({ ok: true });
       }
@@ -818,54 +1034,33 @@ const onConnection = (socket) => {
     try {
       const { messageId, threadId, pinned } = data;
       if (!messageId || !threadId) return ack?.({ error: 'messageId and threadId required' });
-      const pinValue = pinned ? 1 : 0;
 
-      // Log pin action in message_actions
-      logMessageAction(messageId, threadId, Number(userId), 'pin', pinValue).catch(() => {});
-
-      // Update message metadata with pin status (encrypted)
+      // Per-user pin: only store in message_actions, no global metadata change
       const isGroup = threadId.startsWith('group-');
-      const table = isGroup ? 'group_messages' : 'messages';
+      const table = isGroup ? 'group_message_actions' : 'message_actions';
       const idCol = isGroup ? 'group_message_id' : 'message_id';
-      // Read existing metadata, decrypt, merge pin info, re-encrypt
-      const { rows: metaRows } = await db.query(
-        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
-        [messageId]
-      );
-      const existingMeta = metaRows[0]?.message_metadata
-        ? decryptMetadata(metaRows[0].message_metadata)
-        : {};
-      const mergedMeta = {
-        ...existingMeta,
-        pinned: !!pinned,
-        pinnedBy: userId,
-        pinnedAt: new Date().toISOString(),
-      };
-      const encMeta = encryptMetadata(mergedMeta);
-      await db.query(
-        `UPDATE ${table}
-         SET message_metadata = $1::jsonb,
-             updated_at = NOW()
-         WHERE ${idCol} = $2`,
-        [encMeta, messageId]
-      );
 
-      // Emit to participants
-      if (threadId.startsWith('dm-')) {
-        const otherUserId = threadId.replace('dm-', '');
-        emitToUser(userId, 'message:pinned', { threadId, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId });
-        emitToUser(otherUserId, 'message:pinned', {
-          threadId: `dm-${userId}`, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId,
-        });
-      } else if (threadId.startsWith('group-')) {
-        const groupId = Number(threadId.replace('group-', ''));
-        const members = await getGroupMemberIds(groupId);
-        for (const memberId of members) {
-          emitToUser(String(memberId), 'message:pinned', {
-            threadId, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId,
-          });
-        }
+      if (pinned) {
+        // Pin: insert action (ignore if already exists)
+        await db.query(
+          `INSERT INTO ${table} (${idCol}, user_id, action_type)
+           VALUES ($1, $2, 'pin')
+           ON CONFLICT DO NOTHING`,
+          [messageId, Number(userId)]
+        );
+      } else {
+        // Unpin: remove the pin action for this user
+        await db.query(
+          `DELETE FROM ${table}
+           WHERE ${idCol} = $1 AND user_id = $2 AND action_type = 'pin'`,
+          [messageId, Number(userId)]
+        );
       }
+
+      // Only notify the user who pinned/unpinned (per-user pin)
+      emitToUser(userId, 'message:pinned', {
+        threadId, messageId: String(messageId), pinned: !!pinned, pinnedBy: userId,
+      });
       ack?.({ ok: true });
     } catch (err) {
       console.error('[socket] message:pin error', err.message);
@@ -981,65 +1176,72 @@ const onConnection = (socket) => {
       const table = isGroup ? 'group_messages' : 'messages';
       const idCol = isGroup ? 'group_message_id' : 'message_id';
 
-      // Read existing metadata
-      const { rows: metaRows } = await db.query(
-        `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1`,
-        [messageId]
-      );
-      if (!metaRows[0]) return ack?.({ error: 'Message not found' });
-
-      const meta = metaRows[0].message_metadata
-        ? decryptMetadata(metaRows[0].message_metadata)
-        : {};
-
-      if (!meta.options || !Array.isArray(meta.options)) return ack?.({ error: 'Not a poll message' });
-
-      // Check if poll has ended
-      if (meta.endedAt || (meta.endAt && new Date(meta.endAt) < new Date())) {
-        return ack?.({ error: 'Poll has ended' });
-      }
-
       const voterId = Number(userId);
       const voterName = socket.user.name || '';
 
-      // Update vote in options
-      meta.options = meta.options.map((opt) => {
-        const voters = Array.isArray(opt.voters) ? opt.voters : [];
-        const alreadyVoted = voters.some((v) => String(v.id) === String(voterId));
+      // Use transaction with row lock to prevent race conditions
+      const client = await db.connect();
+      let meta;
+      try {
+        await client.query('BEGIN');
+        const { rows: metaRows } = await client.query(
+          `SELECT message_metadata FROM ${table} WHERE ${idCol} = $1 FOR UPDATE`,
+          [messageId]
+        );
+        if (!metaRows[0]) { await client.query('ROLLBACK'); return ack?.({ error: 'Message not found' }); }
 
-        if (opt.id === optionId) {
-          if (alreadyVoted) {
-            // Remove vote (toggle off)
+        meta = metaRows[0].message_metadata
+          ? decryptMetadata(metaRows[0].message_metadata)
+          : {};
+
+        if (!meta.options || !Array.isArray(meta.options)) { await client.query('ROLLBACK'); return ack?.({ error: 'Not a poll message' }); }
+
+        if (meta.endedAt || (meta.endAt && new Date(meta.endAt) < new Date())) {
+          await client.query('ROLLBACK');
+          return ack?.({ error: 'Poll has ended' });
+        }
+
+        // Update vote in options
+        meta.options = meta.options.map((opt) => {
+          const voters = Array.isArray(opt.voters) ? opt.voters : [];
+          const alreadyVoted = voters.some((v) => String(v.id) === String(voterId));
+
+          if (opt.id === optionId) {
+            if (alreadyVoted) {
+              return {
+                ...opt,
+                votes: Math.max(0, (opt.votes || 0) - 1),
+                voters: voters.filter((v) => String(v.id) !== String(voterId)),
+              };
+            }
+            return {
+              ...opt,
+              votes: (opt.votes || 0) + 1,
+              voters: [...voters, { id: voterId, name: voterName }],
+            };
+          }
+          if (pollType === 'single' && alreadyVoted) {
             return {
               ...opt,
               votes: Math.max(0, (opt.votes || 0) - 1),
               voters: voters.filter((v) => String(v.id) !== String(voterId)),
             };
           }
-          // Add vote
-          return {
-            ...opt,
-            votes: (opt.votes || 0) + 1,
-            voters: [...voters, { id: voterId, name: voterName }],
-          };
-        }
-        // For single-choice: remove voter from other options
-        if (pollType === 'single' && alreadyVoted) {
-          return {
-            ...opt,
-            votes: Math.max(0, (opt.votes || 0) - 1),
-            voters: voters.filter((v) => String(v.id) !== String(voterId)),
-          };
-        }
-        return opt;
-      });
+          return opt;
+        });
 
-      // Save back encrypted
-      const encMeta = encryptMetadata(meta);
-      await db.query(
-        `UPDATE ${table} SET message_metadata = $1::jsonb, updated_at = NOW() WHERE ${idCol} = $2`,
-        [encMeta, messageId]
-      );
+        const encMeta = encryptMetadata(meta);
+        await client.query(
+          `UPDATE ${table} SET message_metadata = $1::jsonb, updated_at = NOW() WHERE ${idCol} = $2`,
+          [encMeta, messageId]
+        );
+        await client.query('COMMIT');
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
 
       // Also persist vote to group_poll_votes table (best effort)
       if (isGroup) {
@@ -1938,6 +2140,223 @@ const onConnection = (socket) => {
     if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
   });
 
+  // ─── Chat Mute ──────────────────────────────────────────────────────────
+  socket.on('thread:mute', async (data, ack) => {
+    if (!rl.mute()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { threadId, duration } = data || {};
+      if (!threadId) return ack?.({ error: 'Missing threadId' });
+
+      if (duration === 'unmute') {
+        await threadMuteModel.removeMute(Number(userId), orgId, threadId);
+        invalidateMuteCache(userId, orgId);
+        emitToUser(userId, 'thread:mute_update', { threadId, muted: false, muteUntil: null });
+        return ack?.({ ok: true });
+      }
+
+      const muteUntil = duration === 'forever' ? null :
+        duration === '1h' ? new Date(Date.now() + 3600000) :
+        duration === '8h' ? new Date(Date.now() + 28800000) :
+        duration === '1w' ? new Date(Date.now() + 604800000) : null;
+
+      await threadMuteModel.upsertMute(Number(userId), orgId, threadId, muteUntil);
+      invalidateMuteCache(userId, orgId);
+      emitToUser(userId, 'thread:mute_update', {
+        threadId, muted: true,
+        muteUntil: muteUntil?.toISOString() || null,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] thread:mute error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── DND Mode ──────────────────────────────────────────────────────────
+  socket.on('dnd:update', async (data, ack) => {
+    if (!rl.dnd()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { enabled, schedule } = data || {};
+      const value = { enabled: !!enabled, schedule: schedule || null };
+      await userSettingsModel.upsertSetting(Number(userId), 'dnd', value);
+      invalidateDndCache(userId);
+      emitToUser(userId, 'dnd:state', value);
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] dnd:update error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Custom Notification Sound Per Chat ────────────────────────────────
+  socket.on('thread:sound:set', async (data, ack) => {
+    try {
+      const { threadId, sound } = data || {};
+      if (!threadId) return ack?.({ error: 'Missing threadId' });
+      const existing = await userSettingsModel.getSetting(Number(userId), 'thread_sounds') || {};
+      if (sound && sound !== 'default') {
+        existing[threadId] = sound;
+      } else {
+        delete existing[threadId];
+      }
+      await userSettingsModel.upsertSetting(Number(userId), 'thread_sounds', existing);
+      emitToUser(userId, 'thread:sound:updated', { threadId, sound: sound || 'default' });
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] thread:sound:set error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Scheduled Messages ────────────────────────────────────────────────
+  socket.on('message:schedule', async (data, ack) => {
+    if (!rl.schedule()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { threadId, message, messageType = 'text', metadata = null, sendAt } = data || {};
+      if (!threadId || !message || !sendAt) return ack?.({ error: 'threadId, message, and sendAt required' });
+      const sendDate = new Date(sendAt);
+      if (isNaN(sendDate.getTime()) || sendDate <= new Date()) return ack?.({ error: 'sendAt must be a future date' });
+      const scheduled = await scheduledMessageModel.create(
+        Number(userId), orgId, threadId, message, messageType, metadata, sendDate
+      );
+      emitToUser(userId, 'message:scheduled', scheduled);
+      ack?.({ ok: true, scheduled });
+    } catch (err) {
+      console.error('[socket] message:schedule error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('message:schedule:cancel', async (data, ack) => {
+    if (!rl.schedule()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { id } = data || {};
+      if (!id) return ack?.({ error: 'Missing id' });
+      const cancelled = await scheduledMessageModel.cancel(id, Number(userId));
+      if (!cancelled) return ack?.({ error: 'Not found or already sent' });
+      emitToUser(userId, 'message:schedule:cancelled', { id });
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] message:schedule:cancel error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('scheduled:list', async (data, ack) => {
+    try {
+      const list = await scheduledMessageModel.getByUser(Number(userId), orgId);
+      ack?.({ ok: true, scheduled: list });
+    } catch (err) {
+      console.error('[socket] scheduled:list error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Disappearing Messages ─────────────────────────────────────────────
+  socket.on('thread:disappear:set', async (data, ack) => {
+    if (!rl.disappear()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { threadId, durationSeconds } = data || {};
+      if (!threadId) return ack?.({ error: 'Missing threadId' });
+
+      if (!durationSeconds || durationSeconds <= 0) {
+        await disappearingModel.removeTimer(threadId, orgId);
+        // Notify thread participants
+        if (threadId.startsWith('group-')) {
+          const groupId = Number(threadId.replace('group-', ''));
+          const members = await getGroupMemberIds(groupId);
+          for (const mid of members) {
+            emitToUser(String(mid), 'thread:disappear:updated', { threadId, durationSeconds: 0, setBy: userId });
+          }
+        } else {
+          const otherUserId = threadId.replace('dm-', '');
+          emitToUser(userId, 'thread:disappear:updated', { threadId, durationSeconds: 0, setBy: userId });
+          emitToUser(otherUserId, 'thread:disappear:updated', { threadId, durationSeconds: 0, setBy: userId });
+        }
+        return ack?.({ ok: true });
+      }
+
+      await disappearingModel.setTimer(threadId, orgId, Number(userId), durationSeconds);
+      if (threadId.startsWith('group-')) {
+        const groupId = Number(threadId.replace('group-', ''));
+        const members = await getGroupMemberIds(groupId);
+        for (const mid of members) {
+          emitToUser(String(mid), 'thread:disappear:updated', { threadId, durationSeconds, setBy: userId });
+        }
+      } else {
+        const otherUserId = threadId.replace('dm-', '');
+        emitToUser(userId, 'thread:disappear:updated', { threadId, durationSeconds, setBy: userId });
+        emitToUser(otherUserId, 'thread:disappear:updated', { threadId, durationSeconds, setBy: userId });
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] thread:disappear:set error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('thread:disappear:get', async (data, ack) => {
+    try {
+      const { threadId } = data || {};
+      if (!threadId) return ack?.({ error: 'Missing threadId' });
+      const timer = await disappearingModel.getTimer(threadId, orgId);
+      ack?.({ ok: true, timer });
+    } catch (err) {
+      console.error('[socket] thread:disappear:get error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Broadcast ─────────────────────────────────────────────────────────
+  socket.on('broadcast:send', async (data, ack) => {
+    if (!rl.broadcast()) return ack?.({ error: 'Rate limited (max 2 broadcasts per minute)' });
+    try {
+      const { contactIds, message, messageType = 'text', metadata = null } = data || {};
+      if (!Array.isArray(contactIds) || !contactIds.length || !message) {
+        return ack?.({ error: 'contactIds array and message required' });
+      }
+      if (contactIds.length > 50) return ack?.({ error: 'Max 50 contacts per broadcast' });
+
+      const sentFrom = buildSentFrom(socket);
+      let sent = 0;
+      let failed = 0;
+
+      for (const contactId of contactIds) {
+        try {
+          const receiverId = Number(contactId);
+          if (receiverId === Number(userId)) continue;
+          const saved = await chatModel.sendDMMessage({
+            orgId, senderId: Number(userId), receiverId,
+            message, messageType, metadata: { ...(metadata || {}), broadcast: true, ...(sentFrom ? { sentFrom } : {}) },
+          });
+          if (!saved) { failed++; continue; }
+          const normalized = normalizeDMMessage(saved);
+          const senderThreadId = `dm-${receiverId}`;
+          const receiverThread = getUserActiveThread(String(receiverId));
+          const receiverOnline = isUserOnline(String(receiverId));
+          const senderName = socket.user.name || 'User';
+
+          emitToUser(userId, 'message:new', {
+            threadId: senderThreadId,
+            message: { ...normalized, direction: 'outgoing' },
+          });
+          await deliverDMToReceiver({
+            receiverId, userId, orgId, normalized, senderThreadId,
+            receiverThread, receiverOnline, senderName, messageType, message,
+          });
+          sent++;
+        } catch (err) {
+          console.error('[socket] broadcast send to', contactId, 'failed:', err.message);
+          failed++;
+        }
+      }
+      ack?.({ ok: true, sent, failed });
+    } catch (err) {
+      console.error('[socket] broadcast:send error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
   // ─── Disconnect ───────────────────────────────────────────────────────────
   socket.on('disconnect', (reason) => {
     if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
@@ -2126,6 +2545,7 @@ const normalizeDMMessage = (row, currentUserId) => {
     },
     createdAt: sentAt,
     editedAt,
+    ...(row.expires_at ? { expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at) } : {}),
     status: row.read_time ? 'read' : row.delivered_at ? 'delivered' : 'sent',
   };
 };
@@ -2157,6 +2577,7 @@ const normalizeGroupMessage = (row, currentUserId) => {
     },
     createdAt: sentAt,
     editedAt,
+    ...(row.expires_at ? { expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at) } : {}),
     status: 'delivered',
   };
 };
