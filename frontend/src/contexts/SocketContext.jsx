@@ -13,6 +13,14 @@ const buildSocketUrl = (explicitUrl) => {
   const resolvedExplicit = cleanUrl(explicitUrl);
   if (resolvedExplicit) return resolvedExplicit;
 
+  // Auto-detect: if opened from network IP, connect socket to same IP
+  if (typeof window !== "undefined" && !import.meta.env.PROD) {
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") {
+      return `http://${host}:5000`;
+    }
+  }
+
   const candidates = [
     import.meta.env.VITE_SOCKET_URL,
     import.meta.env.REACT_APP_SOCKET_URL,

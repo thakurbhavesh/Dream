@@ -14,6 +14,8 @@ import ScreenShareOverlay from "../../components/screenshare/ScreenShareOverlay.
 import { CallProvider } from "../../contexts/CallContext.jsx";
 import CallRequestDialog from "../../components/call/CallRequestDialog.jsx";
 import CallOverlay from "../../components/call/CallOverlay.jsx";
+import { MeetingProvider } from "../../contexts/MeetingContext.jsx";
+import MeetingInviteDialog from "../../components/meeting/MeetingInviteDialog.jsx";
 import { appBrandingAssets } from "../../data/CommonData.js";
 
 const OutletFallback = () => {
@@ -149,27 +151,35 @@ const DashboardLayout = () => {
             <TypingIndicatorProvider>
               <ScreenShareProvider>
                 <CallProvider>
-                  <Stack direction="column">
-                    <TopBar />
-                    <Stack
-                      direction="row"
-                      height={`calc(100vh - 39px)`}
-                      overflow={"hidden"}
-                    >
-                      {/* sidebar  */}
-                      <SideBar />
-                      <Suspense fallback={<OutletFallback />}>
-                        <KeepAliveOutlet
-                          keepAlivePaths={["/app"]}
-                          containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
-                        />
-                      </Suspense>
+                  <MeetingProvider>
+                    <Stack direction="column">
+                      <TopBar />
+                      <Stack
+                        direction="row"
+                        height={`calc(100vh - 39px)`}
+                        overflow={"hidden"}
+                      >
+                        {/* sidebar  */}
+                        <SideBar />
+                        <Suspense fallback={<OutletFallback />}>
+                          <KeepAliveOutlet
+                            keepAlivePaths={["/app"]}
+                            containerSx={{ flexGrow: 1, minWidth: 0, display: "flex" }}
+                          />
+                        </Suspense>
+                      </Stack>
                     </Stack>
-                  </Stack>
-                  <ScreenShareRequestDialog />
-                  <ScreenShareOverlay />
-                  <CallRequestDialog />
-                  <CallOverlay />
+                    <ScreenShareRequestDialog />
+                    <ScreenShareOverlay />
+                    <CallRequestDialog />
+                    <CallOverlay />
+                    <MeetingInviteDialog
+                      onJoin={(meetingData) => {
+                        // This will be handled by the component that has access to meeting context
+                        window.dispatchEvent(new CustomEvent("meeting:join-from-invite", { detail: meetingData }));
+                      }}
+                    />
+                  </MeetingProvider>
                 </CallProvider>
               </ScreenShareProvider>
             </TypingIndicatorProvider>

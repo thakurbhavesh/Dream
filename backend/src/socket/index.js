@@ -10,6 +10,8 @@ const threadMuteModel = require('../models/threadMuteModel');
 const userSettingsModel = require('../models/userSettingsModel');
 const scheduledMessageModel = require('../models/scheduledMessageModel');
 const disappearingModel = require('../models/disappearingModel');
+const { sendMailAsync } = require('../utils/mail');
+const { resolveMailBranding } = require('../utils/mailBranding');
 
 // Safe decrypt wrappers — return fallback instead of crashing the socket handler
 const decryptMessage = (val) => {
@@ -322,7 +324,7 @@ const initSocket = (httpServer) => {
         if (!origin) return cb(null, true);
         if (allowedOrigins.includes(origin)) return cb(null, true);
         if (process.env.NODE_ENV !== 'production' &&
-          /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) {
           return cb(null, true);
         }
         cb(new Error('CORS'));
@@ -1765,6 +1767,277 @@ const onConnection = (socket) => {
     }
   });
 
+  // ─── Meeting / Conference ──────────────────────────────────────────────────
+  // In-memory meeting rooms: meetingRoomId → Set of { socketId, userId, userName }
+  const _meetingRooms = (io._meetingRooms = io._meetingRooms || new Map());
+
+  socket.on('meeting:join', async (data, ack) => {
+    try {
+      const { meetingRoomId, userName } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      socket.join(roomKey);
+
+      if (!_meetingRooms.has(meetingRoomId)) _meetingRooms.set(meetingRoomId, new Map());
+      const room = _meetingRooms.get(meetingRoomId);
+      room.set(socket.id, { socketId: socket.id, userId, userName: userName || 'User' });
+
+      // Tell existing participants about new joiner
+      socket.to(roomKey).emit('meeting:user-joined', {
+        socketId: socket.id, userId, userName: userName || 'User',
+      });
+
+      // Send list of current participants to the joiner
+      const participants = Array.from(room.values());
+      ack?.({ ok: true, participants });
+    } catch (err) {
+      console.error('[socket] meeting:join error', err.message);
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('meeting:leave', async (data, ack) => {
+    try {
+      const { meetingRoomId } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      socket.leave(roomKey);
+
+      const room = _meetingRooms.get(meetingRoomId);
+      if (room) {
+        room.delete(socket.id);
+        if (room.size === 0) _meetingRooms.delete(meetingRoomId);
+      }
+
+      socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // WebRTC signaling for meetings (offer/answer/ice)
+  socket.on('meeting:signal', async (data, ack) => {
+    try {
+      const { meetingRoomId, targetSocketId, signalData } = data || {};
+      if (!targetSocketId || !signalData) return ack?.({ error: 'targetSocketId and signalData required' });
+
+      io.to(targetSocketId).emit('meeting:signal', {
+        fromSocketId: socket.id,
+        fromUserId: userId,
+        signalData,
+        meetingRoomId,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // In-meeting chat
+  socket.on('meeting:chat', async (data, ack) => {
+    try {
+      const { meetingRoomId, message } = data || {};
+      if (!meetingRoomId || !message) return ack?.({ error: 'meetingRoomId and message required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      const chatMsg = {
+        id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+        userId,
+        userName: data.userName || 'User',
+        message,
+        timestamp: new Date().toISOString(),
+      };
+
+      io.to(roomKey).emit('meeting:chat-message', chatMsg);
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // Meeting reactions (hand raise, emoji reactions)
+  socket.on('meeting:reaction', async (data, ack) => {
+    try {
+      const { meetingRoomId, reaction } = data || {};
+      if (!meetingRoomId || !reaction) return ack?.({ error: 'meetingRoomId and reaction required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      io.to(roomKey).emit('meeting:reaction', {
+        userId, socketId: socket.id, reaction, userName: data.userName,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // Toggle media state broadcast (mute/unmute/video on-off/screen share)
+  socket.on('meeting:media-state', async (data, ack) => {
+    try {
+      const { meetingRoomId, audio, video, screenShare } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      socket.to(roomKey).emit('meeting:media-state', {
+        socketId: socket.id, userId, audio, video, screenShare,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // Pin / Spotlight participant
+  socket.on('meeting:pin', async (data, ack) => {
+    try {
+      const { meetingRoomId, targetSocketId, pinned } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+
+      const roomKey = `meeting:${meetingRoomId}`;
+      io.to(roomKey).emit('meeting:pin', {
+        userId, targetSocketId, pinned,
+      });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // Meeting invite notification
+  socket.on('meeting:invite', async (data, ack) => {
+    try {
+      const { targetUserIds, meetingId, meetingTitle, hostName, scheduledAt } = data || {};
+      if (!Array.isArray(targetUserIds) || !meetingId) return ack?.({ error: 'targetUserIds and meetingId required' });
+
+      const senderName = hostName || socket.user.name || 'User';
+      const sentFrom = buildSentFrom(socket);
+
+      // Resolve branding for email (fire once, reuse)
+      let branding = null;
+      try { branding = await resolveMailBranding(); } catch (_) {}
+      const appName = branding?.appName || 'TeamChatX';
+
+      for (const targetId of targetUserIds) {
+        // 1. Send real-time popup notification
+        emitToUser(String(targetId), 'meeting:invited', {
+          meetingId, meetingTitle, hostName: senderName, hostUserId: userId,
+        });
+
+        const receiverId = Number(targetId);
+        if (receiverId === Number(userId)) continue;
+
+        // 2. Send a DM chat message with meeting invite
+        try {
+          const inviteText = scheduledAt
+            ? `Meeting Invite: "${meetingTitle || 'Meeting'}"\nMeeting ID: ${meetingId}\nScheduled: ${new Date(scheduledAt).toLocaleString()}\n\nJoin using the Meeting ID from the + menu.`
+            : `Meeting Invite: "${meetingTitle || 'Meeting'}"\nMeeting ID: ${meetingId}\n\nJoin now using the Meeting ID from the + menu!`;
+
+          const saved = await chatModel.sendDMMessage({
+            orgId, senderId: Number(userId), receiverId,
+            message: inviteText, messageType: 'text',
+            metadata: { meetingInvite: true, meetingId, meetingTitle, scheduledAt, ...(sentFrom ? { sentFrom } : {}) },
+          });
+          if (saved) {
+            const normalized = normalizeDMMessage(saved);
+            const senderThreadId = `dm-${receiverId}`;
+            const receiverThread = getUserActiveThread(String(receiverId));
+            const receiverOnline = isUserOnline(String(receiverId));
+
+            emitToUser(userId, 'message:new', {
+              threadId: senderThreadId,
+              message: { ...normalized, direction: 'outgoing' },
+            });
+            await deliverDMToReceiver({
+              receiverId, userId, orgId, normalized, senderThreadId,
+              receiverThread, receiverOnline, senderName, messageType: 'text', message: inviteText,
+            });
+          }
+        } catch (dmErr) {
+          console.error('[socket] meeting invite DM to', targetId, 'failed:', dmErr.message);
+        }
+
+        // 3. Send email invite
+        try {
+          const { rows: userRows } = await db.query('SELECT email, name FROM users WHERE user_id = $1', [receiverId]);
+          const targetUser = userRows[0];
+          if (targetUser?.email) {
+            const scheduleInfo = scheduledAt
+              ? `<p style="margin:0 0 8px"><strong>Scheduled:</strong> ${new Date(scheduledAt).toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'short' })}</p>`
+              : `<p style="margin:0 0 8px;color:#1976d2"><strong>Starting now — join immediately!</strong></p>`;
+
+            const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">
+  <div style="max-width:520px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+    <div style="background:linear-gradient(135deg,#1565c0,#1976d2);padding:28px 32px;text-align:center">
+      <h1 style="margin:0;color:#fff;font-size:22px;font-weight:600">Meeting Invitation</h1>
+    </div>
+    <div style="padding:28px 32px">
+      <p style="margin:0 0 16px;color:#333;font-size:15px">Hi <strong>${targetUser.name || 'there'}</strong>,</p>
+      <p style="margin:0 0 20px;color:#555;font-size:14px"><strong>${senderName}</strong> has invited you to a meeting on <strong>${appName}</strong>.</p>
+
+      <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin:0 0 20px;border-left:4px solid #1976d2">
+        <p style="margin:0 0 8px"><strong>Title:</strong> ${meetingTitle || 'Meeting'}</p>
+        <p style="margin:0 0 8px"><strong>Meeting ID:</strong> <span style="font-family:monospace;font-size:16px;color:#1565c0;font-weight:700;letter-spacing:1px">${meetingId}</span></p>
+        ${scheduleInfo}
+      </div>
+
+      <div style="text-align:center;margin:24px 0">
+        <div style="display:inline-block;background:#1976d2;color:#fff;padding:12px 32px;border-radius:8px;font-size:15px;font-weight:600;letter-spacing:0.5px">
+          Join with ID: ${meetingId}
+        </div>
+      </div>
+
+      <p style="margin:0 0 8px;color:#777;font-size:13px"><strong>How to join:</strong></p>
+      <ol style="margin:0 0 16px;padding-left:20px;color:#777;font-size:13px">
+        <li>Open ${appName}</li>
+        <li>Click the <strong>+</strong> button</li>
+        <li>Select <strong>Meeting</strong> → <strong>Join</strong> tab</li>
+        <li>Enter Meeting ID: <strong>${meetingId}</strong></li>
+      </ol>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+      <p style="margin:0;color:#999;font-size:12px;text-align:center">Sent via ${appName}</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+            sendMailAsync({
+              to: targetUser.email,
+              subject: `${senderName} invited you to "${meetingTitle || 'Meeting'}" — ${appName}`,
+              text: `${senderName} invited you to a meeting.\n\nTitle: ${meetingTitle || 'Meeting'}\nMeeting ID: ${meetingId}\n${scheduledAt ? 'Scheduled: ' + new Date(scheduledAt).toLocaleString() + '\n' : ''}\nJoin using the Meeting ID in ${appName}.`,
+              html: emailHtml,
+            });
+          }
+        } catch (mailErr) {
+          console.error('[socket] meeting invite email to user', targetId, 'failed:', mailErr.message);
+        }
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  // Clean up meeting rooms on disconnect
+  const _origDisconnectHandler = socket._meetingCleanup;
+  socket._meetingCleanup = () => {
+    for (const [meetingRoomId, room] of _meetingRooms.entries()) {
+      if (room.has(socket.id)) {
+        room.delete(socket.id);
+        const roomKey = `meeting:${meetingRoomId}`;
+        socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
+        if (room.size === 0) _meetingRooms.delete(meetingRoomId);
+      }
+    }
+  };
+
   // ─── Tab Visibility (browser tab focus/blur) ────────────────────────────────
   socket.on('tab-visibility', async (data) => {
     if (!orgId) return;
@@ -2311,16 +2584,17 @@ const onConnection = (socket) => {
   socket.on('broadcast:send', async (data, ack) => {
     if (!rl.broadcast()) return ack?.({ error: 'Rate limited (max 2 broadcasts per minute)' });
     try {
-      const { contactIds, message, messageType = 'text', metadata = null } = data || {};
-      if (!Array.isArray(contactIds) || !contactIds.length || !message) {
-        return ack?.({ error: 'contactIds array and message required' });
+      const { contactIds = [], groupIds = [], message, messageType = 'text', metadata = null } = data || {};
+      if ((!contactIds.length && !groupIds.length) || !message) {
+        return ack?.({ error: 'contactIds/groupIds and message required' });
       }
-      if (contactIds.length > 50) return ack?.({ error: 'Max 50 contacts per broadcast' });
+      if (contactIds.length + groupIds.length > 50) return ack?.({ error: 'Max 50 targets per broadcast' });
 
       const sentFrom = buildSentFrom(socket);
       let sent = 0;
       let failed = 0;
 
+      // Send to individual contacts (DMs)
       for (const contactId of contactIds) {
         try {
           const receiverId = Number(contactId);
@@ -2346,10 +2620,34 @@ const onConnection = (socket) => {
           });
           sent++;
         } catch (err) {
-          console.error('[socket] broadcast send to', contactId, 'failed:', err.message);
+          console.error('[socket] broadcast DM to', contactId, 'failed:', err.message);
           failed++;
         }
       }
+
+      // Send to groups
+      for (const gId of groupIds) {
+        try {
+          const groupId = Number(gId);
+          const threadId = `group-${groupId}`;
+          const saved = await chatModel.sendGroupMessage({
+            orgId, groupId, senderId: Number(userId),
+            message, messageType, metadata: { ...(metadata || {}), broadcast: true, ...(sentFrom ? { sentFrom } : {}) },
+          });
+          if (!saved) { failed++; continue; }
+          const normalized = normalizeGroupMessage(saved, Number(userId));
+          await deliverGroupToMembers({
+            groupId, orgId, userId, normalized,
+            senderName: socket.user.name || 'User',
+            messageType, message, threadId,
+          });
+          sent++;
+        } catch (err) {
+          console.error('[socket] broadcast group to', gId, 'failed:', err.message);
+          failed++;
+        }
+      }
+
       ack?.({ ok: true, sent, failed });
     } catch (err) {
       console.error('[socket] broadcast:send error', err.message);
@@ -2360,6 +2658,8 @@ const onConnection = (socket) => {
   // ─── Disconnect ───────────────────────────────────────────────────────────
   socket.on('disconnect', (reason) => {
     if (_statsInterval) { clearInterval(_statsInterval); _statsInterval = null; }
+    // Clean up meeting rooms
+    if (socket._meetingCleanup) socket._meetingCleanup();
     socketActiveThread.delete(socket.id);
     removeUserSocket(userId, socket.id);
     // Clear org mapping on disconnect (only when ALL tabs closed)

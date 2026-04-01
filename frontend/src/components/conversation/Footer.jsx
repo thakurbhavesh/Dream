@@ -2612,26 +2612,7 @@ const ConversationFooter = ({
             >
               <PiPaperPlaneRight size={20} />
             </IconButton>
-            <Tooltip title="Schedule send">
-              <IconButton
-                disableRipple
-                sx={{
-                  alignSelf: "flex-start",
-                  width: 24,
-                  height: 45,
-                  borderRadius: "0 6px 6px 0",
-                  backgroundColor: "primary.main",
-                  color: "#fff",
-                  "&:hover": {
-                    backgroundColor: "primary.dark",
-                  },
-                  borderLeft: "1px solid rgba(255,255,255,0.3)",
-                }}
-                onClick={(e) => setScheduleAnchor(e.currentTarget)}
-              >
-                <PiClockBold size={14} />
-              </IconButton>
-            </Tooltip>
+            {/* Schedule send button hidden */}
           </Stack>
         </Box>
         <Divider sx={{ borderColor: theme.palette.grey[500_56] }} />

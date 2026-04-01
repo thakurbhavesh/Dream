@@ -11,6 +11,11 @@ const RTC_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun.relay.metered.ca:80" },
+    { urls: "turn:a.relay.metered.ca:80", username: "e8dd65b92a0abe29be4e6ed4", credential: "5sIJGwERkrG2tLLu" },
+    { urls: "turn:a.relay.metered.ca:80?transport=tcp", username: "e8dd65b92a0abe29be4e6ed4", credential: "5sIJGwERkrG2tLLu" },
+    { urls: "turn:a.relay.metered.ca:443", username: "e8dd65b92a0abe29be4e6ed4", credential: "5sIJGwERkrG2tLLu" },
+    { urls: "turns:a.relay.metered.ca:443?transport=tcp", username: "e8dd65b92a0abe29be4e6ed4", credential: "5sIJGwERkrG2tLLu" },
   ],
 };
 

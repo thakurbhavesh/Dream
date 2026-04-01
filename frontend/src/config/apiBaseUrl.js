@@ -7,6 +7,14 @@ const DEFAULT_DEV_API_URL = "http://localhost:5000";
 const DEFAULT_PROD_API_URL = "https://server.officechatkarlo.com";
 
 export const getApiBaseUrl = () => {
+  // Auto-detect: if opened from a network IP (not localhost), use that IP for API too
+  if (typeof window !== "undefined" && !import.meta.env.PROD) {
+    const host = window.location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") {
+      return `http://${host}:5000`;
+    }
+  }
+
   const candidates = [
     import.meta.env.REACT_APP_API_URL,
     import.meta.env.VITE_API_URL,

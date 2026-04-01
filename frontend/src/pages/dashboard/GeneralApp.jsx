@@ -2923,6 +2923,8 @@ const GeneralApp = () => {
                 email: resolvedProfile?.email || "",
                 avatar: resolvedProfile?.avatar || "",
               }}
+              organizationId={activeOrganizationId}
+              threads={threadsForActiveOrg}
               disabled={isLocked || threadsLoading}
               onCreateGroup={handleCreateGroup}
             />

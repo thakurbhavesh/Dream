@@ -39,6 +39,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const translateRoutes = require('./routes/translateRoutes');
 const aiProviderRoutes = require('./routes/aiProviderRoutes');
 const gifRoutes = require('./routes/gifRoutes');
+const meetingRoutes = require('./routes/meetingRoutes');
 
 const app = express();
 
@@ -51,8 +52,8 @@ const corsOptions = {
   origin(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    // Dev convenience: allow localhost origins even if port changes (e.g. Vite fallback port).
-    if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    // Dev convenience: allow localhost and local network IPs (e.g. 192.168.x.x, 10.x.x.x)
+    if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }
     return callback(new Error('Origin not allowed by CORS'));
@@ -112,6 +113,7 @@ app.use('/upload', uploadRoutes);
 app.use('/translate', translateRoutes);
 app.use('/ai-providers', aiProviderRoutes);
 app.use('/gifs', gifRoutes);
+app.use('/meetings', meetingRoutes);
 
 
 app.use((req, res, next) => {

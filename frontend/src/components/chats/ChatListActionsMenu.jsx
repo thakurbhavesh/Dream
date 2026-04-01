@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Alert,
   Box,
@@ -13,15 +13,21 @@ import {
   PiShareFatBold,
   PiUsersThreeBold,
   PiXBold,
+  PiVideoCameraBold,
 } from "react-icons/pi";
 import GroupMembersDialog from "./GroupMembersDialog.jsx";
 import BroadcastDialog from "./BroadcastDialog.jsx";
+import MeetingDialog from "../meeting/MeetingDialog.jsx";
+import MeetingRoom from "../meeting/MeetingRoom.jsx";
+import { useMeetingContext } from "../../contexts/MeetingContext.jsx";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
 import { useSocket } from "../../contexts/SocketContext.jsx";
 
 const ChatListActionsMenu = ({
   members = [],
   currentUser = null,
+  organizationId = null,
+  threads = [],
   disabled = false,
   onCreateGroup,
 }) => {
@@ -33,6 +39,9 @@ const ChatListActionsMenu = ({
   const [anchorEl, setAnchorEl] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [meetingDialogOpen, setMeetingDialogOpen] = useState(false);
+  const [meetingRoomOpen, setMeetingRoomOpen] = useState(false);
+  const meeting = useMeetingContext();
   const [toast, setToast] = useState({
     open: false,
     message: "",
@@ -88,10 +97,56 @@ const ChatListActionsMenu = ({
     handleCloseMenu();
   };
 
-  const handleBroadcastSend = (contactIds, message) => {
+  const handleOpenMeeting = () => {
+    setMeetingDialogOpen(true);
+    handleCloseMenu();
+  };
+
+  const handleMeetingCreated = (meetingData, action) => {
+    const userName = authUser?.first_name
+      ? `${authUser.first_name} ${authUser.last_name || ""}`.trim()
+      : authUser?.name || "User";
+
+    // Send invite notifications + DM messages for all meeting types
+    const sendInvites = (data) => {
+      if (!socket) return;
+      const participantIds = (data.participants || [])
+        .map((p) => p.user_id)
+        .filter((id) => id && String(id) !== String(authUser?.id || authUser?.user_id));
+      if (participantIds.length > 0) {
+        socket.emit("meeting:invite", {
+          targetUserIds: participantIds,
+          meetingId: data.meeting_id,
+          meetingTitle: data.title,
+          hostName: userName,
+          scheduledAt: data.scheduled_at || null,
+        });
+      }
+    };
+
+    if (action === "instant" || action === "join-now" || action === "join") {
+      meeting.joinMeeting({
+        meetingRoomId: meetingData.meeting_id,
+        meetingData,
+        userName,
+        enableVideo: true,
+        enableAudio: true,
+      });
+      setMeetingRoomOpen(true);
+      setMeetingDialogOpen(false);
+
+      if (action === "instant") sendInvites(meetingData);
+    } else if (action === "scheduled") {
+      sendInvites(meetingData);
+      setMeetingDialogOpen(false);
+      setToast({ open: true, message: "Meeting scheduled!", severity: "success" });
+    }
+  };
+
+  const handleBroadcastSend = ({ contactIds = [], groupIds = [], message, messageType = "text", metadata = null }) => {
     return new Promise((resolve) => {
       if (!socket) return resolve({ error: "Not connected" });
-      socket.emit("broadcast:send", { contactIds, message, messageType: "text" }, resolve);
+      socket.emit("broadcast:send", { contactIds, groupIds, message, messageType, metadata }, resolve);
     });
   };
   const handleCreateGroup = async (payload = {}) => {
@@ -147,8 +202,21 @@ const ChatListActionsMenu = ({
     }
   };
 
-  // Hide FAB entirely for User role (no menu items for them)
-  if (isUser) return null;
+  // Listen for meeting invite join events
+  const handleInviteJoin = useCallback((e) => {
+    const meetingData = e.detail;
+    if (meetingData) {
+      handleMeetingCreated(meetingData, "join");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meeting, authUser, socket]);
+
+  useEffect(() => {
+    window.addEventListener("meeting:join-from-invite", handleInviteJoin);
+    return () => window.removeEventListener("meeting:join-from-invite", handleInviteJoin);
+  }, [handleInviteJoin]);
+
+  // FAB visible for all roles (Users can create groups & meetings)
 
   return (
     <>
@@ -189,24 +257,27 @@ const ChatListActionsMenu = ({
         transitionDuration={200}
       >
         <Stack sx={{ p: 1 }} spacing={0.5}>
-          {!isUser && (
-            <Button
-              onClick={handleOpenCreateGroup}
-              startIcon={<PiUsersThreeBold size={16} />}
-              sx={{ justifyContent: "flex-start", color: "text.primary" }}
-            >
-              Create Group
-            </Button>
-          )}
-          {isOwner && (
-            <Button
-              onClick={handleBroadcast}
-              startIcon={<PiShareFatBold size={16} />}
-              sx={{ justifyContent: "flex-start", color: "text.primary" }}
-            >
-              Broadcast
-            </Button>
-          )}
+          <Button
+            onClick={handleOpenCreateGroup}
+            startIcon={<PiUsersThreeBold size={16} />}
+            sx={{ justifyContent: "flex-start", color: "text.primary" }}
+          >
+            Create Group
+          </Button>
+          <Button
+            onClick={handleOpenMeeting}
+            startIcon={<PiVideoCameraBold size={16} />}
+            sx={{ justifyContent: "flex-start", color: "text.primary" }}
+          >
+            Meeting
+          </Button>
+          <Button
+            onClick={handleBroadcast}
+            startIcon={<PiShareFatBold size={16} />}
+            sx={{ justifyContent: "flex-start", color: "text.primary" }}
+          >
+            Broadcast
+          </Button>
         </Stack>
       </Popover>
 
@@ -225,8 +296,29 @@ const ChatListActionsMenu = ({
         open={broadcastOpen}
         onClose={() => setBroadcastOpen(false)}
         contacts={sortedMembers.filter((m) => !m.isSelf)}
+        threads={threads}
         onSend={handleBroadcastSend}
       />
+
+      <MeetingDialog
+        open={meetingDialogOpen}
+        onClose={() => setMeetingDialogOpen(false)}
+        members={sortedMembers}
+        organizationId={organizationId}
+        onMeetingCreated={handleMeetingCreated}
+      />
+
+      {meetingRoomOpen && (
+        <MeetingRoom
+          userName={
+            authUser?.first_name
+              ? `${authUser.first_name} ${authUser.last_name || ""}`.trim()
+              : authUser?.name || "User"
+          }
+          userId={authUser?.id || authUser?.user_id}
+          onLeave={() => setMeetingRoomOpen(false)}
+        />
+      )}
 
       <Snackbar
         open={toast.open}

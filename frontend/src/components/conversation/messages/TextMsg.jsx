@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Box, Link, Stack, Typography } from "@mui/material";
+import { Box, Button, Link, Stack, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import { PiVideoCameraBold, PiCopyBold } from "react-icons/pi";
 import EmojiMsg from "./EmojiMsg.jsx";
 import {
   buildTextMessageRenderCache,
@@ -126,8 +127,117 @@ const injectMentionsIntoHtml = (html, mentions) => {
   return doc.body.innerHTML;
 };
 
+// ─── Meeting Invite Card ──────────────────────────────────────────────────
+const MeetingInviteCard = ({ metadata }) => {
+  const { meetingId, meetingTitle, scheduledAt } = metadata || {};
+  const [copied, setCopied] = useState(false);
+
+  const handleJoin = () => {
+    window.dispatchEvent(
+      new CustomEvent("meeting:join-from-invite", {
+        detail: { meeting_id: meetingId, title: meetingTitle },
+      })
+    );
+  };
+
+  const handleCopy = () => {
+    if (meetingId) {
+      navigator.clipboard.writeText(meetingId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        borderRadius: 2,
+        overflow: "hidden",
+        maxWidth: 320,
+        border: "1px solid",
+        borderColor: "divider",
+        bgcolor: "background.paper",
+      }}
+    >
+      {/* Header */}
+      <Box
+        sx={{
+          background: "linear-gradient(135deg, #1565c0, #1976d2)",
+          px: 2,
+          py: 1.25,
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+        }}
+      >
+        <PiVideoCameraBold size={18} color="#fff" />
+        <Typography variant="subtitle2" sx={{ color: "#fff", fontWeight: 600 }}>
+          Meeting Invite
+        </Typography>
+      </Box>
+
+      {/* Body */}
+      <Stack sx={{ px: 2, py: 1.5 }} spacing={1}>
+        <Typography variant="subtitle2" fontWeight={700} noWrap>
+          {meetingTitle || "Meeting"}
+        </Typography>
+
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            ID:
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              fontFamily: "monospace",
+              fontWeight: 700,
+              color: "primary.main",
+              letterSpacing: 1,
+            }}
+          >
+            {meetingId}
+          </Typography>
+          <Box
+            component="span"
+            onClick={handleCopy}
+            sx={{ cursor: "pointer", display: "inline-flex", ml: 0.5 }}
+          >
+            <PiCopyBold size={13} color={copied ? "#4caf50" : "#999"} />
+          </Box>
+        </Stack>
+
+        {scheduledAt && (
+          <Typography variant="caption" color="text.secondary">
+            {new Date(scheduledAt).toLocaleString([], {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </Typography>
+        )}
+
+        <Button
+          variant="contained"
+          size="small"
+          startIcon={<PiVideoCameraBold size={16} />}
+          onClick={handleJoin}
+          sx={{
+            mt: 0.5,
+            textTransform: "none",
+            fontWeight: 600,
+            borderRadius: 1.5,
+            py: 0.75,
+          }}
+        >
+          Join Meeting
+        </Button>
+      </Stack>
+    </Box>
+  );
+};
+
 const TextMsg = ({ message }) => {
   // console.log("[TextMsg] message --->", message);
+  const isMeetingInvite = message?.metadata?.meetingInvite === true;
   const textValue = message?.content?.text ?? "";
   const htmlValue = message?.content?.html ?? "";
   const mentionEntries = message?.metadata?.mentions ?? [];
@@ -190,6 +300,11 @@ const TextMsg = ({ message }) => {
     },
     [handleMentionClick, mentionMap]
   );
+
+  // Meeting invite → render card with Join button
+  if (isMeetingInvite && message?.metadata?.meetingId) {
+    return <MeetingInviteCard metadata={message.metadata} />;
+  }
 
   if (isEmojiOnly) {
     // Emoji-only payloads get elevated into a grid so large reactions do not
