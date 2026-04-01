@@ -25,6 +25,7 @@ const Demo = lazy(() => import("../website/pages/Demo.jsx"));
 const Help = lazy(() => import("../website/pages/Help.jsx"));
 const HowItworks = lazy(() => import("../website/pages/HowItworks.jsx"));
 const Contact = lazy(() => import("../website/pages/Contact.jsx"));
+const Compare = lazy(() => import("../website/pages/Compare.jsx"));
 
 export default function Router() {
   const authenticated = authStore.useAuthStatus();
@@ -78,6 +79,7 @@ export default function Router() {
           { path: "help", element: <Help /> },
           { path: "how-it-works", element: <HowItworks /> },
           { path: "contact", element: <Contact /> },
+          { path: "compare", element: <Compare /> },
         ],
       },
       {

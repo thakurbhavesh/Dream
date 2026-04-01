@@ -157,6 +157,11 @@ const Navbar = () => {
                     Features
                   </Link>
                 </li>
+                <li className="nav-item">
+                  <Link className="nav-link" to="/compare">
+                    Compare
+                  </Link>
+                </li>
                 <li className="nav-item dropdown">
                   <div
                     className="nav-link dropdown-toggle"
