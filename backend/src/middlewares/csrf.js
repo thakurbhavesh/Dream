@@ -22,12 +22,20 @@ const PUBLIC_MUTATION_ROUTES = new Set([
   '/upload/profile-picture',
 ]);
 
+// Routes that start with these prefixes skip CSRF (protected by Bearer auth)
+const CSRF_EXEMPT_PREFIXES = ['/meetings', '/chat/', '/auth/'];
+
 const csrfProtection = (req, res, next) => {
   if (SAFE_METHODS.has(String(req.method || '').toUpperCase())) {
     return next();
   }
 
   if (PUBLIC_MUTATION_ROUTES.has(req.path)) {
+    return next();
+  }
+
+  // Skip CSRF for exempt prefixes (these use Bearer token auth)
+  if (CSRF_EXEMPT_PREFIXES.some(prefix => req.path.startsWith(prefix))) {
     return next();
   }
 
