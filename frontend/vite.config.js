@@ -12,8 +12,9 @@ export default defineConfig({
     react(),
   ],
   server: {
-    host: '0.0.0.0',  // Allow access from other devices on the network
+    host: '0.0.0.0',
     port: 5173,
+    allowedHosts: 'all',  // Allow tunnel domains
   },
   build: {
     chunkSizeWarningLimit: 900,

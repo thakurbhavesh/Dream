@@ -52,7 +52,7 @@ const corsOptions = {
   origin(origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    // Dev convenience: allow localhost and local network IPs (e.g. 192.168.x.x, 10.x.x.x)
+    // Dev convenience: allow localhost, local network IPs, and tunnel domains
     if (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }

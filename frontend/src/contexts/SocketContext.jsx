@@ -17,7 +17,7 @@ const buildSocketUrl = (explicitUrl) => {
   if (typeof window !== "undefined" && !import.meta.env.PROD) {
     const host = window.location.hostname;
     if (host && host !== "localhost" && host !== "127.0.0.1") {
-      return `http://${host}:5000`;
+      return `${window.location.protocol}//${host}:5000`;
     }
   }
 

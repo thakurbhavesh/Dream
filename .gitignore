@@ -1,6 +1,6 @@
 .env
+.env.local
 node_modules
-migrations
 
 # Logs
 logs
@@ -26,3 +26,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+backend/neon-*.sql

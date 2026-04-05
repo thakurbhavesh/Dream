@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // Change this to your backend URL
-export const API_BASE_URL = 'http://10.215.82.10:5000';
+export const API_BASE_URL = 'http://10.232.7.40:5000';
 export const SOCKET_URL = API_BASE_URL;
 
 const api = axios.create({
