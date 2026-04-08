@@ -75,7 +75,10 @@ const VideoTile = ({ stream, userName, isMuted, isVideoOff, isLocal, isScreenSha
           sx={{
             width: "100%",
             height: "100%",
-            objectFit: "cover",
+            // Screen share: contain so the entire shared screen is visible.
+            // Camera: cover so faces fill the tile without letterboxing.
+            objectFit: isScreenShare ? "contain" : "cover",
+            backgroundColor: isScreenShare ? "#000" : "transparent",
             transform: isLocal && !isScreenShare ? "scaleX(-1)" : "none",
           }}
         />
@@ -324,6 +327,26 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
     }
   }, [meeting.status, onLeave]);
 
+  // Auto-pin a remote participant when they start screen sharing.
+  // Unpin them when they stop. Local user sharing is handled separately
+  // via the showLocalScreenAsPrimary branch in the layout below.
+  useEffect(() => {
+    const sharer = meeting.participants.find((p) => p.screenShare);
+    if (sharer && meeting.pinnedSocketId !== sharer.socketId) {
+      meeting.pinParticipant(sharer.socketId);
+      meeting.setViewMode("speaker");
+    } else if (!sharer && meeting.pinnedSocketId) {
+      // If the pinned participant was sharing and stopped, unpin
+      const pinned = meeting.participants.find(
+        (p) => p.socketId === meeting.pinnedSocketId
+      );
+      if (pinned && pinned.screenShare === false) {
+        meeting.pinParticipant(null);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meeting.participants.map((p) => `${p.socketId}:${p.screenShare}`).join(",")]);
+
   // Track unread when chat is closed
   useEffect(() => {
     if (!chatOpen && meeting.chatMessages.length > 0) {
@@ -373,7 +396,14 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
   };
 
   const gridCols = getGridCols();
-  const showingPinned = meeting.pinnedSocketId && meeting.viewMode !== "gallery";
+  // Promote local screen share to the main area so the sharer sees their
+  // own screen big (and other tiles move to the sidebar). This activates
+  // even when no remote participant is pinned.
+  const showLocalScreenAsPrimary =
+    meeting.isScreenSharing && meeting.viewMode !== "gallery";
+  const showingPinned =
+    (meeting.pinnedSocketId && meeting.viewMode !== "gallery") ||
+    showLocalScreenAsPrimary;
 
   // Build tiles array
   const pinnedParticipant = meeting.participants.find((p) => p.socketId === meeting.pinnedSocketId);
@@ -454,42 +484,70 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
           transition: "margin-right 0.3s ease",
         }}
       >
-        {showingPinned && pinnedParticipant ? (
-          // Pinned / Speaker view
+        {showingPinned && (pinnedParticipant || showLocalScreenAsPrimary) ? (
+          // Pinned / Speaker view (also covers local screen share)
           <Stack direction="row" sx={{ width: "100%", height: "100%", gap: 1 }}>
             <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <VideoTile
-                stream={pinnedParticipant.stream}
-                userName={pinnedParticipant.userName}
-                isMuted={!pinnedParticipant.audio}
-                isVideoOff={!pinnedParticipant.video}
-                isScreenShare={pinnedParticipant.screenShare}
-                isPinned
-                handRaised={pinnedParticipant.handRaised}
-              />
+              {showLocalScreenAsPrimary ? (
+                <VideoTile
+                  stream={meeting.screenStream}
+                  userName={userName}
+                  isMuted={meeting.isMuted}
+                  isVideoOff={false}
+                  isLocal
+                  isScreenShare
+                  isPinned
+                />
+              ) : (
+                <VideoTile
+                  stream={pinnedParticipant.stream}
+                  userName={pinnedParticipant.userName}
+                  isMuted={!pinnedParticipant.audio}
+                  isVideoOff={!pinnedParticipant.video}
+                  isScreenShare={pinnedParticipant.screenShare}
+                  isPinned
+                  handRaised={pinnedParticipant.handRaised}
+                />
+              )}
             </Box>
             <Stack sx={{ width: 200, gap: 1, overflow: "auto" }}>
-              <VideoTile
-                stream={meeting.isScreenSharing ? meeting.screenStream : meeting.localStream}
-                userName={userName}
-                isMuted={meeting.isMuted}
-                isVideoOff={meeting.isVideoOff && !meeting.isScreenSharing}
-                isLocal
-                isScreenShare={meeting.isScreenSharing}
-                onPin={() => meeting.pinParticipant(null)}
-              />
-              {meeting.participants.filter((p) => p.socketId !== meeting.pinnedSocketId).map((p) => (
+              {/* Local camera tile (only show in sidebar when NOT showing it as primary) */}
+              {!showLocalScreenAsPrimary && (
                 <VideoTile
-                  key={p.socketId}
-                  stream={p.stream}
-                  userName={p.userName}
-                  isMuted={!p.audio}
-                  isVideoOff={!p.video}
-                  isScreenShare={p.screenShare}
-                  onPin={() => meeting.pinParticipant(p.socketId)}
-                  handRaised={p.handRaised}
+                  stream={meeting.localStream}
+                  userName={userName}
+                  isMuted={meeting.isMuted}
+                  isVideoOff={meeting.isVideoOff}
+                  isLocal
+                  isScreenShare={false}
+                  onPin={() => meeting.pinParticipant(null)}
                 />
-              ))}
+              )}
+              {/* When local IS sharing, still show local camera (if on) in sidebar */}
+              {showLocalScreenAsPrimary && !meeting.isVideoOff && meeting.localStream && (
+                <VideoTile
+                  stream={meeting.localStream}
+                  userName={userName}
+                  isMuted={meeting.isMuted}
+                  isVideoOff={false}
+                  isLocal
+                  isScreenShare={false}
+                />
+              )}
+              {meeting.participants
+                .filter((p) => p.socketId !== meeting.pinnedSocketId)
+                .map((p) => (
+                  <VideoTile
+                    key={p.socketId}
+                    stream={p.stream}
+                    userName={p.userName}
+                    isMuted={!p.audio}
+                    isVideoOff={!p.video}
+                    isScreenShare={p.screenShare}
+                    onPin={() => meeting.pinParticipant(p.socketId)}
+                    handRaised={p.handRaised}
+                  />
+                ))}
             </Stack>
           </Stack>
         ) : (
