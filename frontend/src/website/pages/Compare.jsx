@@ -200,11 +200,176 @@ const scoreFor = (key) =>
     return sum;
   }, 0);
 
+// Per-category score for a competitor
+const categoryScoreFor = (cat, key) => {
+  const catFeatures = features.filter((f) => f.category === cat);
+  return catFeatures.reduce((sum, f) => {
+    const v = f.support[key];
+    if (v === true) return sum + 1;
+    if (v === "partial") return sum + 0.5;
+    return sum;
+  }, 0);
+};
+
+const categoryMax = (cat) => features.filter((f) => f.category === cat).length;
+
+// ─── Radar Chart (SVG) ─────────────────────────────────────────────
+const RadarChart = ({ size = 360 }) => {
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = size * 0.38;
+  const numAxes = categories.length;
+
+  // Convert (axisIdx, valueRatio) to (x, y)
+  const point = (axisIdx, ratio) => {
+    const angle = (Math.PI * 2 * axisIdx) / numAxes - Math.PI / 2;
+    return [cx + Math.cos(angle) * radius * ratio, cy + Math.sin(angle) * radius * ratio];
+  };
+
+  // Polygon points string for a competitor
+  const polygonFor = (key) =>
+    categories
+      .map((cat, i) => {
+        const score = categoryScoreFor(cat, key);
+        const max = categoryMax(cat);
+        const ratio = max > 0 ? score / max : 0;
+        const [x, y] = point(i, ratio);
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+  // Background grid rings
+  const rings = [0.25, 0.5, 0.75, 1];
+
+  return (
+    <svg
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ width: "100%", maxWidth: size, height: "auto" }}
+    >
+      {/* Concentric grid rings */}
+      {rings.map((r) => (
+        <polygon
+          key={r}
+          points={categories
+            .map((_, i) => {
+              const [x, y] = point(i, r);
+              return `${x},${y}`;
+            })
+            .join(" ")}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="1"
+        />
+      ))}
+      {/* Axis lines */}
+      {categories.map((_, i) => {
+        const [x, y] = point(i, 1);
+        return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#e2e8f0" strokeWidth="1" />;
+      })}
+
+      {/* Competitor polygons (paint smallest first so leader sits on top) */}
+      {[...competitors]
+        .sort((a, b) => scoreFor(a.key) - scoreFor(b.key))
+        .map((c) => (
+          <polygon
+            key={c.key}
+            points={polygonFor(c.key)}
+            fill={c.color}
+            fillOpacity={c.isUs ? 0.35 : 0.18}
+            stroke={c.color}
+            strokeWidth={c.isUs ? 2.5 : 1.5}
+            strokeLinejoin="round"
+          />
+        ))}
+
+      {/* Axis labels */}
+      {categories.map((cat, i) => {
+        const [x, y] = point(i, 1.18);
+        const isTop = y < cy - 5;
+        const isBottom = y > cy + 5;
+        const anchor = Math.abs(x - cx) < 5 ? "middle" : x < cx ? "end" : "start";
+        return (
+          <g key={cat}>
+            <text
+              x={x}
+              y={y + (isTop ? -4 : isBottom ? 12 : 4)}
+              fontSize="11"
+              fontWeight="700"
+              fill="#475569"
+              textAnchor={anchor}
+            >
+              {categoryIcons[cat]}
+            </text>
+            <text
+              x={x}
+              y={y + (isTop ? 8 : isBottom ? 24 : 16)}
+              fontSize="9"
+              fontWeight="600"
+              fill="#64748b"
+              textAnchor={anchor}
+            >
+              {cat.length > 14 ? cat.split(" ")[0] : cat}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
 const Compare = () => {
   const [activeCategory, setActiveCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [exclusiveOnly, setExclusiveOnly] = useState(false);
   const [hoveredRow, setHoveredRow] = useState(null);
+  const [teamSize, setTeamSize] = useState(20);
+  const [contractMonths, setContractMonths] = useState(12);
+
+  // Cost calculator math (uses pricing.starting parsed as float)
+  const monthlyPrices = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(pricing).map(([k, v]) => [
+          k,
+          parseFloat(String(v.starting).replace(/[^0-9.]/g, "")) || 0,
+        ])
+      ),
+    []
+  );
+
+  const costBreakdown = useMemo(() => {
+    return competitors.map((c) => {
+      const total = monthlyPrices[c.key] * teamSize * contractMonths;
+      return { ...c, monthly: monthlyPrices[c.key], total };
+    });
+  }, [teamSize, contractMonths, monthlyPrices]);
+
+  const tcxTotal = costBreakdown.find((c) => c.isUs)?.total || 0;
+  const maxCompetitorTotal = Math.max(
+    ...costBreakdown.filter((c) => !c.isUs).map((c) => c.total)
+  );
+  const savingsVsMax = Math.max(0, maxCompetitorTotal - tcxTotal);
+
+  // Per-category verdicts
+  const categoryVerdicts = useMemo(
+    () =>
+      categories.map((cat) => {
+        const scoresByComp = competitors.map((c) => ({
+          key: c.key,
+          name: c.name,
+          short: c.short,
+          color: c.color,
+          isUs: c.isUs,
+          score: categoryScoreFor(cat, c.key),
+        }));
+        scoresByComp.sort((a, b) => b.score - a.score);
+        const winner = scoresByComp[0];
+        const runnerUp = scoresByComp[1];
+        const max = categoryMax(cat);
+        return { cat, max, winner, runnerUp, all: scoresByComp };
+      }),
+    []
+  );
 
   const scores = useMemo(
     () => Object.fromEntries(competitors.map((c) => [c.key, scoreFor(c.key)])),
@@ -445,6 +610,346 @@ const Compare = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Visual Radar + Category Verdicts ────────────────── */}
+      <section style={{ padding: "70px 0", background: "#fafbff" }}>
+        <div className="container">
+          <div style={{ textAlign: "center", marginBottom: 50 }}>
+            <p
+              style={{
+                display: "inline-block",
+                background: "#eef2ff",
+                color: "#4f46e5",
+                borderRadius: 999,
+                padding: "5px 14px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.2,
+                marginBottom: 14,
+                textTransform: "uppercase",
+              }}
+            >
+              Visual Breakdown
+            </p>
+            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, color: "#0f172a", marginBottom: 10 }}>
+              Where each platform shines
+            </h2>
+            <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
+              See category-by-category coverage at a glance. The wider the shape, the more complete the platform.
+            </p>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)",
+              gap: 40,
+              alignItems: "center",
+              maxWidth: 1100,
+              margin: "0 auto",
+            }}
+          >
+            {/* Radar */}
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 20,
+                padding: 30,
+                border: "1.5px solid #e2e8f0",
+                boxShadow: "0 8px 24px -16px rgba(15,23,42,0.12)",
+              }}
+            >
+              <RadarChart size={380} />
+              {/* Legend */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  justifyContent: "center",
+                  gap: 14,
+                  marginTop: 14,
+                  paddingTop: 14,
+                  borderTop: "1px solid #f1f5f9",
+                }}
+              >
+                {competitors.map((c) => (
+                  <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+                    <span
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 3,
+                        background: c.color,
+                        opacity: c.isUs ? 1 : 0.6,
+                        border: c.isUs ? `2px solid ${c.color}` : "none",
+                      }}
+                    />
+                    <span style={{ color: c.isUs ? c.color : "#64748b" }}>{c.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Category verdict list */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {categoryVerdicts.map((v) => {
+                const usEntry = v.all.find((x) => x.isUs);
+                const tcxWins = v.winner.isUs;
+                const margin = usEntry.score - v.runnerUp.score;
+                return (
+                  <div
+                    key={v.cat}
+                    style={{
+                      background: "#fff",
+                      border: "1.5px solid #e2e8f0",
+                      borderLeft: tcxWins ? "4px solid #0162c4" : `4px solid ${v.winner.color}`,
+                      borderRadius: 12,
+                      padding: "14px 18px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      transition: "transform 0.2s ease, box-shadow 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateX(4px)";
+                      e.currentTarget.style.boxShadow = "0 8px 20px -10px rgba(15,23,42,0.15)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateX(0)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <div style={{ fontSize: 22 }}>{categoryIcons[v.cat]}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>
+                        {v.cat}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>
+                        {tcxWins ? (
+                          <>
+                            <span style={{ color: "#16a34a", fontWeight: 700 }}>TeamChatX wins</span>
+                            {margin > 0 && (
+                              <span> by {margin === 0.5 ? "½" : margin} feature{margin === 1 || margin === 0.5 ? "" : "s"}</span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ color: v.winner.color, fontWeight: 700 }}>{v.winner.name} leads</span>
+                            <span> · TCX scores {usEntry.score}/{v.max}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        background: tcxWins ? "linear-gradient(135deg, #dcfce7, #bbf7d0)" : "#f1f5f9",
+                        color: tcxWins ? "#15803d" : "#475569",
+                        fontSize: 11,
+                        fontWeight: 800,
+                        padding: "6px 12px",
+                        borderRadius: 999,
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {usEntry.score}/{v.max}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Cost Calculator ────────────────────────────────── */}
+      <section
+        style={{
+          padding: "70px 0",
+          background: "linear-gradient(180deg, #f8fafc, #eef2ff)",
+          borderTop: "1px solid #e2e8f0",
+          borderBottom: "1px solid #e2e8f0",
+        }}
+      >
+        <div className="container">
+          <div style={{ textAlign: "center", marginBottom: 40 }}>
+            <p
+              style={{
+                display: "inline-block",
+                background: "#dcfce7",
+                color: "#16a34a",
+                borderRadius: 999,
+                padding: "5px 14px",
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.2,
+                marginBottom: 14,
+                textTransform: "uppercase",
+              }}
+            >
+              Cost Calculator
+            </p>
+            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, color: "#0f172a", marginBottom: 10 }}>
+              See how much you save
+            </h2>
+            <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
+              Drag the sliders to your team size and contract length. We'll do the math.
+            </p>
+          </div>
+
+          <div
+            style={{
+              maxWidth: 880,
+              margin: "0 auto",
+              background: "#fff",
+              border: "1.5px solid #e2e8f0",
+              borderRadius: 20,
+              padding: "32px 36px",
+              boxShadow: "0 12px 32px -16px rgba(15,23,42,0.12)",
+            }}
+          >
+            {/* Sliders */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 28, marginBottom: 32 }}>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>Team size</label>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "#0162c4" }}>
+                    {teamSize}
+                    <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}> users</span>
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="500"
+                  step="1"
+                  value={teamSize}
+                  onChange={(e) => setTeamSize(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    accentColor: "#0162c4",
+                    cursor: "pointer",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                  <span>1</span>
+                  <span>500</span>
+                </div>
+              </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>Contract length</label>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "#0162c4" }}>
+                    {contractMonths}
+                    <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}> month{contractMonths === 1 ? "" : "s"}</span>
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="36"
+                  step="1"
+                  value={contractMonths}
+                  onChange={(e) => setContractMonths(Number(e.target.value))}
+                  style={{
+                    width: "100%",
+                    accentColor: "#0162c4",
+                    cursor: "pointer",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+                  <span>1 mo</span>
+                  <span>36 mo</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bars */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {[...costBreakdown]
+                .sort((a, b) => a.total - b.total)
+                .map((c) => {
+                  const max = Math.max(...costBreakdown.map((x) => x.total));
+                  const widthPct = max > 0 ? (c.total / max) * 100 : 0;
+                  return (
+                    <div key={c.key}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: c.isUs ? "#0162c4" : "#475569" }}>
+                          {c.isUs && "★ "}{c.name}
+                        </span>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: c.isUs ? "#0162c4" : "#0f172a" }}>
+                          ${c.total.toLocaleString()}
+                        </span>
+                      </div>
+                      <div style={{ height: 10, borderRadius: 999, background: "#f1f5f9", overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${widthPct}%`,
+                            background: c.isUs ? c.gradient : c.color,
+                            opacity: c.isUs ? 1 : 0.7,
+                            borderRadius: 999,
+                            transition: "width 0.4s ease",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Savings callout */}
+            {savingsVsMax > 0 && (
+              <div
+                style={{
+                  marginTop: 28,
+                  padding: "20px 24px",
+                  background: "linear-gradient(135deg, #dcfce7, #bbf7d0)",
+                  border: "1.5px solid #86efac",
+                  borderRadius: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ fontSize: 36 }}>{"\uD83D\uDCB0"}</div>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#15803d", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
+                    Your savings
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "#14532d", lineHeight: 1.2 }}>
+                    Save up to <span style={{ color: "#16a34a" }}>${savingsVsMax.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#15803d", marginTop: 4 }}>
+                    over {contractMonths} month{contractMonths === 1 ? "" : "s"} for {teamSize} user{teamSize === 1 ? "" : "s"} vs the most expensive option
+                  </div>
+                </div>
+                <Link
+                  to="/auth/register"
+                  style={{
+                    background: "linear-gradient(135deg, #16a34a, #15803d)",
+                    color: "#fff",
+                    padding: "12px 24px",
+                    borderRadius: 10,
+                    fontWeight: 700,
+                    fontSize: 14,
+                    textDecoration: "none",
+                    whiteSpace: "nowrap",
+                    boxShadow: "0 8px 20px -6px rgba(22,163,74,0.45)",
+                  }}
+                >
+                  Claim savings →
+                </Link>
+              </div>
+            )}
+
+            <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 18, marginBottom: 0 }}>
+              Estimates based on each vendor's published starting price as of 2025. Actual enterprise pricing may vary.
+            </p>
           </div>
         </div>
       </section>
