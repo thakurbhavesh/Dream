@@ -45,7 +45,7 @@ const VideoTile = ({ stream, userName, isMuted, isVideoOff, isLocal, isScreenSha
     if (videoRef.current) {
       videoRef.current.srcObject = stream || null;
     }
-  }, [stream]);
+  }, [stream, isVideoOff, isScreenShare]);
 
   return (
     <Box
