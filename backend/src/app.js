@@ -74,6 +74,15 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'TeamChat API',
+    message: 'Backend is running',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
