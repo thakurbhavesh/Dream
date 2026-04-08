@@ -22,8 +22,49 @@ const PUBLIC_MUTATION_ROUTES = new Set([
   '/upload/profile-picture',
 ]);
 
-// Routes that start with these prefixes skip CSRF (protected by Bearer auth)
-const CSRF_EXEMPT_PREFIXES = ['/meetings', '/chat/', '/auth/'];
+// Routes that start with these prefixes skip CSRF.
+// Rationale: in cross-origin production (Vercel frontend → Render backend) the
+// browser can't reliably propagate same-site cookies, so the frontend uses
+// Bearer tokens for these protected APIs. CSRF is meaningless against Bearer
+// auth (browsers don't auto-attach Authorization headers to forged requests),
+// and the auth middleware on each route already validates the token.
+const CSRF_EXEMPT_PREFIXES = [
+  '/auth/',
+  '/meetings',
+  '/chat/',
+  '/users',
+  '/roles',
+  '/plans',
+  '/plan-features',
+  '/languages',
+  '/timezones',
+  '/platforms',
+  '/message-menu-items',
+  '/departments',
+  '/designations',
+  '/locations',
+  '/activity-logs',
+  '/global-access',
+  '/groups',
+  '/group-members',
+  '/group-timeline',
+  '/organization',
+  '/organization-controls',
+  '/organization-restrictions',
+  '/organization-message-menu-permissions',
+  '/site-details',
+  '/product-features',
+  '/billing',
+  '/geo',
+  '/coupons',
+  '/payment-gateways',
+  '/smtp-settings',
+  '/live-assistant',
+  '/upload',
+  '/translate',
+  '/ai-providers',
+  '/gifs',
+];
 
 const csrfProtection = (req, res, next) => {
   if (SAFE_METHODS.has(String(req.method || '').toUpperCase())) {
