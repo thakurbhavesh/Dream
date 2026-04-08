@@ -2,12 +2,16 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 // ─── Competitors ────────────────────────────────────────────────────
+// `color` = brand color used in pricing/table/cards
+// `radarColor` = high-contrast color used ONLY in the radar chart so all 4
+// polygons stay visually distinguishable when overlaid
 const competitors = [
   {
     key: "teamchatx",
     name: "TeamChatX",
     short: "TCX",
     color: "#0162c4",
+    radarColor: "#0162c4",
     gradient: "linear-gradient(135deg, #0162c4, #0288d1)",
     isUs: true,
   },
@@ -16,6 +20,7 @@ const competitors = [
     name: "Slack",
     short: "Slack",
     color: "#4A154B",
+    radarColor: "#e11d48", // rose
     gradient: "linear-gradient(135deg, #4A154B, #611f69)",
   },
   {
@@ -23,6 +28,7 @@ const competitors = [
     name: "MS Teams",
     short: "Teams",
     color: "#4b53bc",
+    radarColor: "#f59e0b", // amber
     gradient: "linear-gradient(135deg, #4b53bc, #6264a7)",
   },
   {
@@ -30,9 +36,21 @@ const competitors = [
     name: "Troop Messenger",
     short: "Troop",
     color: "#64748b",
+    radarColor: "#10b981", // emerald
     gradient: "linear-gradient(135deg, #64748b, #475569)",
   },
 ];
+
+// Short labels used inside the radar chart so they don't overflow
+const CATEGORY_SHORT_LABELS = {
+  "Messaging": "Messaging",
+  "Audio & Video": "Audio/Video",
+  "Meeting & Scheduling": "Meetings",
+  "AI & Smart Features": "AI",
+  "Privacy & Security": "Privacy",
+  "Admin & Management": "Admin",
+  "Platform": "Platform",
+};
 
 // Support map: true = full, "partial" = limited / paid only, false = none
 const features = [
@@ -214,10 +232,13 @@ const categoryScoreFor = (cat, key) => {
 const categoryMax = (cat) => features.filter((f) => f.category === cat).length;
 
 // ─── Radar Chart (SVG) ─────────────────────────────────────────────
-const RadarChart = ({ size = 360 }) => {
-  const cx = size / 2;
-  const cy = size / 2;
-  const radius = size * 0.38;
+const RadarChart = ({ size = 420 }) => {
+  // Padded viewBox so axis labels never get clipped
+  const PAD = 70;
+  const vb = size + PAD * 2;
+  const cx = vb / 2;
+  const cy = vb / 2;
+  const radius = size * 0.40;
   const numAxes = categories.length;
 
   // Convert (axisIdx, valueRatio) to (x, y)
@@ -243,8 +264,8 @@ const RadarChart = ({ size = 360 }) => {
 
   return (
     <svg
-      viewBox={`0 0 ${size} ${size}`}
-      style={{ width: "100%", maxWidth: size, height: "auto" }}
+      viewBox={`0 0 ${vb} ${vb}`}
+      style={{ width: "100%", maxWidth: vb, height: "auto", display: "block" }}
     >
       {/* Concentric grid rings */}
       {rings.map((r) => (
@@ -274,26 +295,36 @@ const RadarChart = ({ size = 360 }) => {
           <polygon
             key={c.key}
             points={polygonFor(c.key)}
-            fill={c.color}
-            fillOpacity={c.isUs ? 0.35 : 0.18}
-            stroke={c.color}
-            strokeWidth={c.isUs ? 2.5 : 1.5}
+            fill={c.radarColor}
+            fillOpacity={c.isUs ? 0.32 : 0.16}
+            stroke={c.radarColor}
+            strokeWidth={c.isUs ? 3 : 2}
             strokeLinejoin="round"
           />
         ))}
 
+      {/* Vertex dots for TCX (highlight peaks) */}
+      {categories.map((cat, i) => {
+        const score = categoryScoreFor(cat, "teamchatx");
+        const max = categoryMax(cat);
+        const ratio = max > 0 ? score / max : 0;
+        const [x, y] = point(i, ratio);
+        return <circle key={`dot-${i}`} cx={x} cy={y} r={4} fill="#0162c4" stroke="#fff" strokeWidth="2" />;
+      })}
+
       {/* Axis labels */}
       {categories.map((cat, i) => {
-        const [x, y] = point(i, 1.18);
-        const isTop = y < cy - 5;
-        const isBottom = y > cy + 5;
+        const [x, y] = point(i, 1.22);
+        const isTop = y < cy - 10;
+        const isBottom = y > cy + 10;
         const anchor = Math.abs(x - cx) < 5 ? "middle" : x < cx ? "end" : "start";
+        const labelText = CATEGORY_SHORT_LABELS[cat] || cat;
         return (
           <g key={cat}>
             <text
               x={x}
-              y={y + (isTop ? -4 : isBottom ? 12 : 4)}
-              fontSize="11"
+              y={y + (isTop ? -6 : isBottom ? 6 : 0)}
+              fontSize="14"
               fontWeight="700"
               fill="#475569"
               textAnchor={anchor}
@@ -302,13 +333,13 @@ const RadarChart = ({ size = 360 }) => {
             </text>
             <text
               x={x}
-              y={y + (isTop ? 8 : isBottom ? 24 : 16)}
-              fontSize="9"
-              fontWeight="600"
-              fill="#64748b"
+              y={y + (isTop ? 10 : isBottom ? 22 : 16)}
+              fontSize="11"
+              fontWeight="700"
+              fill="#334155"
               textAnchor={anchor}
             >
-              {cat.length > 14 ? cat.split(" ")[0] : cat}
+              {labelText}
             </text>
           </g>
         );
@@ -669,25 +700,28 @@ const Compare = () => {
                   display: "flex",
                   flexWrap: "wrap",
                   justifyContent: "center",
-                  gap: 14,
+                  gap: 16,
                   marginTop: 14,
                   paddingTop: 14,
                   borderTop: "1px solid #f1f5f9",
                 }}
               >
                 {competitors.map((c) => (
-                  <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+                  <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, fontWeight: 600 }}>
                     <span
                       style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: 3,
-                        background: c.color,
-                        opacity: c.isUs ? 1 : 0.6,
-                        border: c.isUs ? `2px solid ${c.color}` : "none",
+                        width: 14,
+                        height: 14,
+                        borderRadius: 4,
+                        background: c.radarColor,
+                        opacity: c.isUs ? 1 : 0.85,
+                        border: c.isUs ? `2px solid ${c.radarColor}` : `1px solid ${c.radarColor}`,
+                        boxShadow: c.isUs ? `0 0 0 2px rgba(1,98,196,0.18)` : "none",
                       }}
                     />
-                    <span style={{ color: c.isUs ? c.color : "#64748b" }}>{c.name}</span>
+                    <span style={{ color: c.isUs ? c.radarColor : "#475569", fontWeight: c.isUs ? 800 : 600 }}>
+                      {c.name}
+                    </span>
                   </div>
                 ))}
               </div>
