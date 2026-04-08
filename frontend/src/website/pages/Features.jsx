@@ -23,11 +23,30 @@ const stripComingSoonLabel = (label) =>
     .replace(/\s*\(coming soon\)\s*/i, "")
     .trim();
 
+// Map category_key → emoji icon for visual variety
+const CATEGORY_ICONS = {
+  messaging: "\uD83D\uDCAC",
+  group: "\uD83D\uDC65",
+  audio_video: "\uD83C\uDFA5",
+  collaboration: "\uD83E\uDD1D",
+  productivity: "\u26A1",
+  filters: "\uD83D\uDD0D",
+  security: "\uD83D\uDD12",
+  admin: "\uD83D\uDEE0\uFE0F",
+  ai_features: "\u2728",
+  integrations_cs: "\uD83D\uDD0C",
+  automation_cs: "\uD83E\uDD16",
+};
+
+const getCategoryIcon = (key) => CATEGORY_ICONS[String(key || "").toLowerCase()] || "\u2B50";
+
 const normalizeFeatureSections = (catalogRows = []) =>
   catalogRows
     .filter((category) => String(category?.status || "active").toLowerCase() !== "inactive")
     .map((category) => ({
       feature_category_id: category.feature_category_id,
+      category_key: category.category_key,
+      icon: getCategoryIcon(category.category_key),
       id: toSectionId(category.category_key || category.category_label, category.feature_category_id),
       title: stripComingSoonLabel(category.category_label || category.category_key || "Category"),
       comingSoon: isComingSoonCategory(category),
@@ -48,6 +67,7 @@ const Features = () => {
   const [activeTab, setActiveTab] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     let ignore = false;
@@ -90,15 +110,40 @@ const Features = () => {
     };
   }, []);
 
-  const sectionIds = useMemo(() => featureSections.map((section) => section.id), [featureSections]);
+  // Client-side filter
+  const filteredSections = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return featureSections;
+    return featureSections
+      .map((section) => ({
+        ...section,
+        features: section.features.filter(
+          (f) =>
+            f.title.toLowerCase().includes(q) ||
+            f.description.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((section) => section.features.length > 0);
+  }, [searchQuery, featureSections]);
+
+  const totalFeatures = useMemo(
+    () => featureSections.reduce((sum, s) => sum + s.features.length, 0),
+    [featureSections]
+  );
+  const liveCategories = useMemo(
+    () => featureSections.filter((s) => !s.comingSoon).length,
+    [featureSections]
+  );
+
+  const sectionIds = useMemo(() => filteredSections.map((section) => section.id), [filteredSections]);
 
   const handleScroll = useCallback(() => {
     sectionIds.forEach((sectionId) => {
       const sectionElement = document.getElementById(sectionId);
       if (
         sectionElement &&
-        sectionElement.getBoundingClientRect().top <= 150 &&
-        sectionElement.getBoundingClientRect().bottom >= 150
+        sectionElement.getBoundingClientRect().top <= 200 &&
+        sectionElement.getBoundingClientRect().bottom >= 200
       ) {
         setActiveTab(sectionId);
       }
@@ -109,7 +154,7 @@ const Features = () => {
     const section = document.getElementById(id);
     if (section) {
       window.scrollTo({
-        top: section.offsetTop - 80, // Adjust offset for navbar height
+        top: section.offsetTop - 140,
         behavior: "smooth",
       });
     }
@@ -122,112 +167,413 @@ const Features = () => {
     };
   }, [handleScroll]);
 
-  return (
-    <div className="features-page">
-      {/* Navigation Tabs */}
-      <nav className="sticky-top bg-white  py-3">
-        <div className="container">
-          <ul className="nav nav-tabs justify-content-center">
-            {featureSections.map((section) => (
-              <li className="nav-item" key={section.id}>
-                <button
-                  className={`nav-link ${
-                    activeTab === section.id ? "active" : ""
-                  }`}
-                  onClick={() => scrollToSection(section.id)}
-                >
-                  {section.title}
-                  {section.comingSoon && (
-                    <span
-                      className="badge ms-2"
-                      style={{
-                        backgroundColor: "#f59e0b",
-                        color: "#fff",
-                        fontSize: "0.65rem",
-                        verticalAlign: "middle",
-                      }}
-                    >
-                      Coming Soon
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </nav>
-      {isLoading ? (
-        <div className="text-center my-4">
-          <CircularProgress size={28} />
-        </div>
-      ) : null}
-      {errorMessage ? (
-        <div className="container mt-3">
-          <Alert severity="warning">{errorMessage}</Alert>
-        </div>
-      ) : null}
-      {!isLoading && !errorMessage && featureSections.length === 0 ? (
-        <div className="container mt-3">
-          <Alert severity="info">No feature categories/items available right now.</Alert>
-        </div>
-      ) : null}
+  const isSearching = searchQuery.trim().length > 0;
 
-      {/* Feature Sections */}
-      <div className="container mt-4">
-        {featureSections.map((section) => (
-          <div key={section.id} id={section.id} className="mb-5">
-            <h2 className="section-title d-flex align-items-center flex-wrap">
-              <span>{section.title}</span>
-              {section.comingSoon && (
-                <span
-                  className="badge ms-3"
+  return (
+    <div className="features-page" style={{ backgroundColor: "#fafbff" }}>
+      <style>{`
+        @keyframes featureFadeIn {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .tcx-feature-card {
+          animation: featureFadeIn 0.4s ease both;
+          transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .tcx-feature-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 24px -10px rgba(79, 70, 229, 0.18);
+          border-color: #6366f1 !important;
+        }
+        .tcx-tab-pill {
+          transition: all 0.2s ease;
+          border: 1px solid transparent !important;
+          background: transparent;
+        }
+        .tcx-tab-pill:hover {
+          background: #eef2ff;
+          color: #4338ca !important;
+        }
+        .tcx-tab-pill.active {
+          background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+          color: #fff !important;
+          box-shadow: 0 6px 14px -4px rgba(99, 102, 241, 0.5);
+        }
+        .tcx-search-input:focus {
+          outline: none;
+          border-color: #6366f1 !important;
+          box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+        }
+        .tcx-hero-stat {
+          transition: transform 0.2s ease;
+        }
+        .tcx-hero-stat:hover { transform: scale(1.05); }
+      `}</style>
+
+      {/* ─── Hero ──────────────────────────────────────────── */}
+      <section
+        style={{
+          background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #ec4899 100%)",
+          color: "#fff",
+          padding: "4rem 1rem 5rem",
+          textAlign: "center",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            backgroundImage:
+              "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.15) 0, transparent 50%), radial-gradient(circle at 80% 80%, rgba(255,255,255,0.1) 0, transparent 50%)",
+            pointerEvents: "none",
+          }}
+        />
+        <div className="container position-relative">
+          <span
+            className="badge mb-3"
+            style={{
+              backgroundColor: "rgba(255,255,255,0.18)",
+              backdropFilter: "blur(8px)",
+              padding: "0.5rem 1rem",
+              borderRadius: "999px",
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              letterSpacing: "0.5px",
+            }}
+          >
+            EVERYTHING YOUR TEAM NEEDS
+          </span>
+          <h1
+            className="fw-bold mb-3"
+            style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", lineHeight: 1.15 }}
+          >
+            Powerful features for modern teams
+          </h1>
+          <p
+            className="mx-auto mb-4"
+            style={{
+              fontSize: "1.15rem",
+              maxWidth: "640px",
+              opacity: 0.92,
+              lineHeight: 1.6,
+            }}
+          >
+            Messaging, calls, AI, security, and admin controls — all in one
+            workspace built to keep your team in flow.
+          </p>
+
+          {/* Stats */}
+          {!isLoading && featureSections.length > 0 && (
+            <div className="d-flex justify-content-center gap-4 flex-wrap mt-4">
+              {[
+                { value: totalFeatures, label: "Features" },
+                { value: liveCategories, label: "Live Categories" },
+                { value: "100%", label: "End-to-End Encrypted" },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="tcx-hero-stat"
                   style={{
-                    backgroundColor: "#f59e0b",
-                    color: "#fff",
-                    fontSize: "0.75rem",
-                    fontWeight: 600,
-                    padding: "0.35rem 0.7rem",
-                    borderRadius: "999px",
-                    verticalAlign: "middle",
+                    minWidth: "140px",
+                    padding: "1rem 1.25rem",
+                    borderRadius: "16px",
+                    backgroundColor: "rgba(255,255,255,0.13)",
+                    backdropFilter: "blur(10px)",
+                    border: "1px solid rgba(255,255,255,0.22)",
                   }}
                 >
-                  Coming Soon
-                </span>
-              )}
-            </h2>
-            {section.comingSoon && (
-              <p className="text-muted mb-3" style={{ fontStyle: "italic" }}>
-                These features are under active development and will be available in an upcoming release.
-              </p>
-            )}
-            <div
-              className="features-list border rounded-4 p-4"
-              style={section.comingSoon ? { opacity: 0.75, backgroundColor: "#fffbeb" } : undefined}
-            >
-              {section.features.map((feature) => (
-                <div
-                  key={feature.feature_item_id}
-                  className="feature-item d-flex align-items-start mb-4"
-                >
-                  <div className="feature-number bg-light text-center rounded-circle me-3">
-                    <span>{feature.feature_item_id}</span>
+                  <div className="fw-bold" style={{ fontSize: "1.75rem" }}>
+                    {stat.value}
                   </div>
-                  <div>
-                    <h5 className="feature-title mb-2">{feature.title}</h5>
-                    <p className="feature-description mb-0">
-                      {feature.description}
-                    </p>
+                  <div style={{ fontSize: "0.8rem", opacity: 0.85, letterSpacing: "0.3px" }}>
+                    {stat.label}
                   </div>
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      </section>
+
+      {/* ─── Sticky Search + Tabs ──────────────────────────── */}
+      <div
+        className="sticky-top"
+        style={{
+          backgroundColor: "rgba(255,255,255,0.92)",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid #e5e7eb",
+          padding: "1rem 0",
+          marginTop: "-1.5rem",
+          zIndex: 1020,
+        }}
+      >
+        <div className="container">
+          {/* Search */}
+          <div className="d-flex justify-content-center mb-3">
+            <div style={{ position: "relative", width: "100%", maxWidth: "480px" }}>
+              <input
+                type="text"
+                className="tcx-search-input form-control"
+                placeholder="Search features (e.g. encryption, polls, AI)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  padding: "0.75rem 1rem 0.75rem 2.75rem",
+                  border: "1.5px solid #e5e7eb",
+                  borderRadius: "999px",
+                  fontSize: "0.95rem",
+                  backgroundColor: "#fff",
+                  transition: "all 0.2s ease",
+                }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  left: "1rem",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: "1.1rem",
+                  pointerEvents: "none",
+                }}
+              >
+                {"\uD83D\uDD0D"}
+              </span>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  style={{
+                    position: "absolute",
+                    right: "0.5rem",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    border: "none",
+                    background: "#f3f4f6",
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    color: "#6b7280",
+                  }}
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Tabs */}
+          {!isSearching && filteredSections.length > 0 && (
+            <div
+              className="d-flex justify-content-center flex-wrap gap-2"
+              style={{ overflowX: "auto" }}
+            >
+              {filteredSections.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  className={`tcx-tab-pill ${activeTab === section.id ? "active" : ""}`}
+                  onClick={() => scrollToSection(section.id)}
+                  style={{
+                    padding: "0.5rem 1rem",
+                    borderRadius: "999px",
+                    fontSize: "0.85rem",
+                    fontWeight: 600,
+                    color: "#4b5563",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                  }}
+                >
+                  <span>{section.icon}</span>
+                  <span>{section.title}</span>
+                  {section.comingSoon && (
+                    <span
+                      style={{
+                        backgroundColor: "#f59e0b",
+                        color: "#fff",
+                        fontSize: "0.6rem",
+                        padding: "0.15rem 0.45rem",
+                        borderRadius: "999px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      SOON
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {isLoading && (
+        <div className="text-center my-5">
+          <CircularProgress size={36} />
+        </div>
+      )}
+      {errorMessage && (
+        <div className="container mt-4">
+          <Alert severity="warning">{errorMessage}</Alert>
+        </div>
+      )}
+      {!isLoading && !errorMessage && featureSections.length === 0 && (
+        <div className="container mt-4">
+          <Alert severity="info">No features available right now.</Alert>
+        </div>
+      )}
+
+      {/* ─── Empty Search State ────────────────────────────── */}
+      {isSearching && filteredSections.length === 0 && !isLoading && (
+        <div className="container text-center py-5">
+          <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>{"\uD83D\uDD0E"}</div>
+          <h4 className="fw-bold">No features match "{searchQuery}"</h4>
+          <p className="text-muted">Try a different keyword or browse all categories.</p>
+          <button
+            className="btn"
+            onClick={() => setSearchQuery("")}
+            style={{
+              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+              color: "#fff",
+              padding: "0.6rem 1.5rem",
+              borderRadius: "999px",
+              fontWeight: 600,
+              border: "none",
+            }}
+          >
+            Clear search
+          </button>
+        </div>
+      )}
+
+      {/* ─── Feature Sections ──────────────────────────────── */}
+      <div className="container py-5">
+        {filteredSections.map((section, sectionIdx) => (
+          <section key={section.id} id={section.id} className="mb-5">
+            {/* Section Header */}
+            <div className="d-flex align-items-center mb-4 flex-wrap" style={{ gap: "0.75rem" }}>
+              <div
+                style={{
+                  width: "52px",
+                  height: "52px",
+                  borderRadius: "14px",
+                  background: section.comingSoon
+                    ? "linear-gradient(135deg, #fbbf24, #f59e0b)"
+                    : "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "1.6rem",
+                  boxShadow: section.comingSoon
+                    ? "0 8px 18px -6px rgba(245, 158, 11, 0.45)"
+                    : "0 8px 18px -6px rgba(99, 102, 241, 0.45)",
+                }}
+              >
+                {section.icon}
+              </div>
+              <div className="flex-grow-1">
+                <h2
+                  className="fw-bold mb-0 d-flex align-items-center flex-wrap"
+                  style={{ fontSize: "1.75rem", color: "#111827", gap: "0.6rem" }}
+                >
+                  {section.title}
+                  {section.comingSoon && (
+                    <span
+                      style={{
+                        backgroundColor: "#fef3c7",
+                        color: "#b45309",
+                        fontSize: "0.7rem",
+                        fontWeight: 700,
+                        padding: "0.3rem 0.7rem",
+                        borderRadius: "999px",
+                        border: "1px solid #fcd34d",
+                        letterSpacing: "0.5px",
+                      }}
+                    >
+                      COMING SOON
+                    </span>
+                  )}
+                </h2>
+                <p className="text-muted mb-0" style={{ fontSize: "0.9rem" }}>
+                  {section.comingSoon
+                    ? "Under active development — coming in an upcoming release."
+                    : `${section.features.length} feature${section.features.length === 1 ? "" : "s"} available`}
+                </p>
+              </div>
+            </div>
+
+            {/* Cards Grid */}
+            <div
+              className="row g-3"
+              style={section.comingSoon ? { opacity: 0.78 } : undefined}
+            >
+              {section.features.map((feature, idx) => (
+                <div className="col-12 col-md-6 col-lg-4" key={feature.feature_item_id}>
+                  <div
+                    className="tcx-feature-card h-100 p-3"
+                    style={{
+                      backgroundColor: "#fff",
+                      border: "1.5px solid #e5e7eb",
+                      borderRadius: "16px",
+                      animationDelay: `${Math.min(idx, 8) * 0.04}s`,
+                    }}
+                  >
+                    <div className="d-flex align-items-start" style={{ gap: "0.85rem" }}>
+                      <div
+                        style={{
+                          minWidth: "38px",
+                          height: "38px",
+                          borderRadius: "10px",
+                          background: section.comingSoon
+                            ? "linear-gradient(135deg, #fef3c7, #fde68a)"
+                            : "linear-gradient(135deg, #eef2ff, #ede9fe)",
+                          color: section.comingSoon ? "#b45309" : "#4f46e5",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 700,
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {feature.feature_item_id}
+                      </div>
+                      <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                        <h5
+                          className="fw-bold mb-1"
+                          style={{ fontSize: "0.98rem", color: "#111827", lineHeight: 1.3 }}
+                        >
+                          {feature.title}
+                        </h5>
+                        <p
+                          className="mb-0"
+                          style={{
+                            fontSize: "0.83rem",
+                            color: "#6b7280",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {feature.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         ))}
       </div>
-      <ChatDemoBox/>
+
+      <ChatDemoBox />
     </div>
   );
 };
 
 export default Features;
-
