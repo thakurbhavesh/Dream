@@ -1,6 +1,6 @@
 const nodemailer = require('nodemailer');
 
-const DEFAULT_MAIL_TIMEOUT_MS = 5000;
+const DEFAULT_MAIL_TIMEOUT_MS = 10000;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 let cachedTransporter = null;
@@ -10,7 +10,23 @@ let cacheExpiresAt = 0;
 const getSmtpSettingsFromDb = async () => {
   // Lazy-require to avoid circular dependency at module load time
   const smtpSettingsModel = require('../models/smtpSettingsModel');
-  return smtpSettingsModel.findActive();
+  const dbSettings = await smtpSettingsModel.findActive();
+  if (dbSettings) return dbSettings;
+
+  // Fallback to .env if no active DB config exists
+  const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM, CONTACT_US_NOTIFY_TO } = process.env;
+  if (SMTP_HOST && SMTP_USER) {
+    return {
+      host: SMTP_HOST,
+      port: Number(SMTP_PORT) || 587,
+      secure: SMTP_SECURE === 'true',
+      smtp_user: SMTP_USER,
+      smtp_pass: SMTP_PASS || '',
+      from_address: SMTP_FROM || SMTP_USER,
+      contact_notify_to: CONTACT_US_NOTIFY_TO || '',
+    };
+  }
+  return null;
 };
 
 const getTransporter = async () => {

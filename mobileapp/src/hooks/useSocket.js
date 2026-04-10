@@ -22,21 +22,55 @@ const reattachHandlers = (socket) => {
   });
 };
 
-const getFreshToken = async () => {
-  let token = await SecureStore.getItemAsync('accessToken');
-  if (token) return token;
+// Decode JWT payload without verification (just to check expiry)
+const isTokenExpired = (token) => {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return true;
+    const payload = JSON.parse(atob(parts[1]));
+    if (!payload.exp) return false;
+    // Expired if less than 60s remaining
+    return payload.exp * 1000 < Date.now() + 60000;
+  } catch {
+    return true;
+  }
+};
+
+const doRefresh = async () => {
   try {
     const rt = await SecureStore.getItemAsync('refreshToken');
     if (!rt) return null;
-    const { data } = await axios.post(`${API_BASE_URL}/auth/refresh`, { refresh_token: rt });
+    const { data } = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+      refresh_token: rt,
+      device_type: 'mobile',
+    });
     const r = data?.data || data;
     if (r?.access_token) {
       await SecureStore.setItemAsync('accessToken', r.access_token);
       if (r.refresh_token) await SecureStore.setItemAsync('refreshToken', r.refresh_token);
       return r.access_token;
     }
-  } catch {}
+  } catch (e) {
+    console.log('[socket] token refresh failed:', e.message);
+  }
   return null;
+};
+
+const getFreshToken = async () => {
+  const token = await SecureStore.getItemAsync('accessToken');
+  // If token exists and is NOT expired, use it
+  if (token && !isTokenExpired(token)) return token;
+  // Token missing or expired — force refresh
+  return doRefresh();
+};
+
+// Wake up Render server before socket connect (cold start can take 30s+)
+const wakeUpServer = async () => {
+  try {
+    await axios.get(`${API_BASE_URL}/health`, { timeout: 45000 });
+  } catch {
+    // Server might not have /health — that's OK, the request itself wakes it up
+  }
 };
 
 const connectSocket = async (forceNew = false) => {
@@ -46,6 +80,9 @@ const connectSocket = async (forceNew = false) => {
 
   isConnecting = true;
   try {
+    // Wake up the server first (Render free tier sleeps after inactivity)
+    await wakeUpServer();
+
     const token = await getFreshToken();
     if (!token) { isConnecting = false; return null; }
 
@@ -60,23 +97,24 @@ const connectSocket = async (forceNew = false) => {
     }
 
     lastToken = token;
-    console.log('[socket] connecting...');
+    console.log('[socket] connecting to', SOCKET_URL);
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ['polling', 'websocket'],  // Start with polling, upgrade to websocket
+      transports: ['polling', 'websocket'],
       upgrade: true,
       reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 15000,
-      timeout: 20000,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 10000,
+      timeout: 45000,
       forceNew: true,
     });
 
     socket.on('connect', () => {
       console.log('[socket] connected:', socket.id);
       globalConnected = true;
+      authRetries = 0;
       notifyState();
       reattachHandlers(socket);
     });
@@ -86,9 +124,9 @@ const connectSocket = async (forceNew = false) => {
       globalConnected = false;
       notifyState();
       if (reason === 'io server disconnect') {
-        // Server kicked — refresh token and reconnect once
+        // Server kicked — refresh token and reconnect
         setTimeout(async () => {
-          const newToken = await getFreshToken();
+          const newToken = await doRefresh();
           if (newToken && socket) {
             socket.auth = { token: newToken };
             lastToken = newToken;
@@ -101,18 +139,18 @@ const connectSocket = async (forceNew = false) => {
     let authRetries = 0;
     socket.on('connect_error', async (err) => {
       console.log('[socket] connect_error:', err.message);
-      const isAuth = err.message?.includes('auth') || err.message?.includes('token') || err.message?.includes('jwt');
-      if (isAuth && authRetries < 2) {
+      // On ANY connect_error, try refreshing token (might be expired)
+      if (authRetries < 3) {
         authRetries++;
-        const newToken = await getFreshToken();
-        if (newToken && newToken !== lastToken) {
+        const newToken = await doRefresh();
+        if (newToken) {
           lastToken = newToken;
           socket.auth = { token: newToken };
+          // Force reconnect with new token
+          await SecureStore.setItemAsync('accessToken', newToken);
         }
       }
     });
-
-    socket.on('connect', () => { authRetries = 0; });
 
     globalSocket = socket;
     return socket;

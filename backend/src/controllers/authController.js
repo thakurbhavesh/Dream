@@ -35,7 +35,17 @@ const {
 const { disconnectUser } = require('../socket/index');
 
 const ALLOWED_DEVICE_TYPES = new Set(['mobile', 'desktop', 'tablet', 'other']);
-const RETURN_TOKENS_IN_BODY = String(process.env.AUTH_RETURN_TOKENS_IN_BODY || 'false').toLowerCase() === 'true';
+const RETURN_TOKENS_IN_BODY_ENV = String(process.env.AUTH_RETURN_TOKENS_IN_BODY || 'false').toLowerCase() === 'true';
+// Mobile apps can't use cookies — always return tokens in body for mobile requests
+const shouldReturnTokens = (req) => {
+  if (RETURN_TOKENS_IN_BODY_ENV) return true;
+  // Detect mobile: explicit device_type in body, or non-browser User-Agent
+  const deviceType = req.body?.device_type;
+  if (deviceType === 'mobile' || deviceType === 'tablet') return true;
+  const ua = (req.headers['user-agent'] || '').toLowerCase();
+  if (/expo|react.?native|okhttp|dart|flutter/i.test(ua)) return true;
+  return false;
+};
 const FREE_EMAIL_DOMAINS = new Set([
   '163.com',
   '126.com',
@@ -1992,7 +2002,7 @@ const login = async (req, res, next) => {
     return success(
       res,
       {
-        ...(RETURN_TOKENS_IN_BODY
+        ...(shouldReturnTokens(req)
           ? {
               access_token,
               refresh_token,
@@ -2180,7 +2190,7 @@ const refresh = async (req, res, next) => {
     return success(
       res,
       {
-        ...(RETURN_TOKENS_IN_BODY
+        ...(shouldReturnTokens(req)
           ? {
               access_token,
               refresh_token: new_refresh_token,
