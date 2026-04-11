@@ -17,6 +17,7 @@ export default function BillingScreen() {
   const { theme: t, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [data, setData] = useState(null);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const ACCENT = t.accent;
@@ -29,14 +30,19 @@ export default function BillingScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const { data: res } = await api.get('/auth/me');
-        const d = res?.data || res;
+        const [meRes, payRes] = await Promise.all([
+          api.get('/auth/me').catch(() => null),
+          api.get('/billing/payment-history').catch(() => null),
+        ]);
+        const d = meRes?.data?.data || meRes?.data || {};
         setData({
           plan: d?.current_plan || {},
           usage: d?.usage || {},
           org: d?.organization || {},
           counts: d?.counts || {},
         });
+        const payRows = payRes?.data?.data?.rows || payRes?.data?.data || [];
+        setPayments(Array.isArray(payRows) ? payRows.slice(0, 10) : []);
       } catch {}
       finally { setLoading(false); }
     })();
@@ -146,6 +152,32 @@ export default function BillingScreen() {
               </View>
             ))}
           </View>
+
+          {/* Payment History */}
+          {payments.length > 0 && (
+            <>
+              <Text style={[s.sectionTitle, { color: textColor }]}>Recent Payments</Text>
+              {payments.map((p, i) => {
+                const isSuccess = (p.status || '').toLowerCase() === 'success' || (p.status || '').toLowerCase() === 'completed';
+                const isFailed = (p.status || '').toLowerCase() === 'failed';
+                const stColor = isSuccess ? '#22c55e' : isFailed ? '#ef4444' : '#f59e0b';
+                return (
+                  <View key={p.payment_id || i} style={[s.payCard, { backgroundColor: cardBg }]}>
+                    <View style={[s.payIcon, { backgroundColor: `${stColor}12` }]}>
+                      <Ionicons name={isSuccess ? 'checkmark-circle' : isFailed ? 'close-circle' : 'time'} size={20} color={stColor} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.payAmount, { color: textColor }]}>{fmtStorage(0).replace('0 MB', '')}₹{Number(p.amount || 0).toLocaleString('en-IN')}</Text>
+                      <Text style={[s.payMeta, { color: subColor }]}>{p.plan_name || 'Plan'} · {(p.gateway || '').charAt(0).toUpperCase() + (p.gateway || '').slice(1)} · {fmtDate(p.created_at)}</Text>
+                    </View>
+                    <View style={[s.payBadge, { backgroundColor: `${stColor}12` }]}>
+                      <Text style={[s.payBadgeText, { color: stColor }]}>{p.status}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          )}
         </ScrollView>
       )}
     </View>
@@ -186,6 +218,13 @@ const s = StyleSheet.create({
   usageLabel: { flex: 1, fontSize: 14, fontWeight: '600' },
   usageValue: { fontSize: 18, fontWeight: '900', fontVariant: ['tabular-nums'] },
   usageMax: { fontSize: 13 },
+
+  payCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginBottom: 6, padding: 14, borderRadius: 14, elevation: 1 },
+  payIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  payAmount: { fontSize: 15, fontWeight: '800' },
+  payMeta: { fontSize: 11, marginTop: 2 },
+  payBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  payBadgeText: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
 
   orgCard: { marginHorizontal: 14, borderRadius: 16, overflow: 'hidden', elevation: 1 },
   orgRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: StyleSheet.hairlineWidth },

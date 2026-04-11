@@ -36,7 +36,8 @@ export default function OtpLogsScreen() {
       try {
         const { data } = await api.get('/auth/otp-logs');
         const rows = data?.data?.rows || data?.data || [];
-        setLogs(Array.isArray(rows) ? rows : []);
+        // Latest 25 only
+        setLogs(Array.isArray(rows) ? rows.slice(0, 25) : []);
       } catch {}
       finally { setLoading(false); }
     })();

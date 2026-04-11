@@ -5005,7 +5005,7 @@ const getOtpLogs = async (req, res, next) => {
        JOIN users u ON u.user_id = ov.user_id
        WHERE ov.organization_id = $1
        ORDER BY ov.created_at DESC
-       LIMIT 100`,
+       LIMIT 25`,
       [orgId]
     );
     return success(res, { rows, count: rows.length }, 'OTP logs retrieved');
