@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Platform,
-  ActivityIndicator, ScrollView, Keyboard,
+  ActivityIndicator, ScrollView, Keyboard, KeyboardAvoidingView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -78,6 +78,7 @@ export default function ForgotPasswordScreen() {
 
   return (
     <SafeAreaView style={s.root} edges={['top', 'bottom']}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {/* Logo */}
         <View style={s.logoSection}>
@@ -170,6 +171,7 @@ export default function ForgotPasswordScreen() {
           <Text style={{ fontSize: 13, color: '#94a3b8' }}> {step === 1 ? 'Back to Sign In' : 'Go Back'}</Text>
         </TouchableOpacity>
       </ScrollView>
+    </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

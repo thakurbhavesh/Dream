@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Platform,
-  ActivityIndicator, ScrollView, Keyboard, Dimensions, Animated,
+  ActivityIndicator, ScrollView, Keyboard, Dimensions, Animated, KeyboardAvoidingView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -177,6 +177,7 @@ export default function LoginScreen() {
       <View style={z.bgCircle3} />
 
       <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={z.scroll} keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false} bounces={false}>
 
@@ -321,6 +322,7 @@ export default function LoginScreen() {
             <Text style={z.footerText}>Secured with end-to-end encryption</Text>
           </View>
         </ScrollView>
+      </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );

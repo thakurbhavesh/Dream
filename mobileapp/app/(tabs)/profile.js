@@ -269,16 +269,16 @@ export default function ProfileScreen() {
         contentContainerStyle={z.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[t.accent]} />}>
 
-        {/* ─── Profile Info ─── */}
+        {/* ═══════════ ACCOUNT ═══════════ */}
+        <Text style={[z.groupLabel, { color: t.textTer }]}>ACCOUNT</Text>
+
         <Section id="profile" icon="person-outline" label="Profile Info">
           <InfoRow icon="briefcase-outline" label="Department" value={p.department_name} t={t} />
           <InfoRow icon="ribbon-outline" label="Designation" value={p.designation_name} t={t} />
           <InfoRow icon="call-outline" label="Mobile" value={p.mobile || p.phone} t={t} />
           <InfoRow icon="business-outline" label="Company" value={p.company_name} t={t} />
-          <InfoRow icon="globe-outline" label="Domain" value={p.custom_domain} t={t} />
           <InfoRow icon="location-outline" label="Location" value={p.location_name} t={t} />
-          <InfoRow icon="time-outline" label="Last Login" value={p.last_login_at ? new Date(p.last_login_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null} t={t} />
-          <InfoRow icon="earth-outline" label="Timezone" value={p.timezone} t={t} last />
+          <InfoRow icon="time-outline" label="Last Login" value={p.last_login_at ? new Date(p.last_login_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null} t={t} last />
         </Section>
 
         {/* ─── Change Password ─── */}
@@ -311,7 +311,21 @@ export default function ProfileScreen() {
           </View>
         </Section>
 
-        {/* ─── Devices ─── */}
+        {/* ─── Linked Devices ─── */}
+        <View style={[z.section, { backgroundColor: t.card }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/linked-devices')} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: '#3b82f610' }]}>
+              <Ionicons name="qr-code-outline" size={17} color="#3b82f6" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[z.sectionLabel, { color: t.text }]}>Linked Devices</Text>
+              <Text style={{ fontSize: 11, color: t.textTer, marginTop: 1 }}>Scan QR to login on web</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── Active Devices ─── */}
         <Section id="devices" icon="phone-portrait-outline" label="Active Devices" badge={devices.length > 0 ? String(devices.length) : null}>
           {loadingDevices ? <ActivityIndicator color={t.accent} style={{ marginVertical: 20 }} /> : (
             <>
@@ -357,6 +371,9 @@ export default function ProfileScreen() {
             </>
           )}
         </Section>
+
+        {/* ═══════════ APPEARANCE ═══════════ */}
+        <Text style={[z.groupLabel, { color: t.textTer }]}>APPEARANCE</Text>
 
         {/* ─── Appearance ─── */}
         <View style={[z.section, { backgroundColor: t.card }]}>
@@ -434,6 +451,66 @@ export default function ProfileScreen() {
           </View>
         </Section>
 
+        {/* ═══════════ PRIVACY & SECURITY ═══════════ */}
+        <Text style={[z.groupLabel, { color: t.textTer }]}>PRIVACY & SECURITY</Text>
+
+        {/* ─── Notifications ─── */}
+        <Section id="notifications" icon="notifications-outline" label="Notifications">
+          <View style={z.appearRow}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Do Not Disturb</Text>
+            <Switch value={false} onValueChange={() => toast('DND scheduling coming soon', 'info')}
+              trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
+          </View>
+          <View style={[z.appearRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.divider }]}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Notification Tone</Text>
+            <TouchableOpacity onPress={() => toast('Tone selection coming soon', 'info')}>
+              <Text style={{ color: t.accent, fontWeight: '700', fontSize: 14 }}>Default</Text>
+            </TouchableOpacity>
+          </View>
+        </Section>
+
+        {/* ─── App Lock ─── */}
+        <Section id="applock" icon="lock-closed-outline" label="App Lock">
+          <View style={z.appearRow}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Enable App Lock</Text>
+            <Switch value={appLockEnabled} onValueChange={(v) => {
+              if (v) { setPinInput(''); setShowPinSetup(true); }
+              else {
+                (async () => {
+                  const { setAppLockEnabled } = require('../../src/components/AppLock');
+                  await setAppLockEnabled(false);
+                  setAppLockState(false);
+                  toast('App Lock disabled', 'info');
+                })();
+              }
+            }} trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
+          </View>
+          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>PIN or biometric when you leave</Text>
+          {showPinSetup && (
+            <View style={[z.pinSetupRow, { borderTopColor: t.divider }]}>
+              <Text style={[z.fieldLabel, { color: t.textTer }]}>SET 4-DIGIT PIN</Text>
+              <View style={[z.field, { borderColor: t.border, backgroundColor: t.inputBg }]}>
+                <Ionicons name="lock-closed-outline" size={16} color={t.icon} />
+                <TextInput style={[z.input, { color: t.text }]} placeholder="Enter 4-digit PIN"
+                  placeholderTextColor={t.textTer} value={pinInput} onChangeText={setPinInput}
+                  keyboardType="number-pad" maxLength={4} secureTextEntry />
+              </View>
+              <TouchableOpacity style={[z.saveBtn, { backgroundColor: pinInput.length === 4 ? t.accent : t.border, marginTop: 10 }]}
+                disabled={pinInput.length !== 4}
+                onPress={async () => {
+                  const { setAppLockEnabled } = require('../../src/components/AppLock');
+                  await setAppLockEnabled(true, pinInput);
+                  setAppLockState(true);
+                  setShowPinSetup(false);
+                  setPinInput('');
+                  toast('App Lock enabled!', 'success');
+                }} activeOpacity={0.8}>
+                <Text style={z.saveBtnText}>Set PIN & Enable</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Section>
+
         {/* ─── Permissions ─── */}
         <Section id="permissions" icon="shield-outline" label="Permissions">
           <Text style={[z.permHint, { color: t.textTer }]}>Toggle to allow/disallow. Opens system settings when needed.</Text>
@@ -474,79 +551,8 @@ export default function ProfileScreen() {
           })}
         </Section>
 
-        {/* ─── Notifications ─── */}
-        <Section id="notifications" icon="notifications-outline" label="Notifications">
-          <View style={z.appearRow}>
-            <Text style={[z.appearLabel, { color: t.text }]}>Do Not Disturb</Text>
-            <Switch value={false} onValueChange={() => toast('DND scheduling coming soon', 'info')}
-              trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
-          </View>
-          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>Mute all notifications during set hours</Text>
-          <View style={[z.appearRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.divider }]}>
-            <Text style={[z.appearLabel, { color: t.text }]}>Notification Tone</Text>
-            <TouchableOpacity onPress={() => toast('Tone selection coming soon', 'info')}>
-              <Text style={{ color: t.accent, fontWeight: '700', fontSize: 14 }}>Default</Text>
-            </TouchableOpacity>
-          </View>
-        </Section>
-
-        {/* ─── App Lock ─── */}
-        <Section id="applock" icon="lock-closed-outline" label="App Lock">
-          <View style={z.appearRow}>
-            <Text style={[z.appearLabel, { color: t.text }]}>Enable App Lock</Text>
-            <Switch value={appLockEnabled} onValueChange={(v) => {
-              if (v) { setPinInput(''); setShowPinSetup(true); }
-              else {
-                (async () => {
-                  const { setAppLockEnabled } = require('../../src/components/AppLock');
-                  await setAppLockEnabled(false);
-                  setAppLockState(false);
-                  toast('App Lock disabled', 'info');
-                })();
-              }
-            }} trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
-          </View>
-          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>Lock app with PIN or biometric when you leave</Text>
-
-          {/* PIN Setup inline */}
-          {showPinSetup && (
-            <View style={[z.pinSetupRow, { borderTopColor: t.divider }]}>
-              <Text style={[z.fieldLabel, { color: t.textTer }]}>SET 4-DIGIT PIN</Text>
-              <View style={[z.field, { borderColor: t.border, backgroundColor: t.inputBg }]}>
-                <Ionicons name="lock-closed-outline" size={16} color={t.icon} />
-                <TextInput style={[z.input, { color: t.text }]} placeholder="Enter 4-digit PIN"
-                  placeholderTextColor={t.textTer} value={pinInput} onChangeText={setPinInput}
-                  keyboardType="number-pad" maxLength={4} secureTextEntry />
-              </View>
-              <TouchableOpacity style={[z.saveBtn, { backgroundColor: pinInput.length === 4 ? t.accent : t.border, marginTop: 10 }]}
-                disabled={pinInput.length !== 4}
-                onPress={async () => {
-                  const { setAppLockEnabled } = require('../../src/components/AppLock');
-                  await setAppLockEnabled(true, pinInput);
-                  setAppLockState(true);
-                  setShowPinSetup(false);
-                  setPinInput('');
-                  toast('App Lock enabled!', 'success');
-                }} activeOpacity={0.8}>
-                <Text style={z.saveBtnText}>Set PIN & Enable</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </Section>
-
-        {/* ─── Link a Device (QR Login) ─── */}
-        <View style={[z.section, { backgroundColor: t.card }]}>
-          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/linked-devices')} activeOpacity={0.6}>
-            <View style={[z.sectionIcon, { backgroundColor: '#3b82f610' }]}>
-              <Ionicons name="qr-code-outline" size={17} color="#3b82f6" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[z.sectionLabel, { color: t.text }]}>Linked Devices</Text>
-              <Text style={{ fontSize: 11, color: t.textTer, marginTop: 1 }}>Scan QR to login on web browser</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
-          </TouchableOpacity>
-        </View>
+        {/* ═══════════ CHAT ═══════════ */}
+        <Text style={[z.groupLabel, { color: t.textTer }]}>CHAT</Text>
 
         {/* ─── Storage & Data ─── */}
         <View style={[z.section, { backgroundColor: t.card }]}>
@@ -581,7 +587,10 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ─── App Guide + Features ─── */}
+        {/* ═══════════ HELP ═══════════ */}
+        <Text style={[z.groupLabel, { color: t.textTer }]}>HELP</Text>
+
+        {/* ─── App Guide + AI ─── */}
         <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 12, marginTop: 8 }}>
           <TouchableOpacity style={[z.quickLink, { backgroundColor: t.card }]}
             onPress={() => router.push('/chat/guide')} activeOpacity={0.6}>
@@ -767,6 +776,9 @@ const z = StyleSheet.create({
   aboutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   aboutLabel: { flex: 1, fontSize: 14, fontWeight: '500' },
   aboutValue: { fontSize: 13 },
+
+  // Group label
+  groupLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginHorizontal: 18, marginTop: 20, marginBottom: 4 },
 
   // Quick links (Guide + Features)
   quickLink: { flex: 1, alignItems: 'center', padding: 18, borderRadius: 18, elevation: 1, gap: 6 },

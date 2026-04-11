@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, Platform,
-  ActivityIndicator, ScrollView, Keyboard, Dimensions,
+  ActivityIndicator, ScrollView, Keyboard, Dimensions, KeyboardAvoidingView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -80,6 +80,7 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={z.root} edges={['top', 'bottom']}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={z.scroll} keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false} bounces={false}>
 
@@ -199,6 +200,7 @@ export default function RegisterScreen() {
           <Text style={z.secureText}>Secured with end-to-end encryption</Text>
         </View>
       </ScrollView>
+    </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
