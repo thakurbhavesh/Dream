@@ -127,7 +127,7 @@ const s = StyleSheet.create({
   rescanBtn: { position: 'absolute', bottom: 60, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#3b82f6', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 28 },
   rescanText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  permWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
+  permWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30, paddingBottom: 60 },
   permTitle: { fontSize: 20, fontWeight: '800', color: '#fff', marginTop: 16 },
   permSub: { fontSize: 14, color: '#94a3b8', marginTop: 6 },
   permBtn: { backgroundColor: '#3b82f6', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 14, marginTop: 24 },

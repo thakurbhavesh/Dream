@@ -429,7 +429,7 @@ export default function ChatsScreen() {
   }, [t, user?.id, pinnedChats, userStatuses, isDark]);
 
   return (
-    <SafeAreaView style={[s.root, { backgroundColor: t.bg }]} edges={['top']}>
+    <SafeAreaView style={[s.root, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       {/* Header */}
       {!showGlobalSearch ? (
         <View style={[s.header, { backgroundColor: t.card, ...Platform.select({ ios: { shadowColor: t.shadow }, android: { elevation: 2 } }) }]}>

@@ -158,7 +158,7 @@ export default function ContactsScreen() {
   const hasChat = (contactId) => existingThreads.has(`dm-${contactId}`);
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: t.bg }]} edges={['top']}>
+    <SafeAreaView style={[s.container, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       <View style={s.header}>
         <Text style={[s.title, { color: t.text }]}>Contacts</Text>
         <View style={[s.count, { backgroundColor: t.accentBg }]}>

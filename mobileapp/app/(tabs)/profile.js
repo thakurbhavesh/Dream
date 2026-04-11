@@ -239,7 +239,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={[z.root, { backgroundColor: t.bg }]} edges={['top']}>
+    <SafeAreaView style={[z.root, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       {/* ─── Fixed Profile Header ─── */}
       <View style={[z.profileCard, { backgroundColor: t.card }]}>
         <View style={z.profileTop}>
