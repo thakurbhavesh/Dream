@@ -337,6 +337,8 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
     if (st === 'read') return <Ionicons name="checkmark-done" size={14} color="#53bdeb" />;
     if (st === 'delivered') return <Ionicons name="checkmark-done" size={14} color="#8696a0" />;
     if (st === 'sent') return <Ionicons name="checkmark" size={14} color="#8696a0" />;
+    if (st === 'queued') return <Ionicons name="cloud-offline-outline" size={12} color="#f59e0b" />;
+    if (st === 'failed') return <Ionicons name="alert-circle" size={12} color="#ef4444" />;
     return <Ionicons name="time-outline" size={11} color="#8696a0" />;
   };
 
@@ -681,6 +683,18 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
       </Pressable>
       </Animated.View>
 
+      {/* ── Failed/Queued retry ── */}
+      {isOwn && (message?.status === 'failed' || message?.status === 'queued') && (
+        <TouchableOpacity style={[z.retryRow, isOwn ? z.retryOwn : z.retryOther]}
+          onPress={() => onAction?.('retry', message)} activeOpacity={0.7}>
+          <Ionicons name={message.status === 'queued' ? 'cloud-offline-outline' : 'alert-circle'} size={13}
+            color={message.status === 'queued' ? '#f59e0b' : '#ef4444'} />
+          <Text style={[z.retryText, { color: message.status === 'queued' ? '#f59e0b' : '#ef4444' }]}>
+            {message.status === 'queued' ? 'Waiting for network' : 'Failed — tap to retry'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
       {/* ── Reactions display ── */}
       {(() => {
         // Backend sends metadata.reactions as array: [{emoji, users: [{id,name}]}]
@@ -873,6 +887,12 @@ const z = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', gap: 4, zIndex: 10,
   },
   uploadingText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+
+  // Retry row
+  retryRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2, paddingHorizontal: 8 },
+  retryOwn: { justifyContent: 'flex-end' },
+  retryOther: { justifyContent: 'flex-start' },
+  retryText: { fontSize: 11, fontWeight: '600' },
 
   // Swipe reply icon
   swipeReplyIcon: { position: 'absolute', left: 16, top: '50%', marginTop: -15, width: 30, height: 30, borderRadius: 15, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center' },

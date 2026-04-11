@@ -2126,6 +2126,12 @@ const GeneralApp = () => {
               }).catch((err) => {
                 console.warn("[send]", err);
                 upsertMessage(targetThreadId, { ...message, status: "error" });
+                // Queue for offline retry
+                try {
+                  const q = JSON.parse(localStorage.getItem('offline_queue') || '[]');
+                  q.push({ threadId: targetThreadId, message: { ...message, status: 'queued' }, _queuedAt: Date.now() });
+                  localStorage.setItem('offline_queue', JSON.stringify(q.slice(-50)));
+                } catch {}
               });
             };
 

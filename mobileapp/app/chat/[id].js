@@ -24,6 +24,7 @@ import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
 import { getMessages, uploadFile, sendMessageRest } from '../../src/api/chat';
 import { getCachedMessages, cacheMessages, appendCachedMessage, updateCachedMessage } from '../../src/services/cache';
+import { enqueue, dequeue, getQueue, processQueue, isOnline } from '../../src/services/offlineQueue';
 import api from '../../src/api/config';
 import useSocket from '../../src/hooks/useSocket';
 import { useAuth } from '../../src/store/AuthContext';
@@ -202,8 +203,20 @@ export default function ChatScreen() {
   useEffect(() => {
     if (connected && !loading && !hasLeftGroup) {
       focusThread(threadId);
-      // Reload messages to catch any missed during disconnect
       (async () => {
+        // Process offline queue — auto-retry queued messages
+        try {
+          const result = await processQueue(async (msg) => {
+            if (msg._threadId !== threadId) return; // skip other threads
+            const res = await sendMessage(msg._threadId, msg.content?.text, 'text', msg._meta);
+            if (res?.message) {
+              setMessages(prev => prev.map(m => m.id === msg.id ? { ...res.message, status: 'sent' } : m));
+              await dequeue(msg.id);
+            }
+          });
+          if (result.sent > 0) toast(`${result.sent} queued message${result.sent > 1 ? 's' : ''} sent`, 'success');
+        } catch {}
+        // Reload messages to catch any missed during disconnect
         try {
           const data = await getMessages(threadId);
           const fresh = data?.messages || data || [];
@@ -560,26 +573,31 @@ export default function ChatScreen() {
       setMessages(prev => [...prev, optimistic]);
       setTimeout(scrollToEnd, 50);
 
-      // Send in background
-      try {
-        let realMsg = null;
-        if (connected) {
+      // Send in background — queue if offline
+      const online = await isOnline();
+      if (!online || !connected) {
+        // Queue for later
+        await enqueue({ ...optimistic, _threadId: threadId, _meta: meta });
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'queued' } : m));
+      } else {
+        try {
+          let realMsg = null;
           const res = await sendMessage(threadId, trimmed, 'text', meta);
           realMsg = res?.message || (res?.ok ? res : null);
+          if (!realMsg) {
+            const restRes = await sendMessageRest(threadId, trimmed, 'text', meta);
+            realMsg = restRes;
+          }
+          if (realMsg) {
+            setMessages(prev => prev.map(m => m.id === tempId ? { ...realMsg, status: 'sent' } : m));
+          } else {
+            setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m));
+          }
+        } catch {
+          // Queue for retry
+          await enqueue({ ...optimistic, _threadId: threadId, _meta: meta });
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'queued' } : m));
         }
-        if (!realMsg) {
-          const restRes = await sendMessageRest(threadId, trimmed, 'text', meta);
-          realMsg = restRes;
-        }
-        // Replace optimistic with real message
-        if (realMsg) {
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...realMsg, status: 'sent' } : m));
-        } else {
-          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m));
-        }
-      } catch {
-        // Mark as failed
-        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
       }
       return; // already handled setSending above
     } catch (e) {
@@ -978,8 +996,31 @@ export default function ChatScreen() {
         setMessages(prev => prev.map(m => m.id === msgId ? { ...m, metadata: { ...m.metadata, starred } } : m));
         toast(starred ? 'Starred' : 'Unstarred', 'success');
       } catch { toast('Failed', 'error'); }
+    } else if (action === 'retry') {
+      // Retry sending a failed/queued message
+      const text = msg?.content?.text;
+      if (!text) return;
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'sending' } : m));
+      try {
+        let realMsg = null;
+        if (connected) {
+          const res = await sendMessage(threadId, text, 'text', msg?.metadata?.replyTo ? { replyTo: msg.metadata.replyTo } : null);
+          realMsg = res?.message;
+        }
+        if (!realMsg) {
+          realMsg = await sendMessageRest(threadId, text, 'text');
+        }
+        if (realMsg) {
+          setMessages(prev => prev.map(m => m.id === msgId ? { ...realMsg, status: 'sent' } : m));
+          await dequeue(msgId);
+          toast('Sent', 'success');
+        }
+      } catch {
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'failed' } : m));
+        toast('Still offline', 'error');
+      }
     }
-  }, [threadId, emit, toast]);
+  }, [threadId, emit, toast, connected, sendMessage]);
 
   const displayMessages = searchResults || messages;
   // For inverted FlatList — reverse so newest is first (renders at bottom)

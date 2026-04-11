@@ -112,7 +112,27 @@ export const SocketProvider = ({
           });
         };
 
-        instance.on("connect", handleConnect);
+        instance.on("connect", (...args) => {
+          handleConnect(...args);
+          // Auto-retry offline queue on reconnect
+          try {
+            const q = JSON.parse(localStorage.getItem('offline_queue') || '[]');
+            if (q.length > 0) {
+              console.log(`[socket] Retrying ${q.length} queued messages`);
+              const remaining = [];
+              q.forEach(item => {
+                const text = item.message?.content?.text || item.message?.message || '';
+                const msgType = item.message?.type || 'text';
+                if (text && item.threadId) {
+                  instance.emit('message:send', { threadId: item.threadId, message: text, message_type: msgType }, (res) => {
+                    if (!res?.ok) remaining.push(item);
+                  });
+                }
+              });
+              setTimeout(() => localStorage.setItem('offline_queue', JSON.stringify(remaining)), 3000);
+            }
+          } catch {}
+        });
         instance.on("disconnect", handleDisconnect);
         instance.on("connect_error", handleError);
         instance.on("error", handleError);
