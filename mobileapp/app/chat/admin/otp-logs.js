@@ -28,12 +28,12 @@ export default function OtpLogsScreen() {
   const [detail, setDetail] = useState(null);
 
   const ACCENT = t.accent;
-  const bg = isDark ? '#0b141a' : '#f8fafc';
+  const bg = t.bg || (isDark ? '#0b141a' : '#f5f5f5');
   const headerBg = isDark ? '#1f2c34' : ACCENT;
-  const cardBg = isDark ? '#1e293b' : '#fff';
-  const textColor = isDark ? '#f1f5f9' : '#0f172a';
-  const subColor = isDark ? '#64748b' : '#94a3b8';
-  const divider = isDark ? '#334155' : '#f1f5f9';
+  const cardBg = t.card || (isDark ? '#1e293b' : '#ffffff');
+  const textColor = t.text || (isDark ? '#f1f5f9' : '#0f172a');
+  const subColor = t.textSec || (isDark ? '#8696a0' : '#667781');
+  const divider = t.divider || (isDark ? '#334155' : '#e2e8f0');
 
   const load = useCallback(async () => {
     try {
@@ -74,7 +74,7 @@ export default function OtpLogsScreen() {
       {/* Filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
         {['all', 'verified', 'pending', 'expired'].map(f => (
-          <TouchableOpacity key={f} style={[s.chip, { backgroundColor: filter === f ? `${ACCENT}15` : (isDark ? '#0f172a' : '#f1f5f9'), borderColor: filter === f ? ACCENT : 'transparent' }]}
+          <TouchableOpacity key={f} style={[s.chip, { backgroundColor: filter === f ? `${ACCENT}15` : cardBg, borderColor: filter === f ? ACCENT : divider }]}
             onPress={() => setFilter(f)} activeOpacity={0.7}>
             <Text style={[s.chipText, { color: filter === f ? ACCENT : subColor }]}>{f[0].toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>

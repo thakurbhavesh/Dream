@@ -21,11 +21,11 @@ export default function BillingScreen() {
   const [loading, setLoading] = useState(true);
 
   const ACCENT = t.accent;
-  const bg = isDark ? '#0b141a' : '#f8fafc';
+  const bg = t.bg || (isDark ? '#0b141a' : '#f5f5f5');
   const headerBg = isDark ? '#1f2c34' : ACCENT;
-  const cardBg = isDark ? '#1e293b' : '#fff';
-  const textColor = isDark ? '#f1f5f9' : '#0f172a';
-  const subColor = isDark ? '#64748b' : '#94a3b8';
+  const cardBg = t.card || (isDark ? '#1e293b' : '#ffffff');
+  const textColor = t.text || (isDark ? '#f1f5f9' : '#0f172a');
+  const subColor = t.textSec || (isDark ? '#8696a0' : '#667781');
 
   useEffect(() => {
     (async () => {
