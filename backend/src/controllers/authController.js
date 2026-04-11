@@ -5153,6 +5153,73 @@ const qrStatus = async (req, res, next) => {
   }
 };
 
+// 4. Mobile calls this to list all QR-linked web sessions
+const qrLinkedDevices = async (req, res, next) => {
+  try {
+    const userId = Number(req.user?.sub);
+    const { rows } = await db.query(
+      `SELECT qr_id, ip_address, user_agent, status, linked_at, used_at, created_at
+       FROM qr_sessions
+       WHERE user_id = $1 AND status IN ('linked', 'used')
+       ORDER BY linked_at DESC
+       LIMIT 20`,
+      [userId]
+    );
+
+    const devices = rows.map(r => {
+      const ua = r.user_agent || '';
+      let browser = 'Web Browser';
+      let os = 'Unknown';
+      if (ua.includes('Chrome')) browser = 'Chrome';
+      else if (ua.includes('Firefox')) browser = 'Firefox';
+      else if (ua.includes('Safari')) browser = 'Safari';
+      else if (ua.includes('Edge')) browser = 'Edge';
+      if (ua.includes('Windows')) os = 'Windows';
+      else if (ua.includes('Mac')) os = 'macOS';
+      else if (ua.includes('Linux')) os = 'Linux';
+      else if (ua.includes('Android')) os = 'Android';
+      else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+      return {
+        qr_id: r.qr_id,
+        browser,
+        os,
+        ip_address: r.ip_address,
+        status: r.status,
+        linked_at: r.linked_at || r.used_at,
+        created_at: r.created_at,
+      };
+    });
+
+    return success(res, { devices }, 'Linked devices');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// 5. Mobile calls this to logout a QR-linked web session
+const qrLogout = async (req, res, next) => {
+  try {
+    const userId = Number(req.user?.sub);
+    const { qrId } = req.params;
+
+    const result = await db.query(
+      `DELETE FROM qr_sessions WHERE qr_id = $1 AND user_id = $2 RETURNING qr_id`,
+      [qrId, userId]
+    );
+
+    if (!result.rows.length) {
+      const err = new Error('Session not found');
+      err.status = 404;
+      throw err;
+    }
+
+    return success(res, { ok: true }, 'Device logged out');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   register,
   createNewAccount,
@@ -5188,4 +5255,6 @@ module.exports = {
   qrGenerate,
   qrConfirm,
   qrStatus,
+  qrLinkedDevices,
+  qrLogout,
 };

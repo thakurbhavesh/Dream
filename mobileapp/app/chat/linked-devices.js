@@ -2,25 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../../src/api/config';
 import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
 
 let CameraView, useCameraPermissions;
-try {
-  const cam = require('expo-camera');
-  CameraView = cam.CameraView;
-  useCameraPermissions = cam.useCameraPermissions;
-} catch { CameraView = null; useCameraPermissions = null; }
+try { const c = require('expo-camera'); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {}
 
-const getTimeAgo = (d) => {
+const timeAgo = (d) => {
   if (!d) return '';
   const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
   if (s < 60) return 'Just now';
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 };
 
 export default function LinkedDevicesScreen() {
@@ -28,9 +25,9 @@ export default function LinkedDevicesScreen() {
   const insets = useSafeAreaInsets();
   const toast = useToast();
 
-  const [mode, setMode] = useState('list'); // 'list' | 'scan'
+  const [mode, setMode] = useState('list');
   const [devices, setDevices] = useState([]);
-  const [loadingDevices, setLoadingDevices] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [scanned, setScanned] = useState(false);
   const [processing, setProcessing] = useState(false);
 
@@ -41,48 +38,61 @@ export default function LinkedDevicesScreen() {
   const textColor = isDark ? '#f1f5f9' : '#0f172a';
   const subColor = isDark ? '#64748b' : '#94a3b8';
 
-  // Load linked devices
+  // Load only QR-linked web sessions
   const loadDevices = useCallback(async () => {
-    setLoadingDevices(true);
+    setLoading(true);
     try {
-      const { data } = await api.get('/auth/trusted-devices');
-      const list = data?.data?.trusted_devices || data?.data?.devices || data?.data || [];
+      const { data } = await api.get('/auth/qr/devices');
+      const list = data?.data?.devices || data?.devices || [];
       setDevices(Array.isArray(list) ? list : []);
     } catch {}
-    finally { setLoadingDevices(false); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadDevices(); }, []);
 
-  // Revoke device
-  const revokeDevice = useCallback((deviceId, name) => {
-    Alert.alert('Remove Device', `Remove "${name || 'Unknown'}" from linked devices?`, [
+  // Logout = delete QR session → web token invalidated
+  const logoutDevice = useCallback((qrId, browser) => {
+    Alert.alert('Log out', `Log out from ${browser || 'Web Browser'}?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
+      { text: 'Log Out', style: 'destructive', onPress: async () => {
         try {
-          await api.post(`/auth/trusted-devices/${deviceId}/revoke`);
-          setDevices(prev => prev.filter(d => d.device_id !== deviceId));
-          toast('Device removed', 'success');
+          await api.delete(`/auth/qr/devices/${qrId}`);
+          setDevices(prev => prev.filter(d => d.qr_id !== qrId));
+          toast('Logged out', 'success');
         } catch { toast('Failed', 'error'); }
       }},
     ]);
   }, [toast]);
 
-  // QR scan handler
-  const handleBarCodeScanned = async ({ data }) => {
+  // Logout all
+  const logoutAll = useCallback(() => {
+    if (!devices.length) return;
+    Alert.alert('Log out all devices', `Log out from ${devices.length} web browser${devices.length > 1 ? 's' : ''}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out All', style: 'destructive', onPress: async () => {
+        try {
+          for (const d of devices) { await api.delete(`/auth/qr/devices/${d.qr_id}`).catch(() => {}); }
+          setDevices([]);
+          toast('All devices logged out', 'success');
+        } catch { toast('Failed', 'error'); }
+      }},
+    ]);
+  }, [devices, toast]);
+
+  // QR scan
+  const handleScan = async ({ data }) => {
     if (scanned || processing) return;
     setScanned(true);
     setProcessing(true);
     try {
       let qrToken = data;
-      try { const parsed = JSON.parse(data); qrToken = parsed.qrToken || parsed.token || data; } catch {}
-
-      // api interceptor auto-attaches Bearer token from SecureStore
+      try { const p = JSON.parse(data); qrToken = p.qrToken || p.token || data; } catch {}
       const { data: res } = await api.post('/auth/qr/confirm', { qrToken });
       if (res?.status === 'success' || res?.data?.ok) {
         toast('Web browser linked!', 'success');
         setMode('list');
-        loadDevices(); // refresh list
+        loadDevices();
       } else {
         toast(res?.message || 'QR expired or invalid', 'error');
         setScanned(false);
@@ -94,203 +104,170 @@ export default function LinkedDevicesScreen() {
     finally { setProcessing(false); }
   };
 
-  // Scanner mode
+  // ─── Scanner ───
   if (mode === 'scan') {
     return (
-      <View style={[s.root, { backgroundColor: '#000' }]}>
+      <View style={[z.root, { backgroundColor: '#000' }]}>
         {CameraView ? (
-          <CameraView style={s.camera}
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} />
-        ) : (
-          <View style={s.noCam}><Text style={s.noCamText}>Camera not available</Text></View>
-        )}
+          <CameraView style={z.camera} barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={scanned ? undefined : handleScan} />
+        ) : <View style={z.camera}><Text style={{ color: '#fff', textAlign: 'center', marginTop: 100 }}>Camera not available</Text></View>}
 
-        {/* Header overlay */}
-        <View style={[s.scanHeader, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity onPress={() => { setMode('list'); setScanned(false); }} style={s.scanBackBtn}>
+        <View style={[z.scanHeader, { paddingTop: insets.top + 8 }]}>
+          <TouchableOpacity onPress={() => { setMode('list'); setScanned(false); }} style={z.scanClose}>
             <Ionicons name="close" size={26} color="#fff" />
           </TouchableOpacity>
-          <Text style={s.scanTitle}>Scan QR Code</Text>
+          <Text style={z.scanTitle}>Scan QR Code</Text>
           <View style={{ width: 44 }} />
         </View>
 
-        {/* Scanner frame */}
-        <View style={s.scanOverlay}>
-          <View style={s.scanFrame}>
-            <View style={[s.corner, s.tl]} />
-            <View style={[s.corner, s.tr]} />
-            <View style={[s.corner, s.bl]} />
-            <View style={[s.corner, s.br]} />
+        <View style={z.scanCenter}>
+          <View style={z.scanFrame}>
+            <View style={[z.c, z.tl]} /><View style={[z.c, z.tr]} />
+            <View style={[z.c, z.bl]} /><View style={[z.c, z.br]} />
           </View>
-          <Text style={s.scanHint}>Point camera at QR code on{'\n'}TeamChatX web login page</Text>
+          <Text style={z.scanHint}>Point camera at QR code{'\n'}on web login page</Text>
           {processing && <ActivityIndicator color="#fff" style={{ marginTop: 16 }} />}
         </View>
 
         {scanned && !processing && (
-          <TouchableOpacity style={s.rescanBtn} onPress={() => setScanned(false)} activeOpacity={0.8}>
+          <TouchableOpacity style={z.rescanBtn} onPress={() => setScanned(false)}>
             <Ionicons name="refresh" size={18} color="#fff" />
-            <Text style={s.rescanText}>Scan Again</Text>
+            <Text style={z.rescanText}>Scan Again</Text>
           </TouchableOpacity>
         )}
       </View>
     );
   }
 
-  // List mode
+  // ─── List ───
   return (
-    <View style={[s.root, { backgroundColor: bg }]}>
-      {/* Header */}
-      <View style={[s.header, { backgroundColor: headerBg, paddingTop: insets.top + 6 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+    <View style={[z.root, { backgroundColor: bg }]}>
+      <View style={[z.header, { backgroundColor: headerBg, paddingTop: insets.top + 6 }]}>
+        <TouchableOpacity onPress={() => router.back()} style={z.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Linked Devices</Text>
+        <Text style={z.headerTitle}>Linked Devices</Text>
       </View>
 
       <FlatList
         data={devices}
-        keyExtractor={(d, i) => String(d.device_id || i)}
+        keyExtractor={(d) => d.qr_id}
         contentContainerStyle={{ paddingBottom: insets.bottom + 50 }}
-        refreshing={loadingDevices}
+        refreshing={loading}
         onRefresh={loadDevices}
         ListHeaderComponent={
           <>
-            {/* Link new device button */}
-            <TouchableOpacity style={[s.linkBtn, { backgroundColor: `${ACCENT}10`, borderColor: ACCENT }]}
+            {/* Link button */}
+            <TouchableOpacity style={[z.linkBtn, { borderColor: ACCENT }]}
               onPress={() => { setScanned(false); setMode('scan'); }} activeOpacity={0.7}>
-              <View style={[s.linkIcon, { backgroundColor: ACCENT }]}>
-                <Ionicons name="qr-code" size={24} color="#fff" />
+              <View style={[z.linkIcon, { backgroundColor: ACCENT }]}>
+                <Ionicons name="qr-code" size={22} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[s.linkTitle, { color: textColor }]}>Link a Device</Text>
-                <Text style={[s.linkSub, { color: subColor }]}>Scan QR code from web browser to login</Text>
+                <Text style={[z.linkTitle, { color: textColor }]}>Link a Device</Text>
+                <Text style={[z.linkSub, { color: subColor }]}>Scan QR from web browser</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={subColor} />
             </TouchableOpacity>
 
             {/* How it works */}
-            <View style={[s.howCard, { backgroundColor: cardBg }]}>
-              <Text style={[s.howTitle, { color: textColor }]}>How it works</Text>
-              {[
-                { step: '1', text: 'Open TeamChatX on your web browser' },
-                { step: '2', text: 'Click "Login via QR Code" on the login page' },
-                { step: '3', text: 'Tap "Link a Device" above and scan the QR code' },
-              ].map((item, i) => (
-                <View key={i} style={s.howRow}>
-                  <View style={[s.howStep, { backgroundColor: `${ACCENT}15` }]}>
-                    <Text style={[s.howStepText, { color: ACCENT }]}>{item.step}</Text>
+            <View style={[z.howCard, { backgroundColor: cardBg }]}>
+              <Text style={[z.howTitle, { color: textColor }]}>How it works</Text>
+              {['Open TeamChatX on web browser', 'Click "Login via QR Code"', 'Tap "Link a Device" and scan QR'].map((t, i) => (
+                <View key={i} style={z.howRow}>
+                  <View style={[z.howDot, { backgroundColor: `${ACCENT}15` }]}>
+                    <Text style={[z.howNum, { color: ACCENT }]}>{i + 1}</Text>
                   </View>
-                  <Text style={[s.howText, { color: subColor }]}>{item.text}</Text>
+                  <Text style={[z.howText, { color: subColor }]}>{t}</Text>
                 </View>
               ))}
             </View>
 
-            {/* Devices header */}
-            <Text style={[s.sectionTitle, { color: textColor }]}>Active Devices</Text>
+            {/* Linked sessions header + logout all */}
+            {devices.length > 0 && (
+              <View style={z.secHeader}>
+                <Text style={[z.secTitle, { color: textColor }]}>Logged in browsers</Text>
+                {devices.length > 1 && (
+                  <TouchableOpacity onPress={logoutAll} activeOpacity={0.7}>
+                    <Text style={z.logoutAll}>Log out all</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
           </>
         }
-        renderItem={({ item: d, index }) => {
-          const isCurrent = index === 0;
-          const os = (d.os_name || '').toLowerCase();
-          const isAndroid = os.includes('android');
-          const isIOS = os.includes('ios') || os.includes('mac');
-          const isWindows = os.includes('windows');
-          let devIcon = 'monitor', devColor = '#3b82f6';
-          if (isAndroid) { devIcon = 'android'; devColor = '#3DDC84'; }
-          else if (isIOS) { devIcon = 'apple'; devColor = '#999'; }
-          else if (isWindows) { devIcon = 'microsoft-windows'; devColor = '#00A4EF'; }
-
-          return (
-            <View style={[s.deviceRow, { backgroundColor: cardBg }]}>
-              <View style={[s.deviceIcon, { backgroundColor: `${isCurrent ? '#22c55e' : devColor}12` }]}>
-                <MaterialCommunityIcons name={devIcon} size={22} color={isCurrent ? '#22c55e' : devColor} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={s.deviceNameRow}>
-                  <Text style={[s.deviceName, { color: textColor }]}>{d.device_name || 'Unknown Device'}</Text>
-                  {isCurrent && <View style={[s.currentBadge, { backgroundColor: '#22c55e15' }]}><Text style={s.currentText}>This device</Text></View>}
-                </View>
-                <Text style={[s.deviceMeta, { color: subColor }]}>
-                  {[d.os_name, d.city, d.country].filter(Boolean).join(' · ')}
-                </Text>
-                <Text style={[s.deviceTime, { color: subColor }]}>
-                  {isCurrent ? 'Active now' : `Last active ${getTimeAgo(d.last_active_at)}`}
-                </Text>
-              </View>
-              {!isCurrent && (
-                <TouchableOpacity style={[s.revokeBtn, { backgroundColor: '#ef444412' }]}
-                  onPress={() => revokeDevice(d.device_id, d.device_name)} activeOpacity={0.7}>
-                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                </TouchableOpacity>
-              )}
+        renderItem={({ item: d }) => (
+          <View style={[z.devCard, { backgroundColor: cardBg }]}>
+            <View style={[z.devIcon, { backgroundColor: isDark ? '#0f172a' : '#eff6ff' }]}>
+              <Ionicons name="desktop-outline" size={22} color="#3b82f6" />
             </View>
-          );
-        }}
+            <View style={{ flex: 1 }}>
+              <Text style={[z.devName, { color: textColor }]}>{d.browser} — {d.os}</Text>
+              <Text style={[z.devMeta, { color: subColor }]}>
+                {d.ip_address ? `${d.ip_address} · ` : ''}{timeAgo(d.linked_at)}
+              </Text>
+            </View>
+            <TouchableOpacity style={z.logoutBtn} onPress={() => logoutDevice(d.qr_id, d.browser)} activeOpacity={0.7}>
+              <Text style={z.logoutBtnText}>Log out</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         ListEmptyComponent={
-          loadingDevices ? null : (
-            <View style={s.empty}>
-              <Ionicons name="phone-portrait-outline" size={44} color={subColor} />
-              <Text style={[s.emptyText, { color: subColor }]}>No devices found</Text>
+          !loading ? (
+            <View style={z.empty}>
+              <Ionicons name="desktop-outline" size={48} color={subColor} />
+              <Text style={[z.emptyTitle, { color: textColor }]}>No linked devices</Text>
+              <Text style={[z.emptySub, { color: subColor }]}>Tap "Link a Device" to login on web browser</Text>
             </View>
-          )
+          ) : null
         }
       />
     </View>
   );
 }
 
-const FRAME = 240;
-const s = StyleSheet.create({
+const F = 240;
+const z = StyleSheet.create({
   root: { flex: 1 },
-
-  // Header
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingBottom: 14, elevation: 6 },
   backBtn: { padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: -0.2 },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
 
-  // Link button
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginTop: 16, padding: 16, borderRadius: 18, borderWidth: 1.5, borderStyle: 'dashed' },
-  linkIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', elevation: 2 },
+  linkIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', elevation: 2 },
   linkTitle: { fontSize: 16, fontWeight: '800' },
   linkSub: { fontSize: 12, marginTop: 2 },
 
-  // How it works
-  howCard: { marginHorizontal: 14, marginTop: 16, padding: 18, borderRadius: 18, elevation: 1 },
-  howTitle: { fontSize: 15, fontWeight: '800', marginBottom: 14 },
-  howRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
-  howStep: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  howStepText: { fontSize: 13, fontWeight: '900' },
+  howCard: { marginHorizontal: 14, marginTop: 14, padding: 16, borderRadius: 16, elevation: 1 },
+  howTitle: { fontSize: 14, fontWeight: '800', marginBottom: 12 },
+  howRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  howDot: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  howNum: { fontSize: 12, fontWeight: '900' },
   howText: { flex: 1, fontSize: 13, lineHeight: 18 },
 
-  // Section
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginHorizontal: 18, marginTop: 20, marginBottom: 10 },
+  secHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 18, marginTop: 20, marginBottom: 10 },
+  secTitle: { fontSize: 14, fontWeight: '800' },
+  logoutAll: { fontSize: 13, fontWeight: '700', color: '#ef4444' },
 
-  // Device row
-  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, padding: 16, borderRadius: 16, elevation: 1 },
-  deviceIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  deviceNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  deviceName: { fontSize: 15, fontWeight: '700' },
-  currentBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  currentText: { fontSize: 9, fontWeight: '800', color: '#22c55e', textTransform: 'uppercase' },
-  deviceMeta: { fontSize: 12, marginTop: 3 },
-  deviceTime: { fontSize: 11, marginTop: 2 },
-  revokeBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  devCard: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, padding: 14, borderRadius: 16, elevation: 1 },
+  devIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  devName: { fontSize: 14, fontWeight: '700' },
+  devMeta: { fontSize: 12, marginTop: 2 },
+  logoutBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#ef444412' },
+  logoutBtnText: { fontSize: 12, fontWeight: '800', color: '#ef4444' },
 
-  // Empty
-  empty: { alignItems: 'center', paddingTop: 40, gap: 8 },
-  emptyText: { fontSize: 14 },
+  empty: { alignItems: 'center', paddingTop: 50, gap: 8, paddingHorizontal: 30 },
+  emptyTitle: { fontSize: 16, fontWeight: '800' },
+  emptySub: { fontSize: 13, textAlign: 'center', lineHeight: 19 },
 
-  // Scanner
   camera: { flex: 1 },
-  noCam: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
-  noCamText: { color: '#fff', fontSize: 16 },
   scanHeader: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, zIndex: 10 },
-  scanBackBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
+  scanClose: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
   scanTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
-  scanOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-  scanFrame: { width: FRAME, height: FRAME, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 20, position: 'relative' },
-  corner: { position: 'absolute', width: 30, height: 30, borderColor: '#3b82f6', borderWidth: 3 },
+  scanCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  scanFrame: { width: F, height: F, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', borderRadius: 20 },
+  c: { position: 'absolute', width: 28, height: 28, borderColor: '#3b82f6', borderWidth: 3 },
   tl: { top: -1, left: -1, borderBottomWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 20 },
   tr: { top: -1, right: -1, borderBottomWidth: 0, borderLeftWidth: 0, borderTopRightRadius: 20 },
   bl: { bottom: -1, left: -1, borderTopWidth: 0, borderRightWidth: 0, borderBottomLeftRadius: 20 },
