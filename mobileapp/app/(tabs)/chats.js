@@ -7,6 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../../src/components/Avatar';
+import * as LocalAuthentication from 'expo-local-authentication';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import ImageViewer from '../../src/components/ImageViewer';
 import { getThreads } from '../../src/api/chat';
 import api from '../../src/api/config';
@@ -324,7 +326,7 @@ export default function ChatsScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+
         const p = await AsyncStorage.getItem('pinned_chats');
         const a = await AsyncStorage.getItem('archived_chats');
         if (p) setPinnedChats(new Set(JSON.parse(p)));
@@ -356,14 +358,11 @@ export default function ChatsScreen() {
   };
 
   const openChat = async (thread) => {
-    // Check if chat is locked
     try {
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
       const locked = await AsyncStorage.getItem(`chat_lock_${thread.id}`);
       if (locked) {
-        const LocalAuth = require('expo-local-authentication');
-        const result = await LocalAuth.authenticateAsync({ promptMessage: `Unlock ${thread.name}`, cancelLabel: 'Cancel' });
-        if (!result.success) return; // auth failed — don't open
+        const result = await LocalAuthentication.authenticateAsync({ promptMessage: `Unlock ${thread.name}`, cancelLabel: 'Cancel' });
+        if (!result.success) return;
       }
     } catch {}
     router.push(`/chat/${thread.id}?name=${encodeURIComponent(thread.name || '')}&avatar=${encodeURIComponent(thread.avatar || '')}`);
@@ -621,11 +620,9 @@ export default function ChatsScreen() {
                   const id = longPressItem.id;
                   setLongPressItem(null);
                   try {
-                    const LocalAuth = require('expo-local-authentication');
-                    const hasHw = await LocalAuth.hasHardwareAsync();
-                    const enrolled = await LocalAuth.isEnrolledAsync();
+                    const hasHw = await LocalAuthentication.hasHardwareAsync();
+                    const enrolled = await LocalAuthentication.isEnrolledAsync();
                     if (!hasHw || !enrolled) { toast('Biometric not available', 'error'); return; }
-                    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
                     const locked = await AsyncStorage.getItem(`chat_lock_${id}`);
                     if (locked) {
                       await AsyncStorage.removeItem(`chat_lock_${id}`);
