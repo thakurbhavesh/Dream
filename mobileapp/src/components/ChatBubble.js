@@ -18,8 +18,8 @@ const isEmojiOnly = (txt) => {
 const openInApp = (url, color) => url && WebBrowser.openBrowserAsync(url, { presentationStyle: 'pageSheet', controlsColor: color || '#ea4c89' });
 const openExternal = (url) => url && Linking.openURL(url);
 
-// URL regex for auto-detection in text
-const URL_REGEX = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/gi;
+// URL regex — detects both https://... AND bare domains like teamchatx.com, google.com/path
+const URL_REGEX = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+|(?:(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+(?:com|org|net|io|dev|app|co|in|me|info|biz|xyz|tech|ai|cloud|edu|gov|mil|pro|site|online|store|shop|blog|design|agency|studio|media|world|space|live|digital|solutions|software|systems|services|team|chat|work|zone|link|click|page|wiki|tv|fm|gg|ly|to|cc|us|uk|de|fr|jp|cn|ru|br|au|ca|eu))(?:\/[^\s<>"{}|\\^`\[\]]*)?)/gi;
 
 // Parse text into parts: plain text + clickable links
 const parseTextWithLinks = (txt, textColor, linkColor) => {
@@ -32,10 +32,12 @@ const parseTextWithLinks = (txt, textColor, linkColor) => {
     if (match.index > lastIndex) {
       parts.push(<Text key={`t-${lastIndex}`} style={{ color: textColor }}>{txt.slice(lastIndex, match.index)}</Text>);
     }
-    const href = match[0];
+    const raw = match[0];
+    // Auto-prepend https:// for bare domains
+    const href = raw.match(/^https?:\/\//) ? raw : `https://${raw}`;
     parts.push(
-      <Text key={`l-${match.index}`} style={{ color: linkColor, textDecorationLine: 'underline' }}
-        onPress={() => Linking.openURL(href)}>{href}</Text>
+      <Text key={`l-${match.index}`} style={{ color: linkColor, textDecorationLine: 'underline', fontWeight: '500' }}
+        onPress={() => Linking.openURL(href)}>{raw}</Text>
     );
     lastIndex = match.index + match[0].length;
   }
@@ -553,23 +555,26 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
         {/* ── Link ── */}
         {isLink && (() => {
           const linkHref = c?.url || url || text;
+          const fullHref = linkHref?.match(/^https?:\/\//) ? linkHref : `https://${linkHref}`;
           let host = c?.displayHost || '';
-          if (!host && linkHref) try { host = new URL(linkHref).hostname.replace('www.', ''); } catch {}
+          if (!host && fullHref) try { host = new URL(fullHref).hostname.replace('www.', ''); } catch {}
           const hasPreview = c?.title || c?.thumbnail;
           return (
             <>
               <TouchableOpacity style={z.linkCard} activeOpacity={0.7}
-                onPress={() => openExternal(linkHref)}>
+                onPress={() => openExternal(fullHref)}>
                 {/* Thumbnail */}
                 {c?.thumbnail && <Image source={{ uri: c.thumbnail }} style={z.linkThumb} resizeMode="cover" />}
 
                 {/* Preview body */}
-                <View style={[z.linkPreviewBody, { backgroundColor: isOwn ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.03)' }]}>
+                <View style={[z.linkPreviewBody, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : (isOwn ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.03)') }]}>
                   <View style={[z.linkAccent, { backgroundColor: ACCENT }]} />
                   <View style={z.linkContent}>
                     {hasPreview && c?.title ? (
                       <Text style={[z.linkTitle, { color: textColor }]} numberOfLines={2}>{c.title}</Text>
-                    ) : null}
+                    ) : (
+                      <Text style={[z.linkTitle, { color: textColor }]} numberOfLines={1}>{host || linkHref}</Text>
+                    )}
                     {hasPreview && c?.description ? (
                       <Text style={[z.linkDesc, { color: metaColor }]} numberOfLines={2}>{c.description}</Text>
                     ) : null}
@@ -582,7 +587,7 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
 
                 {/* Full URL below preview */}
                 <View style={z.linkUrlWrap}>
-                  <Text style={[z.linkFullUrl, { color: isOwn ? '#054640' : '#027eb5' }]}
+                  <Text style={[z.linkFullUrl, { color: isDark ? '#7dd3fc' : (isOwn ? '#054640' : '#027eb5') }]}
                     numberOfLines={2}>{linkHref}</Text>
                 </View>
               </TouchableOpacity>
@@ -618,13 +623,34 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
         {!showImage && !isLink && !isEmojiOnly(text) && type !== 'code' && (text || (!isMedia)) ? (() => {
           const isLong = text.length > TEXT_LIMIT;
           const display = isLong && !expanded ? text.slice(0, TEXT_LIMIT) + '...' : text;
-          const linkColor = isOwn ? '#054640' : '#027eb5';
+          const linkColor = isDark ? '#7dd3fc' : (isOwn ? '#054640' : '#027eb5');
+
+          // Detect first URL in text for mini preview
+          URL_REGEX.lastIndex = 0;
+          const firstUrlMatch = URL_REGEX.exec(text);
+          let miniHost = '';
+          let miniHref = '';
+          if (firstUrlMatch) {
+            miniHref = firstUrlMatch[0].match(/^https?:\/\//) ? firstUrlMatch[0] : `https://${firstUrlMatch[0]}`;
+            try { miniHost = new URL(miniHref).hostname.replace('www.', ''); } catch {}
+          }
+
           return (
             <View style={z.textWrap}>
               <Text style={[z.text, { fontSize: textSize }]}>{parseTextWithLinks(display, textColor, linkColor)}</Text>
               {isLong && (
                 <TouchableOpacity onPress={() => setExpanded(!expanded)} activeOpacity={0.7} style={z.showMoreBtn}>
                   <Text style={[z.showMoreText, { color: linkColor }]}>{expanded ? 'Show less' : 'Show more'}</Text>
+                </TouchableOpacity>
+              )}
+              {/* Mini link preview for text messages containing URLs */}
+              {miniHost && type === 'text' && (
+                <TouchableOpacity style={[z.miniLinkPreview, { backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }]}
+                  onPress={() => Linking.openURL(miniHref)} activeOpacity={0.7}>
+                  <View style={[z.miniLinkAccent, { backgroundColor: ACCENT }]} />
+                  <Ionicons name="globe-outline" size={14} color={metaColor} />
+                  <Text style={[z.miniLinkHost, { color: linkColor }]} numberOfLines={1}>{miniHost}</Text>
+                  <Ionicons name="open-outline" size={12} color={metaColor} />
                 </TouchableOpacity>
               )}
               <Footer />
@@ -816,6 +842,11 @@ const z = StyleSheet.create({
   // Show more/less
   showMoreBtn: { marginTop: 5, paddingVertical: 2 },
   showMoreText: { fontSize: 13, fontWeight: '700' },
+
+  // Mini link preview inside text messages
+  miniLinkPreview: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, padding: 10, borderRadius: 12 },
+  miniLinkAccent: { width: 3, height: 18, borderRadius: 2 },
+  miniLinkHost: { flex: 1, fontSize: 13, fontWeight: '600' },
 
   // Quick reactions — pill-shaped
   quickReactRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
