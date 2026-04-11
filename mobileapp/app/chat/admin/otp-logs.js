@@ -74,7 +74,7 @@ export default function OtpLogsScreen() {
       {/* Filters */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterScroll}>
         {['all', 'verified', 'pending', 'expired'].map(f => (
-          <TouchableOpacity key={f} style={[s.chip, filter === f && { backgroundColor: `${ACCENT}15`, borderColor: ACCENT }]}
+          <TouchableOpacity key={f} style={[s.chip, { backgroundColor: filter === f ? `${ACCENT}15` : (isDark ? '#0f172a' : '#f1f5f9'), borderColor: filter === f ? ACCENT : 'transparent' }]}
             onPress={() => setFilter(f)} activeOpacity={0.7}>
             <Text style={[s.chipText, { color: filter === f ? ACCENT : subColor }]}>{f[0].toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>
