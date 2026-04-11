@@ -8,20 +8,36 @@ const KEYS = {
 
 const MAX_MESSAGES = 50;
 const MAX_THREADS = 50;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// TTL wrapper — save with timestamp
+const setWithTTL = async (key, data) => {
+  await AsyncStorage.setItem(key, JSON.stringify({ _ts: Date.now(), data }));
+};
+const getWithTTL = async (key) => {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Check TTL — if has _ts field
+    if (parsed._ts && Date.now() - parsed._ts > CACHE_TTL_MS) {
+      await AsyncStorage.removeItem(key); // expired
+      return null;
+    }
+    return parsed.data || parsed; // backward compat (old cache without _ts)
+  } catch { return null; }
+};
 
 // ─── Threads ────────────────────────────────────────────────────────────────
 
 export const getCachedThreads = async () => {
-  try {
-    const raw = await AsyncStorage.getItem(KEYS.threads);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  return getWithTTL(KEYS.threads);
 };
 
 export const cacheThreads = async (threads) => {
   try {
     const trimmed = (threads || []).slice(0, MAX_THREADS);
-    await AsyncStorage.setItem(KEYS.threads, JSON.stringify(trimmed));
+    await setWithTTL(KEYS.threads, trimmed);
   } catch {}
 };
 

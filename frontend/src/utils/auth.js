@@ -236,9 +236,12 @@ export const authStore = {
     const preserve = new Set([...PERSISTENT_KEYS_ON_LOGOUT, ...keepKeys]);
     Object.keys(window.localStorage).forEach((key) => {
       if (!preserve.has(key)) {
-        secureStorage.removeItem(key);
+        window.localStorage.removeItem(key);
       }
     });
+    // Also clear secure storage tokens
+    secureStorage.removeItem(AUTH_KEYS.token);
+    secureStorage.removeItem(AUTH_KEYS.refreshToken);
     clearStoredCurrentUser();
     emitChange();
   },

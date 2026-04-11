@@ -843,8 +843,18 @@ const onConnection = (socket) => {
     try {
       const { threadId, message, message_type = 'text', metadata: rawMeta = null } = data;
       console.log(`[socket] message:send received threadId=${threadId} userId=${userId} type=${message_type}`);
-      if (!threadId || (!message && message_type === 'text')) {
+
+      // Validate threadId format
+      if (!threadId || !/^(dm|group)-\d+$/.test(threadId)) {
+        return ack?.({ error: 'Invalid threadId format' });
+      }
+      // Validate message
+      if (!message && message_type === 'text') {
         return ack?.({ error: 'message and threadId required' });
+      }
+      // Message size limit — 5000 chars max
+      if (typeof message === 'string' && message.length > 5000) {
+        return ack?.({ error: 'Message too long (max 5000 characters)' });
       }
       // Inject sender geo location into metadata
       const sentFrom = buildSentFrom(socket);

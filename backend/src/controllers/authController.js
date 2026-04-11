@@ -1935,6 +1935,23 @@ const login = async (req, res, next) => {
       }
     }
 
+    // Device limit — max 3 active devices
+    const MAX_DEVICES = 3;
+    const { rows: activeDevices } = await db.query(
+      `SELECT device_id, device_name, last_active_at FROM user_devices
+       WHERE user_id = $1 ORDER BY last_active_at DESC`,
+      [user.user_id]
+    );
+    if (activeDevices.length >= MAX_DEVICES && !devicePayload.client_device_id) {
+      // New device + already at limit — block login, show existing devices
+      const deviceList = activeDevices.map(d => d.device_name || 'Unknown').join(', ');
+      const err = new Error(`Maximum ${MAX_DEVICES} devices allowed. Currently logged in: ${deviceList}. Please logout from another device first.`);
+      err.status = 403;
+      err.deviceLimit = true;
+      err.devices = activeDevices.map(d => ({ id: d.device_id, name: d.device_name, lastActive: d.last_active_at }));
+      throw err;
+    }
+
     const payload = {
       sub: user.user_id,
       email: user.email,
