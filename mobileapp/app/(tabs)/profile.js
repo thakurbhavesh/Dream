@@ -509,13 +509,9 @@ export default function ProfileScreen() {
           </View>
         </Section>
 
-        {/* ─── Chat Lock ─── */}
-        <Section id="chatlock" icon="lock-closed-outline" label="Chat Lock">
-          <Text style={[z.permHint, { color: t.textTer }]}>Lock individual chats with fingerprint or Face ID. Long-press any chat → Lock to enable.</Text>
-          <View style={[z.appearRow, { marginTop: 8 }]}>
-            <Ionicons name="finger-print-outline" size={20} color={t.accent} />
-            <Text style={[z.appearLabel, { color: t.text, flex: 1, marginLeft: 10 }]}>Biometric required to open locked chats</Text>
-          </View>
+        {/* ─── Privacy ─── */}
+        <Section id="privacy" icon="eye-off-outline" label="Privacy">
+          <Text style={[z.permHint, { color: t.textTer }]}>Control who can see your information</Text>
         </Section>
 
         {/* ─── Permissions ─── */}
