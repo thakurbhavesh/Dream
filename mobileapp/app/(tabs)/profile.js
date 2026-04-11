@@ -636,6 +636,30 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* ─── Danger Zone ─── */}
+        <View style={[z.section, { backgroundColor: t.card, marginTop: 16 }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => {
+            const { Alert } = require('react-native');
+            Alert.alert('Delete Account', 'This will permanently delete your account, all messages, and data. This cannot be undone.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete My Account', style: 'destructive', onPress: async () => {
+                try {
+                  await api.delete('/auth/me');
+                  await doLogout();
+                  toast('Account deleted', 'info');
+                  setTimeout(() => router.replace('/(auth)/login'), 300);
+                } catch { toast('Contact support to delete account', 'info'); }
+              }},
+            ]);
+          }} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: '#ef444412' }]}>
+              <Ionicons name="trash-outline" size={17} color="#ef4444" />
+            </View>
+            <Text style={[z.sectionLabel, { color: '#ef4444' }]}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={18} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
+
         <View style={{ height: 40 }} />
       </ScrollView>
 

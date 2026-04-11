@@ -1,4 +1,16 @@
 const { Server } = require('socket.io');
+
+// XSS sanitization — strip dangerous HTML/script tags from messages
+const sanitizeText = (text) => {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // remove script tags
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // remove iframes
+    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')  // remove event handlers
+    .replace(/<\/?(?:script|iframe|object|embed|form|input|textarea|select|button)\b[^>]*>/gi, '') // strip dangerous tags
+    .replace(/javascript\s*:/gi, '') // remove javascript: protocol
+    .trim();
+};
 const jwt = require('jsonwebtoken');
 const chatModel = require('../chat/chatModel');
 const db = require('../config/database');
@@ -856,6 +868,8 @@ const onConnection = (socket) => {
       if (typeof message === 'string' && message.length > 5000) {
         return ack?.({ error: 'Message too long (max 5000 characters)' });
       }
+      // XSS sanitization
+      const sanitizedMessage = sanitizeText(message);
       // Inject sender geo location into metadata
       const sentFrom = buildSentFrom(socket);
       const metadata = sentFrom ? { ...(rawMeta || {}), sentFrom } : rawMeta;
@@ -868,7 +882,7 @@ const onConnection = (socket) => {
         const isSelfChat = receiverId === Number(userId);
         const saved = await chatModel.sendDMMessage({
           orgId, senderId: Number(userId), receiverId,
-          message, messageType: message_type, metadata,
+          message: sanitizedMessage, messageType: message_type, metadata,
         });
 
         // Set expires_at if disappearing messages is enabled
@@ -905,7 +919,7 @@ const onConnection = (socket) => {
         const groupId = Number(threadId.replace('group-', ''));
         const saved = await chatModel.sendGroupMessage({
           orgId, groupId, senderId: Number(userId),
-          message, messageType: message_type, metadata,
+          message: sanitizedMessage, messageType: message_type, metadata,
         });
 
         // Set expires_at if disappearing messages is enabled

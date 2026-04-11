@@ -116,6 +116,7 @@ export default function ChatScreen() {
   const [forwardMsg, setForwardMsg] = useState(null);
   const [forwardContacts, setForwardContacts] = useState([]);
   const [forwardSearch, setForwardSearch] = useState('');
+  const [forwardSelected, setForwardSelected] = useState([]); // multi-select
   const flatListRef = useRef(null);
   const inputRef = useRef(null);
   const searchRef = useRef(null);
@@ -610,8 +611,12 @@ export default function ChatScreen() {
   }, [text, threadId, sendMessage, sending, toast, scrollToEnd, replyTo, connected, editingMsg, emit]);
 
   // Forward handler
-  const handleForwardTo = useCallback(async (targetUserId) => {
-    if (!forwardMsg) return;
+  const toggleForwardSelect = useCallback((id) => {
+    setForwardSelected(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  }, []);
+
+  const handleForwardSend = useCallback(async () => {
+    if (!forwardMsg || !forwardSelected.length) return;
     setShowForward(false);
     const c = forwardMsg.content || {};
     const fwdMeta = {
@@ -620,17 +625,22 @@ export default function ChatScreen() {
       forwardedBy: user?.name || 'You',
       ...(c.fileName ? { fileName: c.fileName, fileUrl: c.fileUrl, fileKey: c.fileKey, fileType: c.fileType, fileSize: c.fileSize || c.rawSize } : {}),
     };
-    try {
-      await emit('message:forward', {
-        targetThreadId: `dm-${targetUserId}`,
-        message: c?.text || c?.url || c?.code || forwardMsg?.message || '',
-        message_type: forwardMsg?.type || 'text',
-        metadata: fwdMeta,
-      });
-      toast('Message forwarded', 'success');
-    } catch { toast('Forward failed', 'error'); }
+    let success = 0;
+    for (const targetUserId of forwardSelected) {
+      try {
+        await emit('message:forward', {
+          targetThreadId: `dm-${targetUserId}`,
+          message: c?.text || c?.url || c?.code || forwardMsg?.message || '',
+          message_type: forwardMsg?.type || 'text',
+          metadata: fwdMeta,
+        });
+        success++;
+      } catch {}
+    }
+    toast(`Forwarded to ${success} contact${success > 1 ? 's' : ''}`, 'success');
     setForwardMsg(null);
-  }, [forwardMsg, emit, toast, user]);
+    setForwardSelected([]);
+  }, [forwardMsg, forwardSelected, emit, toast, user]);
 
   // Helper: send file message with socket + REST fallback
   const sendFileMessage = useCallback(async (msgType, meta) => {
@@ -1565,8 +1575,8 @@ export default function ChatScreen() {
             <View style={[z.fwdOverlay]}>
               <View style={[z.fwdSheet, { backgroundColor: isDark ? '#1e293b' : '#fff', paddingBottom: insets.bottom }]}>
                 <View style={z.fwdHeader}>
-                  <Text style={[z.fwdTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>Forward to</Text>
-                  <TouchableOpacity onPress={() => setShowForward(false)}><Ionicons name="close" size={22} color={isDark ? '#94a3b8' : '#64748b'} /></TouchableOpacity>
+                  <Text style={[z.fwdTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>Forward to {forwardSelected.length > 0 ? `(${forwardSelected.length})` : ''}</Text>
+                  <TouchableOpacity onPress={() => { setShowForward(false); setForwardSelected([]); }}><Ionicons name="close" size={22} color={isDark ? '#94a3b8' : '#64748b'} /></TouchableOpacity>
                 </View>
                 <View style={[z.fwdSearch, { backgroundColor: isDark ? '#0f172a' : '#f1f5f9' }]}>
                   <Ionicons name="search" size={16} color={isDark ? '#64748b' : '#94a3b8'} />
@@ -1577,16 +1587,25 @@ export default function ChatScreen() {
                 <FlatList
                   data={forwardContacts.filter(c => !forwardSearch || (c.name || '').toLowerCase().includes(forwardSearch.toLowerCase()))}
                   keyExtractor={c => String(c.id)}
-                  renderItem={({ item: c }) => (
-                    <TouchableOpacity style={[z.fwdRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
-                      onPress={() => handleForwardTo(c.id)} activeOpacity={0.6}>
-                      <Avatar uri={c.avatar} name={c.name} size={42} />
-                      <Text style={[z.fwdName, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{c.name}</Text>
-                      <Ionicons name="send" size={16} color={BRAND} />
-                    </TouchableOpacity>
-                  )}
+                  renderItem={({ item: c }) => {
+                    const sel = forwardSelected.includes(c.id);
+                    return (
+                      <TouchableOpacity style={[z.fwdRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
+                        onPress={() => toggleForwardSelect(c.id)} activeOpacity={0.6}>
+                        <Avatar uri={c.avatar} name={c.name} size={42} />
+                        <Text style={[z.fwdName, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{c.name}</Text>
+                        <Ionicons name={sel ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={sel ? BRAND : (isDark ? '#334155' : '#cbd5e1')} />
+                      </TouchableOpacity>
+                    );
+                  }}
                   ListEmptyComponent={<Text style={[z.fwdEmpty, { color: isDark ? '#64748b' : '#94a3b8' }]}>No contacts</Text>}
                 />
+                {forwardSelected.length > 0 && (
+                  <TouchableOpacity style={[z.fwdSendBtn, { backgroundColor: BRAND }]} onPress={handleForwardSend} activeOpacity={0.8}>
+                    <Ionicons name="send" size={18} color="#fff" />
+                    <Text style={z.fwdSendText}>Forward to {forwardSelected.length}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </Modal>
@@ -1891,6 +1910,8 @@ const z = StyleSheet.create({
   fwdRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   fwdName: { flex: 1, fontSize: 15, fontWeight: '600' },
   fwdEmpty: { textAlign: 'center', paddingVertical: 30, fontSize: 14 },
+  fwdSendBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, marginVertical: 12, paddingVertical: 14, borderRadius: 14 },
+  fwdSendText: { fontSize: 15, fontWeight: '700', color: '#fff' },
   contactAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   headerTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, marginRight: 4 },
   headerInfo: { flex: 1, marginRight: 4 },

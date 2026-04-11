@@ -25,6 +25,23 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+
+  // Password strength
+  const getPasswordStrength = (p) => {
+    if (!p) return { level: 0, label: '', color: '#e2e8f0' };
+    let score = 0;
+    if (p.length >= 8) score++;
+    if (p.length >= 12) score++;
+    if (/[A-Z]/.test(p)) score++;
+    if (/[0-9]/.test(p)) score++;
+    if (/[^A-Za-z0-9]/.test(p)) score++;
+    if (score <= 1) return { level: 1, label: 'Weak', color: '#ef4444' };
+    if (score <= 2) return { level: 2, label: 'Fair', color: '#f59e0b' };
+    if (score <= 3) return { level: 3, label: 'Good', color: '#22c55e' };
+    return { level: 4, label: 'Strong', color: '#3b82f6' };
+  };
+  const passStrength = getPasswordStrength(pass);
   const [show, setShow] = useState(false);
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -52,6 +69,7 @@ export default function RegisterScreen() {
   const handleRegister = useCallback(async () => {
     Keyboard.dismiss();
     if (!validate()) return;
+    if (!termsAccepted) { toast('Please accept Terms & Privacy Policy', 'error'); return; }
     setLoading(true);
     try {
       await register({ companyName: company.trim(), ownerName: name.trim(), email: email.trim().toLowerCase(), phone: phone.replace(/\D/g, ''), password: pass });
@@ -145,6 +163,17 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
               </View>
               {err.pass ? <Text style={z.errText}>{err.pass}</Text> : null}
+              {/* Password strength */}
+              {pass.length > 0 && (
+                <View style={z.strengthWrap}>
+                  <View style={z.strengthBar}>
+                    {[1,2,3,4].map(i => (
+                      <View key={i} style={[z.strengthSeg, { backgroundColor: i <= passStrength.level ? passStrength.color : '#e2e8f0' }]} />
+                    ))}
+                  </View>
+                  <Text style={[z.strengthLabel, { color: passStrength.color }]}>{passStrength.label}</Text>
+                </View>
+              )}
 
               {/* Confirm */}
               <View style={[z.field, err.confirm && z.fieldErr]}>
@@ -154,8 +183,14 @@ export default function RegisterScreen() {
               </View>
               {err.confirm ? <Text style={z.errText}>{err.confirm}</Text> : null}
 
+              {/* Terms */}
+              <TouchableOpacity style={z.termsRow} onPress={() => setTermsAccepted(!termsAccepted)} activeOpacity={0.7}>
+                <Ionicons name={termsAccepted ? 'checkbox' : 'square-outline'} size={22} color={termsAccepted ? P : '#94a3b8'} />
+                <Text style={z.termsText}>I agree to the <Text style={{ color: P, fontWeight: '700' }} onPress={() => router.push('/chat/legal?type=terms')}>Terms</Text> and <Text style={{ color: P, fontWeight: '700' }} onPress={() => router.push('/chat/legal?type=privacy')}>Privacy Policy</Text></Text>
+              </TouchableOpacity>
+
               {/* Button */}
-              <TouchableOpacity activeOpacity={0.85} onPress={handleRegister} disabled={loading}>
+              <TouchableOpacity activeOpacity={0.85} onPress={handleRegister} disabled={loading || !termsAccepted}>
                 <LinearGradient colors={[P, PD]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                   style={[z.btn, loading && z.btnOff]}>
                   {loading ? <ActivityIndicator color="#fff" /> : <Text style={z.btnText}>Create Account</Text>}
@@ -236,6 +271,12 @@ const z = StyleSheet.create({
   fieldErr: { borderColor: '#fca5a5', backgroundColor: '#fef2f2' },
   input: { flex: 1, fontSize: 14, color: '#0f172a', fontWeight: '500' },
   errText: { fontSize: 10, color: '#ef4444', marginTop: 2, marginLeft: 4 },
+  strengthWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  strengthBar: { flex: 1, flexDirection: 'row', gap: 3 },
+  strengthSeg: { flex: 1, height: 4, borderRadius: 2 },
+  strengthLabel: { fontSize: 11, fontWeight: '700', width: 50 },
+  termsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 4 },
+  termsText: { flex: 1, fontSize: 12, color: '#64748b', lineHeight: 18 },
 
   // Two-column row
   row: { flexDirection: 'row', gap: 8 },
