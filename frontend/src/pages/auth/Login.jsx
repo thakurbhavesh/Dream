@@ -213,7 +213,7 @@ const Login = () => {
     setShowQr(true);
     setQrStatus("loading");
     try {
-      const res = await fetchJson(`${API_BASE_URL}/auth/qr`);
+      const { payload: res } = await fetchJson(`${API_BASE_URL}/auth/qr`);
       const d = res?.data || res;
       if (d?.qrId && d?.qrToken) {
         setQrData(d);
@@ -221,7 +221,7 @@ const Login = () => {
         // Start polling
         qrPollRef.current = setInterval(async () => {
           try {
-            const poll = await fetchJson(`${API_BASE_URL}/auth/qr/status?qrId=${d.qrId}`);
+            const { payload: poll } = await fetchJson(`${API_BASE_URL}/auth/qr/status?qrId=${d.qrId}`);
             const pd = poll?.data || poll;
             if (pd?.status === "linked" && pd?.accessToken) {
               clearInterval(qrPollRef.current);
