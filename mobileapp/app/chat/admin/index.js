@@ -141,11 +141,11 @@ const s = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '900', color: '#fff', letterSpacing: -0.3 },
   headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
 
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, padding: 14 },
-  statCard: { width: '48%', flexGrow: 1, padding: 16, borderRadius: 16, elevation: 1, alignItems: 'center', gap: 6 },
-  statIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  statValue: { fontSize: 24, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  statLabel: { fontSize: 11, fontWeight: '600' },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 14 },
+  statCard: { width: '47%', flexGrow: 1, padding: 18, borderRadius: 18, elevation: 2, alignItems: 'center', gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6 },
+  statIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  statValue: { fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'], letterSpacing: -0.5 },
+  statLabel: { fontSize: 11, fontWeight: '700' },
 
   planCard: { marginHorizontal: 14, marginBottom: 14, padding: 16, borderRadius: 16, elevation: 1 },
   planBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
@@ -155,8 +155,8 @@ const s = StyleSheet.create({
 
   sectionTitle: { fontSize: 15, fontWeight: '800', marginHorizontal: 18, marginTop: 8, marginBottom: 10 },
 
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, padding: 16, borderRadius: 16, elevation: 1 },
-  menuIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  menuLabel: { fontSize: 15, fontWeight: '700' },
-  menuDesc: { fontSize: 12, marginTop: 2 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 10, padding: 18, borderRadius: 18, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4 },
+  menuIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  menuLabel: { fontSize: 16, fontWeight: '800', letterSpacing: -0.1 },
+  menuDesc: { fontSize: 12, marginTop: 3 },
 });

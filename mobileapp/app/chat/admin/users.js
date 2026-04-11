@@ -30,12 +30,26 @@ export default function UsersScreen() {
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { limit: 200, offset: 0 };
+      const params = { limit: 200, offset: 0, all: true };
       if (search.trim()) params.search = search.trim();
-      if (filter !== 'all') params.status = filter;
-      const { data } = await api.get('/org-users', { params });
-      const rows = data?.data?.rows || data?.data || [];
-      setUsers(Array.isArray(rows) ? rows : []);
+      // Try /org-users first, fallback to /users
+      let rows = [];
+      try {
+        const { data } = await api.get('/org-users', { params });
+        const d = data?.data || data;
+        rows = d?.rows || (Array.isArray(d) ? d : []);
+      } catch {
+        try {
+          const { data } = await api.get('/users', { params });
+          const d = data?.data || data;
+          rows = d?.rows || (Array.isArray(d) ? d : []);
+        } catch {}
+      }
+      // Filter by status client-side if needed
+      if (filter !== 'all') {
+        rows = rows.filter(u => (u.status || u.membership_status || 'active') === filter);
+      }
+      setUsers(rows);
     } catch {}
     finally { setLoading(false); }
   }, [search, filter]);
@@ -174,16 +188,16 @@ const s = StyleSheet.create({
   filterChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 18, borderWidth: 1.5, borderColor: 'transparent' },
   filterText: { fontSize: 12, fontWeight: '700' },
 
-  userCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginTop: 8, padding: 14, borderRadius: 16, elevation: 1 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  userName: { fontSize: 15, fontWeight: '700', maxWidth: 140 },
-  userEmail: { fontSize: 12, marginTop: 2 },
-  userDept: { fontSize: 11, marginTop: 1 },
-  roleBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  roleText: { fontSize: 9, fontWeight: '900', textTransform: 'uppercase' },
+  userCard: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginTop: 8, padding: 16, borderRadius: 18, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' },
+  userName: { fontSize: 15, fontWeight: '800', maxWidth: 150, letterSpacing: -0.1 },
+  userEmail: { fontSize: 12, marginTop: 3 },
+  userDept: { fontSize: 11, marginTop: 2, fontWeight: '500' },
+  roleBadge: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8 },
+  roleText: { fontSize: 9, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  actions: { gap: 4 },
-  actionBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  actions: { gap: 6 },
+  actionBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', minWidth: 44, minHeight: 44 },
 
   empty: { alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyText: { fontSize: 14 },
