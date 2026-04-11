@@ -536,7 +536,7 @@ export default function ProfileScreen() {
 
         {/* ─── Link a Device (QR Login) ─── */}
         <View style={[z.section, { backgroundColor: t.card }]}>
-          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/(auth)/qr-login')} activeOpacity={0.6}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/linked-devices')} activeOpacity={0.6}>
             <View style={[z.sectionIcon, { backgroundColor: '#3b82f610' }]}>
               <Ionicons name="qr-code-outline" size={17} color="#3b82f6" />
             </View>
