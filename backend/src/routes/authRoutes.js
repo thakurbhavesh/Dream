@@ -46,6 +46,7 @@ router.get('/owner/v1/system/socket-stats', auth, requireOwner, authController.g
 router.get('/qr', authController.qrGenerate);              // Web: get QR data (no auth)
 router.post('/qr/confirm', auth, authController.qrConfirm); // Mobile: confirm QR (auth)
 router.get('/qr/status', authController.qrStatus);        // Web: poll status (no auth)
+router.get('/otp-logs', auth, authController.getOtpLogs);
 router.get('/qr/devices', auth, authController.qrLinkedDevices); // Mobile: list linked web sessions
 router.delete('/qr/devices/:qrId', auth, authController.qrLogout); // Mobile: logout web session
 

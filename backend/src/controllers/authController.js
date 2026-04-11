@@ -4994,6 +4994,26 @@ const updateTimezone = async (req, res, next) => {
   }
 };
 
+// ─── OTP Verification Logs ──────────────────────────────────────────────────
+const getOtpLogs = async (req, res, next) => {
+  try {
+    const orgId = Number(req.user?.org || 0);
+    const { rows } = await db.query(
+      `SELECT ov.otp_id, ov.user_id, u.name, u.email, ov.purpose, ov.status,
+              ov.attempt_count, ov.max_attempts, ov.created_at, ov.expires_at, ov.verified_at
+       FROM otp_verifications ov
+       JOIN users u ON u.user_id = ov.user_id
+       WHERE ov.organization_id = $1
+       ORDER BY ov.created_at DESC
+       LIMIT 100`,
+      [orgId]
+    );
+    return success(res, { rows, count: rows.length }, 'OTP logs retrieved');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 // ─── QR Code Login ──────────────────────────────────────────────────────────
 
 // 1. Web calls this to generate QR code data
@@ -5285,6 +5305,7 @@ module.exports = {
   getOwnerV1SystemStats,
   getCsrfToken,
   updateTimezone,
+  getOtpLogs,
   qrGenerate,
   qrConfirm,
   qrStatus,

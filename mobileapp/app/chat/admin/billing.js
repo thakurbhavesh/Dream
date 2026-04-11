@@ -1,28 +1,23 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking, Modal, Pressable } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../src/store/ThemeContext';
-import { useToast } from '../../../src/components/Toast';
 import api from '../../../src/api/config';
 
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
-const fmtCurrency = (amt, cur) => {
-  const symbol = cur === 'USD' ? '$' : cur === 'EUR' ? '€' : '₹';
-  return `${symbol}${Number(amt || 0).toLocaleString('en-IN')}`;
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '–';
+const fmtStorage = (mb) => {
+  const n = Number(mb || 0);
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} GB`;
+  return `${n} MB`;
 };
 
 export default function BillingScreen() {
   const { theme: t, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const toast = useToast();
-  const [plan, setPlan] = useState(null);
-  const [payments, setPayments] = useState([]);
-  const [plans, setPlans] = useState([]);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [viewPayment, setViewPayment] = useState(null);
 
   const ACCENT = t.accent;
   const bg = isDark ? '#0b141a' : '#f8fafc';
@@ -34,34 +29,25 @@ export default function BillingScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const [meRes, payRes, planRes] = await Promise.all([
-          api.get('/auth/me').catch(() => null),
-          api.get('/billing/payment-history').catch(() => null),
-          api.get('/billing/plan-comparison').catch(() => null),
-        ]);
-        const d = meRes?.data?.data || meRes?.data || {};
-        setPlan(d?.current_plan || null);
-        const payRows = payRes?.data?.data?.rows || payRes?.data?.data || [];
-        setPayments(Array.isArray(payRows) ? payRows : []);
-        const planRows = planRes?.data?.data?.rows || planRes?.data?.data || [];
-        setPlans(Array.isArray(planRows) ? planRows : []);
+        const { data: res } = await api.get('/auth/me');
+        const d = res?.data || res;
+        setData({
+          plan: d?.current_plan || {},
+          usage: d?.usage || {},
+          org: d?.organization || {},
+          counts: d?.counts || {},
+        });
       } catch {}
       finally { setLoading(false); }
     })();
   }, []);
 
-  const handleUpgrade = async (planId) => {
-    try {
-      toast('Creating checkout...', 'info');
-      const { data } = await api.post('/billing/checkout-session', { plan_id: planId });
-      const url = data?.data?.checkout_url || data?.data?.url || data?.data?.session_url;
-      if (url) { Linking.openURL(url); toast('Opening payment...', 'success'); }
-      else toast('Checkout not available', 'info');
-    } catch (e) { toast(e?.response?.data?.message || 'Payment gateway not configured', 'info'); }
-  };
-
-  const STATUS_COLORS = { success: '#22c55e', completed: '#22c55e', active: '#22c55e', failed: '#ef4444', pending: '#f59e0b', cancelled: '#64748b' };
-  const getStatusColor = (s) => STATUS_COLORS[(s || '').toLowerCase()] || '#64748b';
+  const plan = data?.plan || {};
+  const usage = data?.usage || {};
+  const counts = data?.counts || {};
+  const usedMB = Number(usage.storage_used_mb || 0);
+  const limitMB = Number(usage.storage_limit_mb || 0);
+  const pct = limitMB > 0 ? Math.min((usedMB / limitMB) * 100, 100) : 0;
 
   return (
     <View style={[s.root, { backgroundColor: bg }]}>
@@ -69,177 +55,98 @@ export default function BillingScreen() {
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Billing & Plan</Text>
+        <Text style={s.headerTitle}>Plan & Storage</Text>
       </View>
 
       {loading ? <ActivityIndicator style={{ marginTop: 40 }} color={ACCENT} /> : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 50 }} showsVerticalScrollIndicator={false}>
 
-          {/* ─── Current Plan Card ─── */}
-          {plan && (
-            <View style={[s.planCard, { backgroundColor: isDark ? '#0c2d48' : '#eff6ff', borderColor: isDark ? '#1e3a5f' : '#bfdbfe' }]}>
-              <View style={s.planHeader}>
-                <View style={s.planNameRow}>
-                  <Ionicons name="diamond" size={22} color="#3b82f6" />
-                  <Text style={s.planName}>{plan.plan_name || 'Free'}</Text>
-                  <View style={[s.planBadge, { backgroundColor: '#22c55e18' }]}>
-                    <Text style={s.planBadgeText}>{plan.subscription_status || 'Active'}</Text>
-                  </View>
-                </View>
+          {/* Plan Card */}
+          <View style={[s.planCard, { backgroundColor: isDark ? '#0c2d48' : '#eff6ff', borderColor: isDark ? '#1e3a5f' : '#bfdbfe' }]}>
+            <View style={s.planTop}>
+              <Ionicons name="diamond" size={28} color="#3b82f6" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.planName}>{plan.plan_name || 'Free'}</Text>
+                <Text style={[s.planDesc, { color: subColor }]}>{data?.org?.name || 'Organization'}</Text>
               </View>
-
-              <View style={s.planStatsRow}>
-                <View style={[s.planStat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-                  <Text style={[s.planStatLabel, { color: subColor }]}>AMOUNT</Text>
-                  <Text style={[s.planStatValue, { color: textColor }]}>{fmtCurrency(plan.price, plan.default_currency)}</Text>
-                </View>
-                <View style={[s.planStat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-                  <Text style={[s.planStatLabel, { color: subColor }]}>CYCLE</Text>
-                  <Text style={[s.planStatValue, { color: textColor }]}>{plan.interval_days === 30 ? 'Monthly' : plan.interval_days === 365 ? 'Yearly' : `${plan.interval_days || '–'}d`}</Text>
-                </View>
-                <View style={[s.planStat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
-                  <Text style={[s.planStatLabel, { color: subColor }]}>RENEWAL</Text>
-                  <Text style={[s.planStatValue, { color: textColor }]}>{fmtDate(plan.end_date) || '–'}</Text>
-                </View>
-              </View>
-
-              <View style={s.planMetaRow}>
-                <Text style={[s.planMeta, { color: subColor }]}>👥 {plan.max_users || '∞'} users</Text>
-                <Text style={[s.planMeta, { color: subColor }]}>💾 {plan.max_storage_mb || '∞'} MB</Text>
+              <View style={[s.statusBadge, { backgroundColor: '#22c55e18' }]}>
+                <View style={s.statusDot} />
+                <Text style={s.statusText}>{plan.subscription_status || 'Active'}</Text>
               </View>
             </View>
-          )}
 
-          {/* ─── Available Plans ─── */}
-          {plans.length > 0 && (
-            <>
-              <Text style={[s.sectionTitle, { color: textColor }]}>Plans</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.plansScroll}>
-                {plans.map((p, i) => {
-                  const isCurrent = plan && (p.plan_id === plan.plan_id || p.plan_key === plan.plan_key);
-                  return (
-                    <View key={p.plan_id || i} style={[s.planItem, { backgroundColor: cardBg, borderColor: isCurrent ? '#3b82f6' : (isDark ? '#334155' : '#e2e8f0') }]}>
-                      {isCurrent && <View style={s.currentTag}><Text style={s.currentTagText}>Current</Text></View>}
-                      <Text style={[s.planItemName, { color: textColor }]}>{p.plan_name}</Text>
-                      <Text style={[s.planItemPrice, { color: ACCENT }]}>{fmtCurrency(p.price, p.default_currency)}</Text>
-                      <Text style={[s.planItemCycle, { color: subColor }]}>/{p.interval_days === 30 ? 'month' : p.interval_days === 365 ? 'year' : `${p.interval_days}d`}</Text>
-                      <View style={s.planItemFeatures}>
-                        <Text style={[s.planItemFeat, { color: subColor }]}>👥 {p.max_users || '∞'} users</Text>
-                        <Text style={[s.planItemFeat, { color: subColor }]}>💾 {p.max_storage_mb || '∞'} MB</Text>
-                      </View>
-                      {!isCurrent && (
-                        <TouchableOpacity style={[s.upgradeBtn, { backgroundColor: '#3b82f6' }]}
-                          onPress={() => handleUpgrade(p.plan_id)} activeOpacity={0.8}>
-                          <Text style={s.upgradeBtnText}>{plan && p.price > (plan.price || 0) ? 'Upgrade' : 'Switch'}</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            </>
-          )}
-
-          {/* ─── Payment History ─── */}
-          <Text style={[s.sectionTitle, { color: textColor }]}>Payment History</Text>
-          {payments.length === 0 ? (
-            <View style={[s.emptyCard, { backgroundColor: cardBg }]}>
-              <Ionicons name="receipt-outline" size={40} color={subColor} />
-              <Text style={[s.emptyText, { color: subColor }]}>No payments yet</Text>
-            </View>
-          ) : payments.slice(0, 20).map((p, i) => {
-            const statusColor = getStatusColor(p.status);
-            return (
-              <TouchableOpacity key={p.payment_id || i} style={[s.payCard, { backgroundColor: cardBg }]}
-                onPress={() => setViewPayment(p)} activeOpacity={0.6}>
-                <View style={[s.payGateway, { backgroundColor: p.gateway === 'stripe' ? '#635bff15' : p.gateway === 'paypal' ? '#003087' + '15' : '#64748b15' }]}>
-                  <Ionicons name={p.gateway === 'stripe' ? 'card' : p.gateway === 'paypal' ? 'logo-paypal' : 'cash'} size={18}
-                    color={p.gateway === 'stripe' ? '#635bff' : p.gateway === 'paypal' ? '#003087' : '#64748b'} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={s.payTopRow}>
-                    <Text style={[s.payAmount, { color: textColor }]}>{fmtCurrency(p.amount, p.currency)}</Text>
-                    <View style={[s.payStatus, { backgroundColor: statusColor + '15' }]}>
-                      <Text style={[s.payStatusText, { color: statusColor }]}>{p.status}</Text>
-                    </View>
-                  </View>
-                  <Text style={[s.payPlan, { color: subColor }]}>{p.plan_name || 'Plan'} · {p.gateway || 'Gateway'}</Text>
-                  <Text style={[s.payDate, { color: subColor }]}>{fmtDate(p.created_at)} {fmtTime(p.created_at)}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color={subColor} />
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
-
-      {/* ─── Payment Detail Modal ─── */}
-      {viewPayment && (
-        <Modal visible transparent animationType="slide" onRequestClose={() => setViewPayment(null)}>
-          <View style={s.modalOverlay}>
-            <View style={[s.modalSheet, { backgroundColor: cardBg, paddingBottom: insets.bottom + 20 }]}>
-              {/* Header */}
-              <View style={s.modalHeader}>
-                <Text style={[s.modalTitle, { color: textColor }]}>Payment Details</Text>
-                <TouchableOpacity onPress={() => setViewPayment(null)} style={s.modalClose}>
-                  <Ionicons name="close" size={22} color={subColor} />
-                </TouchableOpacity>
+            {/* Plan stats */}
+            <View style={s.statsRow}>
+              <View style={[s.stat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+                <Ionicons name="people" size={18} color="#3b82f6" />
+                <Text style={[s.statValue, { color: textColor }]}>{plan.max_users || '∞'}</Text>
+                <Text style={[s.statLabel, { color: subColor }]}>Max Users</Text>
               </View>
-
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Amount */}
-                <View style={s.modalAmountWrap}>
-                  <Text style={[s.modalAmountLabel, { color: subColor }]}>{viewPayment.plan_name || 'Plan'}</Text>
-                  <Text style={[s.modalAmount, { color: textColor }]}>{fmtCurrency(viewPayment.amount, viewPayment.currency)}</Text>
-                  <View style={[s.modalStatusBig, { backgroundColor: getStatusColor(viewPayment.status) + '15' }]}>
-                    <Text style={[s.modalStatusText, { color: getStatusColor(viewPayment.status) }]}>{viewPayment.status}</Text>
-                  </View>
-                </View>
-
-                {/* Details grid */}
-                <View style={[s.detailCard, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
-                  <Text style={[s.detailTitle, { color: textColor }]}>Invoice & Subscription</Text>
-                  {[
-                    { label: 'Payment ID', value: `#${viewPayment.payment_id}` },
-                    { label: 'Plan', value: viewPayment.plan_name },
-                    { label: 'Gateway', value: (viewPayment.gateway || '').toUpperCase() },
-                    { label: 'Date', value: `${fmtDate(viewPayment.created_at)} ${fmtTime(viewPayment.created_at)}` },
-                    { label: 'Currency', value: viewPayment.currency || 'INR' },
-                    { label: 'Transaction ID', value: viewPayment.transaction_id || viewPayment.gateway_payment_id || '–' },
-                    { label: 'Billing Type', value: viewPayment.billing_type || 'Subscription' },
-                  ].map((row, i) => (
-                    <View key={i} style={[s.detailRow, { borderBottomColor: isDark ? '#1e293b' : '#e2e8f0' }]}>
-                      <Text style={[s.detailLabel, { color: subColor }]}>{row.label}</Text>
-                      <Text style={[s.detailValue, { color: textColor }]} numberOfLines={1}>{row.value || '–'}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Amount summary */}
-                <View style={[s.detailCard, { backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}>
-                  <Text style={[s.detailTitle, { color: textColor }]}>Amount Summary</Text>
-                  <View style={[s.detailRow, { borderBottomColor: isDark ? '#1e293b' : '#e2e8f0' }]}>
-                    <Text style={[s.detailLabel, { color: subColor }]}>Sub Total</Text>
-                    <Text style={[s.detailValue, { color: textColor }]}>{fmtCurrency(viewPayment.amount, viewPayment.currency)}</Text>
-                  </View>
-                  <View style={s.grandTotalRow}>
-                    <Text style={s.grandTotalLabel}>Grand Total</Text>
-                    <Text style={s.grandTotalValue}>{fmtCurrency(viewPayment.amount, viewPayment.currency)}</Text>
-                  </View>
-                </View>
-
-                {/* Actions */}
-                {viewPayment.status?.toLowerCase() === 'failed' && (
-                  <TouchableOpacity style={[s.retryBtn, { backgroundColor: '#ef4444' }]}
-                    onPress={() => { setViewPayment(null); handleUpgrade(viewPayment.plan_id); }} activeOpacity={0.8}>
-                    <Ionicons name="refresh" size={18} color="#fff" />
-                    <Text style={s.retryBtnText}>Retry Payment</Text>
-                  </TouchableOpacity>
-                )}
-              </ScrollView>
+              <View style={[s.stat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+                <Ionicons name="calendar" size={18} color="#8b5cf6" />
+                <Text style={[s.statValue, { color: textColor }]}>{plan.interval_days === 30 ? 'Monthly' : plan.interval_days === 365 ? 'Yearly' : plan.interval_days ? `${plan.interval_days}d` : '–'}</Text>
+                <Text style={[s.statLabel, { color: subColor }]}>Cycle</Text>
+              </View>
+              <View style={[s.stat, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+                <Ionicons name="time" size={18} color="#f59e0b" />
+                <Text style={[s.statValue, { color: textColor }]}>{fmtDate(plan.end_date)}</Text>
+                <Text style={[s.statLabel, { color: subColor }]}>Renewal</Text>
+              </View>
             </View>
           </View>
-        </Modal>
+
+          {/* Storage Card */}
+          <Text style={[s.sectionTitle, { color: textColor }]}>Storage</Text>
+          <View style={[s.storageCard, { backgroundColor: cardBg }]}>
+            <View style={s.storageTop}>
+              <View style={[s.storageIcon, { backgroundColor: '#06b6d412' }]}>
+                <Ionicons name="cloud" size={24} color="#06b6d4" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.storageUsed, { color: textColor }]}>{fmtStorage(usedMB)}</Text>
+                <Text style={[s.storageLimit, { color: subColor }]}>of {limitMB > 0 ? fmtStorage(limitMB) : 'Unlimited'}</Text>
+              </View>
+              <Text style={[s.storagePct, { color: pct > 80 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#22c55e' }]}>{pct.toFixed(0)}%</Text>
+            </View>
+            <View style={[s.storageBar, { backgroundColor: isDark ? '#0f172a' : '#e2e8f0' }]}>
+              <View style={[s.storageFill, { width: `${pct}%`, backgroundColor: pct > 80 ? '#ef4444' : pct > 50 ? '#f59e0b' : '#22c55e' }]} />
+            </View>
+          </View>
+
+          {/* Usage Breakdown */}
+          <Text style={[s.sectionTitle, { color: textColor }]}>Usage</Text>
+          {[
+            { icon: 'people', label: 'Active Members', value: counts.active_members || 0, max: plan.max_users || '∞', color: '#3b82f6' },
+            { icon: 'phone-portrait', label: 'Devices', value: counts.user_devices || 0, color: '#8b5cf6' },
+            { icon: 'key', label: 'Sessions', value: counts.user_sessions || 0, color: '#f59e0b' },
+            { icon: 'shield-checkmark', label: 'OTP Verifications', value: counts.otp_verifications || 0, color: '#22c55e' },
+          ].map((item, i) => (
+            <View key={i} style={[s.usageRow, { backgroundColor: cardBg }]}>
+              <View style={[s.usageIcon, { backgroundColor: `${item.color}12` }]}>
+                <Ionicons name={item.icon} size={18} color={item.color} />
+              </View>
+              <Text style={[s.usageLabel, { color: textColor }]}>{item.label}</Text>
+              <Text style={[s.usageValue, { color: textColor }]}>{item.value}</Text>
+              {item.max && <Text style={[s.usageMax, { color: subColor }]}>/ {item.max}</Text>}
+            </View>
+          ))}
+
+          {/* Org info */}
+          <Text style={[s.sectionTitle, { color: textColor }]}>Organization</Text>
+          <View style={[s.orgCard, { backgroundColor: cardBg }]}>
+            {[
+              { icon: 'business', label: 'Name', value: data?.org?.name },
+              { icon: 'globe', label: 'Domain', value: data?.org?.subdomain || data?.org?.custom_domain },
+              { icon: 'calendar', label: 'Created', value: fmtDate(data?.org?.created_at) },
+            ].filter(r => r.value).map((r, i) => (
+              <View key={i} style={[s.orgRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}>
+                <Ionicons name={r.icon} size={16} color={subColor} />
+                <Text style={[s.orgLabel, { color: subColor }]}>{r.label}</Text>
+                <Text style={[s.orgValue, { color: textColor }]}>{r.value}</Text>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       )}
     </View>
   );
@@ -251,70 +158,37 @@ const s = StyleSheet.create({
   backBtn: { padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { flex: 1, fontSize: 18, fontWeight: '900', color: '#fff' },
 
-  // Plan card
-  planCard: { margin: 14, padding: 18, borderRadius: 20, borderWidth: 1.5 },
-  planHeader: { marginBottom: 14 },
-  planNameRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  planName: { fontSize: 22, fontWeight: '900', color: '#3b82f6', flex: 1 },
-  planBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  planBadgeText: { fontSize: 10, fontWeight: '800', color: '#22c55e', textTransform: 'uppercase' },
-  planStatsRow: { flexDirection: 'row', gap: 8 },
-  planStat: { flex: 1, padding: 12, borderRadius: 12, alignItems: 'center' },
-  planStatLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
-  planStatValue: { fontSize: 14, fontWeight: '800' },
-  planMetaRow: { flexDirection: 'row', gap: 16, marginTop: 14 },
-  planMeta: { fontSize: 13, fontWeight: '600' },
+  planCard: { margin: 14, padding: 20, borderRadius: 20, borderWidth: 1.5 },
+  planTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  planName: { fontSize: 24, fontWeight: '900', color: '#3b82f6', letterSpacing: -0.3 },
+  planDesc: { fontSize: 12, marginTop: 2 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22c55e' },
+  statusText: { fontSize: 10, fontWeight: '800', color: '#22c55e', textTransform: 'uppercase' },
+  statsRow: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, padding: 12, borderRadius: 14, alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 14, fontWeight: '800' },
+  statLabel: { fontSize: 10, fontWeight: '600' },
 
-  // Plans horizontal
-  sectionTitle: { fontSize: 16, fontWeight: '800', marginHorizontal: 18, marginTop: 16, marginBottom: 10 },
-  plansScroll: { paddingHorizontal: 14, gap: 10, paddingBottom: 4 },
-  planItem: { width: 180, padding: 18, borderRadius: 18, borderWidth: 1.5, alignItems: 'center' },
-  currentTag: { position: 'absolute', top: 10, right: 10, backgroundColor: '#3b82f615', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  currentTagText: { fontSize: 9, fontWeight: '800', color: '#3b82f6', textTransform: 'uppercase' },
-  planItemName: { fontSize: 18, fontWeight: '900', marginBottom: 4 },
-  planItemPrice: { fontSize: 24, fontWeight: '900' },
-  planItemCycle: { fontSize: 12, marginBottom: 10 },
-  planItemFeatures: { gap: 4, marginBottom: 12, alignItems: 'center' },
-  planItemFeat: { fontSize: 12 },
-  upgradeBtn: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 12, width: '100%', alignItems: 'center' },
-  upgradeBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  sectionTitle: { fontSize: 15, fontWeight: '800', marginHorizontal: 18, marginTop: 16, marginBottom: 8 },
 
-  // Payment history
-  payCard: { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 14, marginBottom: 8, padding: 16, borderRadius: 16, elevation: 1 },
-  payGateway: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  payTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  payAmount: { fontSize: 16, fontWeight: '800' },
-  payStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  payStatusText: { fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
-  payPlan: { fontSize: 12, marginTop: 3 },
-  payDate: { fontSize: 11, marginTop: 1 },
+  storageCard: { marginHorizontal: 14, padding: 18, borderRadius: 18, elevation: 1 },
+  storageTop: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
+  storageIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  storageUsed: { fontSize: 22, fontWeight: '900' },
+  storageLimit: { fontSize: 12, marginTop: 2 },
+  storagePct: { fontSize: 20, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  storageBar: { height: 10, borderRadius: 5, overflow: 'hidden' },
+  storageFill: { height: '100%', borderRadius: 5 },
 
-  emptyCard: { margin: 14, padding: 40, borderRadius: 18, alignItems: 'center', gap: 10, elevation: 1 },
-  emptyText: { fontSize: 14, fontWeight: '600' },
+  usageRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginBottom: 6, padding: 14, borderRadius: 14, elevation: 1 },
+  usageIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  usageLabel: { flex: 1, fontSize: 14, fontWeight: '600' },
+  usageValue: { fontSize: 18, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  usageMax: { fontSize: 13 },
 
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalSheet: { maxHeight: '85%', borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 18 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 12 },
-  modalTitle: { fontSize: 19, fontWeight: '900' },
-  modalClose: { padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-
-  modalAmountWrap: { alignItems: 'center', paddingVertical: 20 },
-  modalAmountLabel: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  modalAmount: { fontSize: 34, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  modalStatusBig: { marginTop: 10, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12 },
-  modalStatusText: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
-
-  detailCard: { marginHorizontal: 16, marginBottom: 12, padding: 16, borderRadius: 16 },
-  detailTitle: { fontSize: 14, fontWeight: '800', marginBottom: 12 },
-  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  detailLabel: { fontSize: 12, fontWeight: '600' },
-  detailValue: { fontSize: 13, fontWeight: '700', maxWidth: '55%', textAlign: 'right' },
-
-  grandTotalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, marginTop: 4 },
-  grandTotalLabel: { fontSize: 14, fontWeight: '800', color: '#3b82f6' },
-  grandTotalValue: { fontSize: 18, fontWeight: '900', color: '#3b82f6' },
-
-  retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, paddingVertical: 14, borderRadius: 14 },
-  retryBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  orgCard: { marginHorizontal: 14, borderRadius: 16, overflow: 'hidden', elevation: 1 },
+  orgRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  orgLabel: { fontSize: 12, fontWeight: '600', width: 60 },
+  orgValue: { flex: 1, fontSize: 14, fontWeight: '700' },
 });
