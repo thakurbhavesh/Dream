@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../../src/components/Avatar';
+import ImageViewer from '../../src/components/ImageViewer';
 import { getThreads } from '../../src/api/chat';
 import api from '../../src/api/config';
 import { getCachedThreads, cacheThreads, updateCachedThread } from '../../src/services/cache';
@@ -317,6 +318,7 @@ export default function ChatsScreen() {
   const [archivedChats, setArchivedChats] = useState(() => new Set());
   const [longPressItem, setLongPressItem] = useState(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
+  const [viewPhoto, setViewPhoto] = useState(null); // { uri, name }
 
   // Load pinned/archived from storage
   useEffect(() => {
@@ -386,7 +388,8 @@ export default function ChatsScreen() {
         <View style={s.avatarWrap}>
           <Avatar uri={item.avatar} name={isSelf ? '📌' : item.name} size={52}
             status={!isGroup && !isSelf ? (userStatuses[item.id?.replace('dm-', '')] || (item.online ? 'Online' : undefined)) : undefined}
-            isGlobal={!isGroup && !isSelf && item.isGlobal} />
+            isGlobal={!isGroup && !isSelf && item.isGlobal}
+            onPress={item.avatar ? () => setViewPhoto({ uri: item.avatar, name: item.name }) : undefined} />
           {isGroup && (
             <View style={[s.groupBadge, { backgroundColor: t.accent }]}>
               <Ionicons name="people" size={9} color="#fff" />
@@ -625,6 +628,9 @@ export default function ChatsScreen() {
                 { icon: 'people-outline', label: 'New Group', onPress: () => { setShowHeaderMenu(false); router.push('/chat/create-group'); } },
                 { icon: 'megaphone-outline', label: 'Broadcast', onPress: () => { setShowHeaderMenu(false); router.push('/chat/broadcast'); } },
                 { icon: 'star-outline', label: 'Starred Messages', onPress: () => { setShowHeaderMenu(false); router.push('/chat/starred'); } },
+                { icon: 'qr-code-outline', label: 'Linked Devices', onPress: () => { setShowHeaderMenu(false); router.push('/chat/linked-devices'); } },
+                { icon: 'settings-outline', label: 'Settings', onPress: () => { setShowHeaderMenu(false); router.push('/(tabs)/profile'); } },
+                ...(Number(user?.role_id) >= 1 && Number(user?.role_id) <= 3 ? [{ icon: 'shield-checkmark-outline', label: 'Admin Panel', onPress: () => { setShowHeaderMenu(false); router.push('/chat/admin'); } }] : []),
               ].map((item, i) => (
                 <TouchableOpacity key={i} style={[s.menuRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
                   onPress={item.onPress} activeOpacity={0.6}>
@@ -636,6 +642,9 @@ export default function ChatsScreen() {
           </Pressable>
         </Modal>
       )}
+
+      {/* Photo Viewer */}
+      <ImageViewer visible={!!viewPhoto} uri={viewPhoto?.uri} caption={viewPhoto?.name} onClose={() => setViewPhoto(null)} />
 
       {/* AI Assistant FAB */}
       <TouchableOpacity style={[s.fab, { backgroundColor: t.accent }]} activeOpacity={0.85}

@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../../src/components/Avatar';
+import ImageViewer from '../../src/components/ImageViewer';
 import { getContacts, getThreads } from '../../src/api/chat';
 import api from '../../src/api/config';
 import { useAuth } from '../../src/store/AuthContext';
@@ -21,7 +22,8 @@ export default function ContactsScreen() {
   const [userStatuses, setUserStatuses] = useState({}); // { odne: 'Online' | 'Away' | 'Idle' | 'offline' }
   const [existingThreads, setExistingThreads] = useState(new Set()); // threadIds that have chats
   const [tab, setTab] = useState('people'); // 'people' | 'groups'
-  const [deptFilter, setDeptFilter] = useState(null); // department name or null
+  const [deptFilter, setDeptFilter] = useState(null);
+  const [viewPhoto, setViewPhoto] = useState(null); // department name or null
 
   const load = useCallback(async () => {
     try {
@@ -239,7 +241,8 @@ export default function ContactsScreen() {
             const chatExists = hasChat(item.id);
             return (
               <TouchableOpacity style={[s.contactRow, { borderBottomColor: t.borderLight || t.border }]} onPress={() => openChat(item)} activeOpacity={0.65}>
-                <Avatar uri={item.avatar} name={item.name} size={46} status={userStatuses[String(item.id)] || 'offline'} isGlobal={item.isGlobal} />
+                <Avatar uri={item.avatar} name={item.name} size={46} status={userStatuses[String(item.id)] || 'offline'} isGlobal={item.isGlobal}
+                  onPress={item.avatar ? () => setViewPhoto({ uri: item.avatar, name: item.name }) : undefined} />
                 <View style={s.contactBody}>
                   <Text style={[s.contactName, { color: t.text }]} numberOfLines={1}>{item.name}</Text>
                   <Text style={[s.contactSub, { color: t.textSec }]} numberOfLines={1}>{item.designation || item.department || item.email}</Text>
@@ -321,6 +324,7 @@ export default function ContactsScreen() {
           }
         />
       )}
+      <ImageViewer visible={!!viewPhoto} uri={viewPhoto?.uri} caption={viewPhoto?.name} onClose={() => setViewPhoto(null)} />
     </SafeAreaView>
   );
 }
