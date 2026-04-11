@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../src/store/ThemeContext';
+import { useToast } from '../../../src/components/Toast';
 import api from '../../../src/api/config';
 
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -12,6 +13,7 @@ const fmtCurrency = (amt, cur) => `${cur || '₹'}${Number(amt || 0).toLocaleStr
 export default function BillingScreen() {
   const { theme: t, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
   const [plan, setPlan] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +78,27 @@ export default function BillingScreen() {
             </View>
           )}
 
+          {/* Upgrade / Pay */}
+          <View style={s.upgradeRow}>
+            <TouchableOpacity style={[s.upgradeBtn, { backgroundColor: '#3b82f6' }]}
+              onPress={async () => {
+                try {
+                  const { data } = await api.post('/billing/checkout-session', { plan_id: 2 });
+                  const url = data?.data?.checkout_url || data?.data?.url;
+                  if (url) Linking.openURL(url);
+                  else toast('Checkout not available', 'info');
+                } catch { toast('Payment gateway not configured', 'info'); }
+              }} activeOpacity={0.8}>
+              <Ionicons name="diamond" size={18} color="#fff" />
+              <Text style={s.upgradeBtnText}>Upgrade Plan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.upgradeBtn, { backgroundColor: '#22c55e' }]}
+              onPress={() => Linking.openURL('https://billing.stripe.com/p/login/test')} activeOpacity={0.8}>
+              <Ionicons name="card" size={18} color="#fff" />
+              <Text style={s.upgradeBtnText}>Manage Billing</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Payment History */}
           <Text style={[s.sectionTitle, { color: textColor }]}>Payment History</Text>
           {payments.length === 0 ? (
@@ -118,6 +141,10 @@ const s = StyleSheet.create({
   planValue: { fontSize: 20, fontWeight: '900', fontVariant: ['tabular-nums'] },
   planLabel: { fontSize: 11, fontWeight: '600' },
   planExpiry: { fontSize: 12, marginTop: 14 },
+
+  upgradeRow: { flexDirection: 'row', gap: 10, marginHorizontal: 14, marginBottom: 10 },
+  upgradeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, elevation: 2 },
+  upgradeBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
   sectionTitle: { fontSize: 15, fontWeight: '800', marginHorizontal: 18, marginTop: 12, marginBottom: 8 },
 
