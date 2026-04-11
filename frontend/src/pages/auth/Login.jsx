@@ -674,25 +674,11 @@ const Login = () => {
 
               {step === 1 ? (
                 <>
-                  <Button
-                    fullWidth
-                    size="large"
-                    variant="outlined"
-                    startIcon={<FcGoogle />}
-                    sx={{
-                      bgcolor: "background.default",
-                      borderColor: (t) => t.palette.grey[300],
-                      color: "text.primary",
-                      textTransform: "capitalize",
-                      "&:hover": {
-                        borderColor: "text.primary",
-                        bgcolor: "common.white",
-                        color: "text.secondary",
-                      },
-                    }}
-                  >
+                  {/* Google Sign-In — hidden until OAuth configured */}
+                  {/* <Button fullWidth size="large" variant="outlined" startIcon={<FcGoogle />}
+                    sx={{ bgcolor: "background.default", borderColor: (t) => t.palette.grey[300], color: "text.primary", textTransform: "capitalize" }}>
                     Sign in with Google
-                  </Button>
+                  </Button> */}
 
                   <Button
                     fullWidth
