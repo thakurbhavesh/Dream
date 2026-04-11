@@ -355,7 +355,17 @@ export default function ChatsScreen() {
     } catch {}
   };
 
-  const openChat = (thread) => {
+  const openChat = async (thread) => {
+    // Check if chat is locked
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      const locked = await AsyncStorage.getItem(`chat_lock_${thread.id}`);
+      if (locked) {
+        const LocalAuth = require('expo-local-authentication');
+        const result = await LocalAuth.authenticateAsync({ promptMessage: `Unlock ${thread.name}`, cancelLabel: 'Cancel' });
+        if (!result.success) return; // auth failed — don't open
+      }
+    } catch {}
     router.push(`/chat/${thread.id}?name=${encodeURIComponent(thread.name || '')}&avatar=${encodeURIComponent(thread.avatar || '')}`);
   };
 
@@ -607,6 +617,25 @@ export default function ChatsScreen() {
                 { icon: pinnedChats?.has?.(longPressItem.id) ? 'pin' : 'pin-outline', label: pinnedChats?.has?.(longPressItem.id) ? 'Unpin' : 'Pin to top', onPress: () => togglePin(longPressItem.id), color: t.accent },
                 { icon: 'archive-outline', label: 'Archive', onPress: () => toggleArchive(longPressItem.id), color: '#f59e0b' },
                 { icon: 'notifications-off-outline', label: 'Mute', onPress: () => setLongPressItem(null), color: '#64748b' },
+                { icon: 'lock-closed-outline', label: 'Lock Chat', onPress: async () => {
+                  const id = longPressItem.id;
+                  setLongPressItem(null);
+                  try {
+                    const LocalAuth = require('expo-local-authentication');
+                    const hasHw = await LocalAuth.hasHardwareAsync();
+                    const enrolled = await LocalAuth.isEnrolledAsync();
+                    if (!hasHw || !enrolled) { toast('Biometric not available', 'error'); return; }
+                    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                    const locked = await AsyncStorage.getItem(`chat_lock_${id}`);
+                    if (locked) {
+                      await AsyncStorage.removeItem(`chat_lock_${id}`);
+                      toast('Chat unlocked', 'success');
+                    } else {
+                      await AsyncStorage.setItem(`chat_lock_${id}`, 'true');
+                      toast('Chat locked with biometric', 'success');
+                    }
+                  } catch { toast('Failed', 'error'); }
+                }, color: '#8b5cf6' },
               ].map((a, i) => (
                 <TouchableOpacity key={i} style={[s.actionRow, { borderTopColor: isDark ? '#334155' : '#f1f5f9' }]} onPress={a.onPress} activeOpacity={0.6}>
                   <Ionicons name={a.icon} size={20} color={a.color} />

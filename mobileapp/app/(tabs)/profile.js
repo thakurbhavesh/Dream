@@ -509,46 +509,13 @@ export default function ProfileScreen() {
           </View>
         </Section>
 
-        {/* ─── App Lock ─── */}
-        <Section id="applock" icon="lock-closed-outline" label="App Lock">
-          <View style={z.appearRow}>
-            <Text style={[z.appearLabel, { color: t.text }]}>Enable App Lock</Text>
-            <Switch value={appLockEnabled} onValueChange={(v) => {
-              if (v) { setPinInput(''); setShowPinSetup(true); }
-              else {
-                (async () => {
-                  const { setAppLockEnabled } = require('../../src/components/AppLock');
-                  await setAppLockEnabled(false);
-                  setAppLockState(false);
-                  toast('App Lock disabled', 'info');
-                })();
-              }
-            }} trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
+        {/* ─── Chat Lock ─── */}
+        <Section id="chatlock" icon="lock-closed-outline" label="Chat Lock">
+          <Text style={[z.permHint, { color: t.textTer }]}>Lock individual chats with fingerprint or Face ID. Long-press any chat → Lock to enable.</Text>
+          <View style={[z.appearRow, { marginTop: 8 }]}>
+            <Ionicons name="finger-print-outline" size={20} color={t.accent} />
+            <Text style={[z.appearLabel, { color: t.text, flex: 1, marginLeft: 10 }]}>Biometric required to open locked chats</Text>
           </View>
-          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>PIN or biometric when you leave</Text>
-          {showPinSetup && (
-            <View style={[z.pinSetupRow, { borderTopColor: t.divider }]}>
-              <Text style={[z.fieldLabel, { color: t.textTer }]}>SET 4-DIGIT PIN</Text>
-              <View style={[z.field, { borderColor: t.border, backgroundColor: t.inputBg }]}>
-                <Ionicons name="lock-closed-outline" size={16} color={t.icon} />
-                <TextInput style={[z.input, { color: t.text }]} placeholder="Enter 4-digit PIN"
-                  placeholderTextColor={t.textTer} value={pinInput} onChangeText={setPinInput}
-                  keyboardType="number-pad" maxLength={4} secureTextEntry />
-              </View>
-              <TouchableOpacity style={[z.saveBtn, { backgroundColor: pinInput.length === 4 ? t.accent : t.border, marginTop: 10 }]}
-                disabled={pinInput.length !== 4}
-                onPress={async () => {
-                  const { setAppLockEnabled } = require('../../src/components/AppLock');
-                  await setAppLockEnabled(true, pinInput);
-                  setAppLockState(true);
-                  setShowPinSetup(false);
-                  setPinInput('');
-                  toast('App Lock enabled!', 'success');
-                }} activeOpacity={0.8}>
-                <Text style={z.saveBtnText}>Set PIN & Enable</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </Section>
 
         {/* ─── Permissions ─── */}

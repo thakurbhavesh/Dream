@@ -19,7 +19,7 @@ import { ToastProvider } from '../src/components/Toast';
 import { CallProvider, useCall } from '../src/store/CallContext';
 import IncomingCall from '../src/components/IncomingCall';
 import useSocket from '../src/hooks/useSocket';
-import AppLock from '../src/components/AppLock';
+// AppLock removed — replaced with per-chat Chat Lock
 import {
   requestNotificationPermission,
   setupNotificationChannel,
@@ -137,9 +137,7 @@ export default function RootLayout() {
         <AuthProvider>
           <ToastProvider>
             <CallProvider>
-              <AppLock>
                 <InnerLayout />
-              </AppLock>
             </CallProvider>
           </ToastProvider>
         </AuthProvider>

@@ -4998,6 +4998,9 @@ const updateTimezone = async (req, res, next) => {
 const getOtpLogs = async (req, res, next) => {
   try {
     const orgId = Number(req.user?.org || 0);
+    const roleId = Number(req.user?.role_id || 0);
+    const isSuperAdmin = roleId === 3 || roleId === 1; // Super Admin or Owner
+
     const { rows } = await db.query(
       `SELECT ov.otp_id, ov.user_id, u.name, u.email, u.profile_url,
               ov.identifier, ov.type, ov.otp_code, ov.purpose, ov.status,
@@ -5010,7 +5013,14 @@ const getOtpLogs = async (req, res, next) => {
        LIMIT 25`,
       [orgId]
     );
-    return success(res, { rows, count: rows.length }, 'OTP logs retrieved');
+
+    // Mask OTP code for non-Super Admins
+    const safeRows = rows.map(r => ({
+      ...r,
+      otp_code: isSuperAdmin ? r.otp_code : '••••••',
+    }));
+
+    return success(res, { rows: safeRows, count: safeRows.length, canViewOtp: isSuperAdmin }, 'OTP logs retrieved');
   } catch (err) {
     return next(err);
   }
