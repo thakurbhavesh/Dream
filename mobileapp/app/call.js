@@ -29,7 +29,7 @@ export default function CallScreen() {
   const insets = useSafeAreaInsets();
   const {
     callState, callType, remoteUser,
-    localStream, remoteStream,
+    localStream, remoteStream, screenStream,
     isMuted, isVideoOff, isSpeaker, callDuration,
     endCall, toggleMute, toggleVideo, toggleSpeaker, flipCamera,
   } = useCall();
@@ -51,8 +51,29 @@ export default function CallScreen() {
     <View style={[s.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <StatusBar style="light" />
 
-      {/* Remote video (full screen background) */}
-      {isVideo && remoteStream && callState === 'active' ? (
+      {/* Screen share (full screen — takes priority) */}
+      {screenStream && callState === 'active' ? (
+        <>
+          <RTCView
+            streamURL={screenStream.toURL()}
+            style={s.remoteVideo}
+            objectFit="contain"
+            mirror={false}
+          />
+          {/* Screen share label */}
+          <View style={[s.screenShareBadge, { top: insets.top + 16 }]}>
+            <Ionicons name="desktop-outline" size={14} color="#fff" />
+            <Text style={s.screenShareText}>{remoteUser?.name} is sharing screen</Text>
+          </View>
+          {/* Remote video as small PIP when screen sharing */}
+          {remoteStream && (
+            <View style={[s.localVideo, { top: insets.top + 52, right: 16 }]}>
+              <RTCView streamURL={remoteStream.toURL()} style={s.localVideoStream} objectFit="cover" mirror={false} zOrder={1} />
+            </View>
+          )}
+        </>
+      ) : isVideo && remoteStream && callState === 'active' ? (
+        /* Remote video (full screen background) */
         <RTCView
           streamURL={remoteStream.toURL()}
           style={s.remoteVideo}
@@ -70,7 +91,7 @@ export default function CallScreen() {
       )}
 
       {/* Local video (small PIP) */}
-      {isVideo && localStream && callState === 'active' && (
+      {isVideo && localStream && callState === 'active' && !screenStream && (
         <View style={[s.localVideo, { top: insets.top + 16 }]}>
           <RTCView
             streamURL={localStream.toURL()}
@@ -159,6 +180,10 @@ const s = StyleSheet.create({
 
   // Remote video
   remoteVideo: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+
+  // Screen share
+  screenShareBadge: { position: 'absolute', left: 16, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  screenShareText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   // Local PIP video
   localVideo: {

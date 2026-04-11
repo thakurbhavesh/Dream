@@ -38,6 +38,7 @@ export default function useCall() {
   const [isSpeaker, setIsSpeaker] = useState(false);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null); // remote screen share
   const [callDuration, setCallDuration] = useState(0);
 
   const pcRef = useRef(null);
@@ -71,6 +72,7 @@ export default function useCall() {
     }
     setLocalStream(null);
     setRemoteStream(null);
+    setScreenStream(null);
     setCallState('idle');
     setCallType(null);
     setRemoteUser(null);
@@ -96,7 +98,19 @@ export default function useCall() {
 
     pc.ontrack = (e) => {
       if (e.streams && e.streams[0]) {
-        setRemoteStream(e.streams[0]);
+        const track = e.track;
+        const stream = e.streams[0];
+        // Detect screen share — video track with 'screen' label or second video stream
+        if (track.kind === 'video' && (track.label?.includes('screen') || track.label?.includes('display') || stream.id !== remoteStream?.id)) {
+          // If we already have a remote video stream, this is screen share
+          if (remoteStream) {
+            setScreenStream(stream);
+          } else {
+            setRemoteStream(stream);
+          }
+        } else {
+          setRemoteStream(stream);
+        }
       }
     };
 
@@ -336,6 +350,7 @@ export default function useCall() {
     remoteUser,
     localStream,
     remoteStream,
+    screenStream,
     isMuted,
     isVideoOff,
     isSpeaker,
