@@ -316,6 +316,7 @@ export default function ChatsScreen() {
   const [pinnedChats, setPinnedChats] = useState(() => new Set());
   const [archivedChats, setArchivedChats] = useState(() => new Set());
   const [longPressItem, setLongPressItem] = useState(null);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
 
   // Load pinned/archived from storage
   useEffect(() => {
@@ -438,8 +439,8 @@ export default function ChatsScreen() {
             <TouchableOpacity style={s.headerBtn} onPress={() => { setShowGlobalSearch(true); setTimeout(() => searchInputRef.current?.focus(), 200); }}>
               <Ionicons name="search-outline" size={22} color={t.icon} />
             </TouchableOpacity>
-            <TouchableOpacity style={s.headerBtn} onPress={() => router.push('/(tabs)/contacts')}>
-              <Ionicons name="create-outline" size={22} color={t.accent} />
+            <TouchableOpacity style={s.headerBtn} onPress={() => setShowHeaderMenu(true)}>
+              <Ionicons name="ellipsis-vertical" size={20} color={t.icon} />
             </TouchableOpacity>
           </View>
         </View>
@@ -614,14 +615,32 @@ export default function ChatsScreen() {
         </Modal>
       )}
 
-      {/* FABs */}
-      <TouchableOpacity style={[s.fab, s.fabGroup, { backgroundColor: isDark ? '#334155' : '#e2e8f0' }]} activeOpacity={0.85}
-        onPress={() => router.push('/chat/create-group')}>
-        <Ionicons name="people" size={20} color={t.accent} />
-      </TouchableOpacity>
+      {/* Header 3-dot menu */}
+      {showHeaderMenu && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowHeaderMenu(false)}>
+          <Pressable style={s.menuOverlay} onPress={() => setShowHeaderMenu(false)}>
+            <View style={[s.menuSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+              {[
+                { icon: 'chatbubble-ellipses', label: 'New Chat', onPress: () => { setShowHeaderMenu(false); router.push('/(tabs)/contacts'); } },
+                { icon: 'people-outline', label: 'New Group', onPress: () => { setShowHeaderMenu(false); router.push('/chat/create-group'); } },
+                { icon: 'megaphone-outline', label: 'Broadcast', onPress: () => { setShowHeaderMenu(false); router.push('/chat/broadcast'); } },
+                { icon: 'star-outline', label: 'Starred Messages', onPress: () => { setShowHeaderMenu(false); router.push('/chat/starred'); } },
+              ].map((item, i) => (
+                <TouchableOpacity key={i} style={[s.menuRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
+                  onPress={item.onPress} activeOpacity={0.6}>
+                  <Ionicons name={item.icon} size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                  <Text style={[s.menuRowText, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* AI Assistant FAB */}
       <TouchableOpacity style={[s.fab, { backgroundColor: t.accent }]} activeOpacity={0.85}
-        onPress={() => router.push('/(tabs)/contacts')}>
-        <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
+        onPress={() => router.push('/chat/assistant')}>
+        <Ionicons name="sparkles" size={22} color="#fff" />
       </TouchableOpacity>
     </SafeAreaView>
   );
@@ -683,7 +702,11 @@ const s = StyleSheet.create({
     width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
     ...Platform.select({ ios: { shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }, android: { elevation: 10 } }),
   },
-  fabGroup: { bottom: 88, width: 46, height: 46, borderRadius: 14, elevation: 6 },
+  // Header 3-dot menu
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.15)' },
+  menuSheet: { position: 'absolute', top: 80, right: 14, borderRadius: 16, paddingVertical: 6, minWidth: 200, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  menuRowText: { fontSize: 15, fontWeight: '600' },
 
   // Long-press action sheet
   actionOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },

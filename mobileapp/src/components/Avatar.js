@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, Image as RNImage } from 'react-native';
+import { View, Text, StyleSheet, Image as RNImage, TouchableOpacity } from 'react-native';
 
 const COLORS = [
   '#3b82f6', '#8b5cf6', '#14b8a6', '#f59e0b',
@@ -38,7 +38,7 @@ const getStatusColor = (status) => {
   return '#94a3b8';
 };
 
-export default function Avatar({ uri: rawUri, name, size = 44, online, status, isGlobal, style, border = true }) {
+export default function Avatar({ uri: rawUri, name, size = 44, online, status, isGlobal, style, border = true, onPress }) {
   const uri = rawUri && rawUri !== 'undefined' && rawUri !== 'null' && rawUri !== '' && rawUri.length > 5 ? rawUri : null;
   const [failed, setFailed] = useState(false);
   const label = (name || '?').trim();
@@ -53,8 +53,11 @@ export default function Avatar({ uri: rawUri, name, size = 44, online, status, i
   const showBadge = isGlobal || status !== undefined || online !== undefined;
   const dotColor = isGlobal ? '#FFB020' : (status ? getStatusColor(status) : (online !== undefined ? getStatusColor(online) : null));
 
+  const Wrapper = onPress ? TouchableOpacity : View;
+  const wrapperProps = onPress ? { activeOpacity: 0.8, onPress } : {};
+
   return (
-    <View style={[z.wrap, { width: size, height: size }, style]}>
+    <Wrapper style={[z.wrap, { width: size, height: size }, style]} {...wrapperProps}>
       {showImage ? (
         <RNImage source={{ uri }} onError={() => setFailed(true)}
           style={[z.img, { width: size, height: size, borderRadius: r }, border && z.imgBorder]} />
@@ -68,7 +71,7 @@ export default function Avatar({ uri: rawUri, name, size = 44, online, status, i
           <View style={[z.badge, { width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2, backgroundColor: dotColor }]} />
         </View>
       )}
-    </View>
+    </Wrapper>
   );
 }
 
