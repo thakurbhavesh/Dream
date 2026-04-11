@@ -379,7 +379,7 @@ export default function ChatsScreen() {
 
     return (
       <TouchableOpacity
-        style={[s.thread, { borderBottomColor: t.divider || t.borderLight }, item.unread > 0 && { backgroundColor: t.accentSoft || 'rgba(234,76,137,0.04)' }]}
+        style={[s.thread, { borderBottomColor: isDark ? '#1e293b' : (t.divider || '#f1f5f9') }, item.unread > 0 && { backgroundColor: isDark ? 'rgba(234,76,137,0.08)' : 'rgba(234,76,137,0.04)' }]}
         onPress={() => openChat(item)}
         onLongPress={() => { Vibration.vibrate(30); setLongPressItem(item); }}
         delayLongPress={400}
@@ -437,7 +437,7 @@ export default function ChatsScreen() {
     <SafeAreaView style={[s.root, { backgroundColor: t.bg }]} edges={['top', 'bottom']}>
       {/* Header */}
       {!showGlobalSearch ? (
-        <View style={[s.header, { backgroundColor: t.card, ...Platform.select({ ios: { shadowColor: t.shadow }, android: { elevation: 2 } }) }]}>
+        <View style={[s.header, { backgroundColor: isDark ? '#111b21' : '#fff', borderBottomWidth: isDark ? 1 : 0, borderBottomColor: '#1e293b', ...Platform.select({ ios: { shadowColor: t.shadow }, android: { elevation: isDark ? 0 : 2 } }) }]}>
           <Text style={[s.headerTitle, { color: t.text }]}>Chats</Text>
           <View style={s.headerRight}>
             <TouchableOpacity style={s.headerBtn} onPress={() => { setShowGlobalSearch(true); setTimeout(() => searchInputRef.current?.focus(), 200); }}>
@@ -471,8 +471,8 @@ export default function ChatsScreen() {
 
       {/* Thread filter search + chips (when not in global search) */}
       {!showGlobalSearch && (
-        <View style={[s.searchWrap, { backgroundColor: t.card }]}>
-          <View style={[s.searchBox, { backgroundColor: t.surfaceAlt || (isDark ? '#1e293b' : '#f1f5f9') }]}>
+        <View style={[s.searchWrap, { backgroundColor: isDark ? '#0b141a' : '#fff', borderBottomWidth: 1, borderBottomColor: isDark ? '#1e293b' : '#f1f5f9' }]}>
+          <View style={[s.searchBox, { backgroundColor: isDark ? '#1e293b' : '#f1f5f9' }]}>
             <Ionicons name="search" size={16} color={t.textTer} />
             <TextInput style={[s.searchInput, { color: t.text }]} placeholder="Search..."
               placeholderTextColor={t.textTer} value={search} onChangeText={setSearch} />
@@ -492,7 +492,7 @@ export default function ChatsScreen() {
                 <TouchableOpacity key={f.key}
                   style={[s.filterChip, {
                     backgroundColor: active ? `${t.accent}15` : (isDark ? '#1e293b' : '#f1f5f9'),
-                    borderColor: active ? t.accent : 'transparent',
+                    borderColor: active ? t.accent : (isDark ? '#334155' : '#e2e8f0'),
                   }]}
                   onPress={() => setChatFilter(chatFilter === f.key ? 'all' : f.key)}
                   activeOpacity={0.7}>
