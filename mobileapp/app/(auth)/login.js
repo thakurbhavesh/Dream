@@ -11,7 +11,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import OtpInput from '../../src/components/OtpInput';
 import { useToast } from '../../src/components/Toast';
-import { login, loginWithOtp } from '../../src/api/auth';
+import { login, loginWithOtp, loginBiometric } from '../../src/api/auth';
 import { useAuth } from '../../src/store/AuthContext';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -75,7 +75,7 @@ export default function LoginScreen() {
     })();
   }, []);
 
-  // Biometric login
+  // Biometric login — skip OTP since biometric already verified identity
   const handleBiometricLogin = useCallback(async () => {
     try {
       const result = await LocalAuthentication.authenticateAsync({
@@ -91,11 +91,14 @@ export default function LoginScreen() {
       const savedP = await SecureStore.getItemAsync('biometric_password');
       if (!savedE || !savedP) { toast('No saved credentials', 'error'); setLoading(false); return; }
 
-      const loginResult = await login(savedE, savedP);
+      // Login with biometric flag — backend skips OTP for biometric-verified devices
+      const loginResult = await loginBiometric(savedE, savedP);
+
       if (loginResult?.otp_required) {
+        // Backend still requires OTP — auto-fill saved OTP or show OTP screen
         setEmail(savedE); setPassword(savedP);
         setStep(2); setCooldown(loginResult?.resend_available_in_seconds || COOL); setOtp('');
-        toast('OTP sent to your email', 'success');
+        toast('OTP verification needed', 'info');
       } else {
         await refreshUser();
         toast('Welcome back!', 'success');

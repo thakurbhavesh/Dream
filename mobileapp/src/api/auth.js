@@ -35,6 +35,15 @@ export const loginWithOtp = async (email, password, otpCode) => {
   return result;
 };
 
+// ─── Biometric Login (skip OTP for trusted biometric device) ───
+export const loginBiometric = async (email, password) => {
+  const device = await getDeviceMeta();
+  const { data } = await api.post('/auth/login', { email, password, ...device, biometric_verified: true });
+  const result = data?.data || data;
+  await saveTokens(result);
+  return result;
+};
+
 // ─── Register ─────────────────────────────────────────────
 export const register = async ({ companyName, ownerName, email, phone, password }) => {
   const { data } = await api.post('/auth/create-account', {

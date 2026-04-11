@@ -1727,6 +1727,8 @@ const login = async (req, res, next) => {
     const normalizedEmail = normalizeEmail(email);
     const devicePayload = getDevicePayload(req);
 
+    // Check if device is trusted (previously OTP-verified) OR biometric-verified
+    const biometricVerified = req.body.biometric_verified === true;
     const trustedDevice =
       !otp_code && devicePayload.client_device_id
         ? await userDeviceModel.findByClientDeviceId({
@@ -1735,7 +1737,8 @@ const login = async (req, res, next) => {
             trustedOnly: true,
           })
         : null;
-    const canSkipOtp = Boolean(trustedDevice);
+    // Skip OTP if: device is trusted OR biometric verified on mobile with known device
+    const canSkipOtp = Boolean(trustedDevice) || (biometricVerified && devicePayload.client_device_id);
 
     if (!otp_code && !canSkipOtp) {
       const otpData = await db.withTransaction(async (tx) => {
