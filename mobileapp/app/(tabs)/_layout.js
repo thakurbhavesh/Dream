@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/store/ThemeContext';
+import useSocket from '../../src/hooks/useSocket';
 
 const TabIcon = ({ name, focused, color }) => (
   <View style={st.iconWrap}>
@@ -15,6 +17,14 @@ export default function TabsLayout() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 8);
+  const { on } = useSocket();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Track unread from socket notifications
+  useEffect(() => {
+    const unsub = on('notification', () => setUnreadCount(c => c + 1));
+    return () => unsub?.();
+  }, [on]);
 
   return (
     <Tabs
@@ -39,8 +49,11 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="chats" options={{
         title: 'Chats',
+        tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
+        tabBarBadgeStyle: { backgroundColor: theme.accent, fontSize: 10, fontWeight: '800', minWidth: 18, height: 18, lineHeight: 16 },
         tabBarIcon: ({ focused, color }) => <TabIcon name="chatbubbles-outline" focused={focused} color={color} />,
-      }} />
+      }}
+      listeners={{ tabPress: () => setUnreadCount(0) }} />
       <Tabs.Screen name="contacts" options={{
         title: 'Contacts',
         tabBarIcon: ({ focused, color }) => <TabIcon name="people-outline" focused={focused} color={color} />,

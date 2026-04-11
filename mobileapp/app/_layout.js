@@ -19,7 +19,7 @@ import { ToastProvider } from '../src/components/Toast';
 import { CallProvider, useCall } from '../src/store/CallContext';
 import IncomingCall from '../src/components/IncomingCall';
 import useSocket from '../src/hooks/useSocket';
-// AppLock removed — replaced with per-chat Chat Lock
+import ErrorBoundary from '../src/components/ErrorBoundary';
 import {
   requestNotificationPermission,
   setupNotificationChannel,
@@ -132,6 +132,7 @@ function InnerLayout() {
 
 export default function RootLayout() {
   return (
+    <ErrorBoundary>
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
@@ -143,5 +144,6 @@ export default function RootLayout() {
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

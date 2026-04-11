@@ -29,6 +29,7 @@ import api from '../../src/api/config';
 import useSocket from '../../src/hooks/useSocket';
 import { useAuth } from '../../src/store/AuthContext';
 import { useCall } from '../../src/store/CallContext';
+import * as Haptics from 'expo-haptics';
 
 const chatBg = require('../../assets/chat-bg-pattern.png');
 const { width: W } = Dimensions.get('window');
@@ -507,6 +508,7 @@ export default function ChatScreen() {
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSending(true); setText(''); setShowEmoji(false); setShowAttach(false);
     // Clear draft & stop typing
     try { const AS = require('@react-native-async-storage/async-storage').default; AS.removeItem(`draft-${threadId}`); } catch {}
@@ -1065,7 +1067,7 @@ export default function ChatScreen() {
               onlineStatus?.status === 'Busy' && { color: '#fca5a5' },
             ]}>
               {typingUsers.length > 0
-                ? (isGroup ? `${typingUsers.map(u => u.name?.split(' ')[0]).join(', ')} typing...` : 'typing...')
+                ? (isGroup ? `${typingUsers.map(u => u.name?.split(' ')[0]).join(', ')} typing ` : 'typing ') + '•••'
                 : !connected ? 'Connecting...'
                 : onlineStatus?.online === true ? (onlineStatus?.status === 'Away' ? 'Away' : onlineStatus?.status === 'Busy' ? 'Busy' : onlineStatus?.status === 'DND' ? 'Do Not Disturb' : 'Online')
                 : onlineStatus?.lastSeen ? `Last seen ${new Date(onlineStatus.lastSeen).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`
