@@ -101,8 +101,15 @@ export default function useCall() {
     };
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+      const state = pc.iceConnectionState;
+      // Only end on 'failed' — 'disconnected' is temporary (network switch)
+      if (state === 'failed') {
         endCall();
+      } else if (state === 'disconnected') {
+        // Wait 5s — if still disconnected then end
+        setTimeout(() => {
+          if (pcRef.current?.iceConnectionState === 'disconnected') endCall();
+        }, 5000);
       }
     };
 
@@ -128,6 +135,13 @@ export default function useCall() {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+
+      // Auto-end if not answered in 30s
+      setTimeout(() => {
+        if (callStateRef.current === 'outgoing') {
+          endCall();
+        }
+      }, 30000);
 
       emit('call:request', {
         targetUserId: targetUser.id,
@@ -247,8 +261,14 @@ export default function useCall() {
       setCallState('incoming');
       setCallType(data.callType || 'audio');
       setRemoteUser({ id: data.fromUserId, name: data.fromUserName || 'Unknown', avatar: data.fromUserAvatar });
-      // Store the offer for later
       iceCandidatesQueue.current._offer = data.signalData;
+      // Auto-reject after 30s if not answered
+      setTimeout(() => {
+        if (callStateRef.current === 'incoming') {
+          emit('call:reject', { targetUserId: data.fromUserId, reason: 'no_answer' });
+          cleanup();
+        }
+      }, 30000);
     });
 
     // Call accepted by remote

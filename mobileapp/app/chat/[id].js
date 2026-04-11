@@ -1356,10 +1356,18 @@ export default function ChatScreen() {
                     <ActivityIndicator color={BRAND} style={{ marginVertical: 30 }} />
                   ) : (
                     <ScrollView style={z.aiBody} showsVerticalScrollIndicator={true} nestedScrollEnabled>
+                      {/* Message preview */}
+                      {infoMsg?.content?.text && (
+                        <View style={[z.infoSection, { backgroundColor: isDark ? '#0f172a' : '#f8fafc', borderRadius: 12, padding: 12, marginBottom: 8 }]}>
+                          <Text style={{ fontSize: 13, color: isDark ? '#94a3b8' : '#64748b' }} numberOfLines={3}>{infoMsg.content.text}</Text>
+                        </View>
+                      )}
+
                       {/* Sender info */}
                       <View style={z.infoSection}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: isDark ? '#64748b' : '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Sent by</Text>
                         <Text style={[z.infoSecTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>
-                          {infoMsg?.author?.name || inf?.sender?.name || 'Unknown'}
+                          {String(infoMsg?.author?.id) === String(user?.id) ? 'You' : (infoMsg?.author?.name || inf?.sender?.name || 'Unknown')}
                         </Text>
                         <Text style={[z.infoSecSub, { color: isDark ? '#64748b' : '#94a3b8' }]}>
                           {fmtDate(inf?.sendTime || infoMsg?.metadata?.sentAt)}
