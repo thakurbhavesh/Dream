@@ -4999,8 +4999,10 @@ const getOtpLogs = async (req, res, next) => {
   try {
     const orgId = Number(req.user?.org || 0);
     const { rows } = await db.query(
-      `SELECT ov.otp_id, ov.user_id, u.name, u.email, ov.purpose, ov.status,
-              ov.attempt_count, ov.max_attempts, ov.created_at, ov.expires_at, ov.verified_at
+      `SELECT ov.otp_id, ov.user_id, u.name, u.email, u.profile_url,
+              ov.identifier, ov.type, ov.otp_code, ov.purpose, ov.status,
+              ov.attempt_count, ov.max_attempts, ov.ip_address,
+              ov.created_at, ov.expires_at, ov.verified_at, ov.updated_at
        FROM otp_verifications ov
        JOIN users u ON u.user_id = ov.user_id
        WHERE ov.organization_id = $1

@@ -66,6 +66,7 @@ export default function AdminDashboard() {
     { icon: 'options', label: 'Controls', desc: 'Edit/recall limits, message settings', color: '#f59e0b', route: '/chat/admin/controls' },
     { icon: 'document-text', label: 'Activity Logs', desc: 'Full audit trail', color: '#ef4444', route: '/chat/admin/logs' },
     { icon: 'shield-checkmark', label: 'OTP Logs', desc: 'Verification history', color: '#14b8a6', route: '/chat/admin/otp-logs' },
+    { icon: 'card', label: 'Payment History', desc: 'Invoices & transactions', color: '#635bff', route: '/chat/admin/payments' },
     { icon: 'server', label: 'Plan & Storage', desc: 'Subscription & usage', color: '#06b6d4', route: '/chat/admin/billing' },
   ];
 
