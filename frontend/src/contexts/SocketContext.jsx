@@ -116,6 +116,17 @@ export const SocketProvider = ({
         instance.on("disconnect", handleDisconnect);
         instance.on("connect_error", handleError);
         instance.on("error", handleError);
+
+        // Force logout from linked devices (mobile revoked this session)
+        instance.on("auth:force_logout", (data) => {
+          console.warn("[socket] Force logout received:", data?.reason);
+          // Clear auth and redirect to login
+          try {
+            window.localStorage.clear();
+            window.sessionStorage.clear();
+          } catch {}
+          window.location.href = "/login";
+        });
         instance.io?.on("reconnect_attempt", handleReconnectAttempt);
         instance.io?.on("reconnect", handleConnect);
 

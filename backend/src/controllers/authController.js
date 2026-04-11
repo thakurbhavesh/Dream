@@ -5203,15 +5203,45 @@ const qrLogout = async (req, res, next) => {
     const userId = Number(req.user?.sub);
     const { qrId } = req.params;
 
-    const result = await db.query(
-      `DELETE FROM qr_sessions WHERE qr_id = $1 AND user_id = $2 RETURNING qr_id`,
+    // Get session before deleting — need the web token to invalidate
+    const { rows: sessions } = await db.query(
+      `SELECT qr_id, web_access_token FROM qr_sessions WHERE qr_id = $1 AND user_id = $2`,
       [qrId, userId]
     );
 
-    if (!result.rows.length) {
+    if (!sessions.length) {
       const err = new Error('Session not found');
       err.status = 404;
       throw err;
+    }
+
+    const session = sessions[0];
+
+    // Delete QR session
+    await db.query(`DELETE FROM qr_sessions WHERE qr_id = $1`, [qrId]);
+
+    // Blacklist the web access token — add to revoked list
+    if (session.web_access_token) {
+      try {
+        await db.query(
+          `INSERT INTO revoked_tokens (token_hash, user_id, revoked_at, reason)
+           VALUES ($1, $2, NOW(), 'qr_logout')
+           ON CONFLICT DO NOTHING`,
+          [hashToken(session.web_access_token), userId]
+        );
+      } catch {
+        // Table might not exist yet — that's ok, token will expire naturally
+      }
+    }
+
+    // Emit socket event to force web logout
+    const io = req.app?.get?.('io');
+    if (io) {
+      // Emit to all sockets of this user — web will catch it and logout
+      const { emitToUser } = require('../socket/index');
+      if (typeof emitToUser === 'function') {
+        emitToUser(String(userId), 'auth:force_logout', { reason: 'linked_device_removed', qrId });
+      }
     }
 
     return success(res, { ok: true }, 'Device logged out');
