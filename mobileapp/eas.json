@@ -22,6 +22,7 @@
       "android": {
         "buildType": "apk"
       },
+      "node": "22.16.0",
       "env": {
         "API_BASE_URL": "https://dream-s3pi.onrender.com"
       }

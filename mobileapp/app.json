@@ -23,7 +23,8 @@
         "NSContactsUsageDescription": "TeamChatX needs contacts access to share contact information in chats.",
         "NSFaceIDUsageDescription": "TeamChatX uses Face ID for quick and secure login.",
         "NSPhotoLibraryAddUsageDescription": "TeamChatX needs permission to save photos and files to your device."
-      }
+      },
+      "bitcode": false
     },
     "android": {
       "package": "com.teamchatx.app",
@@ -36,26 +37,29 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
-        "READ_CONTACTS",
-        "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED",
-        "USE_FINGERPRINT",
-        "USE_BIOMETRIC",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "READ_MEDIA_IMAGES",
-        "READ_MEDIA_VIDEO",
-        "READ_MEDIA_AUDIO",
-        "POST_NOTIFICATIONS",
-        "MODIFY_AUDIO_SETTINGS",
-        "BLUETOOTH",
-        "BLUETOOTH_CONNECT"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_CONTACTS",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "web": {
@@ -116,6 +120,13 @@
           "microphonePermission": "TeamChatX needs microphone access for audio and video calls."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d738e76a-8c03-4691-b374-028eeb3a3087"
+      }
+    },
+    "owner": "alltoolhubs"
   }
 }
