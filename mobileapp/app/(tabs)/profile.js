@@ -270,7 +270,7 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[t.accent]} />}>
 
         {/* ═══════════ ADMIN (only for admins) ═══════════ */}
-        {(user?.role_id === 1 || user?.role_id === 2 || user?.role_id === 3) && (
+        {(Number(user?.role_id) <= 3 && Number(user?.role_id) >= 1) && (
           <>
             <View style={[z.section, { backgroundColor: t.card, marginTop: 8 }]}>
               <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/admin')} activeOpacity={0.6}>

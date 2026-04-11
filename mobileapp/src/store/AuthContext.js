@@ -26,7 +26,7 @@ export function AuthProvider({ children }) {
         avatar: u?.profile_url,
         orgId: u?.organization_id || u?.org_id || tokenPayload.org,
         orgName: data?.organization?.name || u?.organization_name,
-        role_id: roleObj.role_id || u?.role_id || tokenPayload.role_id,
+        role_id: Number(roleObj.role_id || u?.role_id || tokenPayload.role_id) || null,
         role_key: roleObj.role_key || u?.role_key || tokenPayload.role,
         role_name: roleObj.role_name || u?.role_name,
       });
