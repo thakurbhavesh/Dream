@@ -18,6 +18,7 @@ import { useToast } from '../../src/components/Toast';
 import { useAuth } from '../../src/store/AuthContext';
 import { useTheme } from '../../src/store/ThemeContext';
 import { getMe, changePassword, getTrustedDevices, revokeDevice, logout, logoutAll } from '../../src/api/auth';
+import api from '../../src/api/config';
 
 const getTimeAgo = (d) => {
   if (!d) return '';
@@ -243,7 +244,28 @@ export default function ProfileScreen() {
       {/* ─── Fixed Profile Header ─── */}
       <View style={[z.profileCard, { backgroundColor: t.card }]}>
         <View style={z.profileTop}>
-          <Avatar uri={p.profile_url || p.avatar} name={p.name} size={62} />
+          <TouchableOpacity activeOpacity={0.7} onPress={async () => {
+            try {
+              const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7, allowsEditing: true, aspect: [1, 1] });
+              if (result.canceled || !result.assets?.[0]) return;
+              const asset = result.assets[0];
+              const formData = new FormData();
+              formData.append('avatar', { uri: asset.uri, name: 'avatar.jpg', type: asset.mimeType || 'image/jpeg' });
+              toast('Uploading...', 'info');
+              const { data } = await api.post('/upload/profile-picture', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+              const newUrl = data?.data?.profile_url || data?.data?.url || data?.profile_url;
+              if (newUrl) {
+                setProfile(prev => ({ ...prev, profile_url: newUrl }));
+                toast('Photo updated!', 'success');
+                refreshUser();
+              } else { toast('Updated', 'success'); }
+            } catch (e) { toast(e?.response?.data?.message || 'Upload failed', 'error'); }
+          }}>
+            <Avatar uri={p.profile_url || p.avatar} name={p.name} size={62} />
+            <View style={z.cameraBadge}>
+              <Ionicons name="camera" size={12} color="#fff" />
+            </View>
+          </TouchableOpacity>
           <View style={z.profileInfo}>
             <Text style={[z.profileName, { color: t.text }]}>{p.name || 'User'}</Text>
             <Text style={[z.profileEmail, { color: t.textSec }]}>{p.email}</Text>
@@ -717,6 +739,7 @@ const z = StyleSheet.create({
   profileEmail: { fontSize: 13, marginTop: 2 },
   rolePill: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 20, marginTop: 4 },
   roleText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  cameraBadge: { position: 'absolute', bottom: -2, right: -2, width: 24, height: 24, borderRadius: 12, backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
   logoutBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 
   // Section — expandable
