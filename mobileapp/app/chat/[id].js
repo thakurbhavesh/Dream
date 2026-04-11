@@ -120,8 +120,13 @@ export default function ChatScreen() {
   const searchTimer = useRef(null);
   const isGroup = threadId?.startsWith('group-');
 
-  // Keyboard handled by react-native-keyboard-controller (KeyboardProvider in _layout.js)
-  // No manual tracking needed
+  // Track keyboard to remove insets.bottom padding when keyboard is open
+  const [kbOpen, setKbOpen] = useState(false);
+  useEffect(() => {
+    const s1 = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKbOpen(true));
+    const s2 = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKbOpen(false));
+    return () => { s1.remove(); s2.remove(); };
+  }, []);
 
   // Scroll-to-bottom fab
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -1686,7 +1691,7 @@ export default function ChatScreen() {
         {/* ─── Footer ─── */}
         <View style={[z.footer, {
           backgroundColor: footerBg,
-          paddingBottom: Math.max(insets.bottom, 6),
+          paddingBottom: kbOpen ? 0 : Math.max(insets.bottom, 6),
           display: (hasLeftGroup || (isAirtime && !isGroupAdmin)) ? 'none' : 'flex',
         }]}>
           {!isRecording && (
