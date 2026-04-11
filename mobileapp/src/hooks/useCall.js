@@ -154,17 +154,23 @@ export default function useCall() {
       const pc = createPeerConnection(remoteUser.id);
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-      // Process queued ICE candidates
-      for (const candidate of iceCandidatesQueue.current) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      // Set remote offer FIRST (saved from incoming_request)
+      const savedOffer = iceCandidatesQueue.current._offer;
+      if (savedOffer && pc.remoteDescription === null) {
+        await pc.setRemoteDescription(new RTCSessionDescription({
+          type: 'offer',
+          sdp: savedOffer.sdp || savedOffer,
+        }));
+      }
+
+      // Process queued ICE candidates AFTER setting remote description
+      const queuedCandidates = [...iceCandidatesQueue.current].filter(c => c && typeof c === 'object' && !c._offer);
+      for (const candidate of queuedCandidates) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
       }
       iceCandidatesQueue.current = [];
 
-      // Set remote offer and create answer
-      if (pc.remoteDescription === null && iceCandidatesQueue.current._offer) {
-        await pc.setRemoteDescription(new RTCSessionDescription(iceCandidatesQueue.current._offer));
-      }
-
+      // Create and send answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
