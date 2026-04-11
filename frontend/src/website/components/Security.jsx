@@ -51,7 +51,7 @@ const Security = () => {
                     <h5 className="mt-3">Multi-Factor Authentication (MFA)</h5>
                     <p>
                       Employ multiple levels of security for your enterprise
-                      messaging software, Aabhyasa Messenger, to avoid
+                      messaging software, TeamChatX, to avoid
                       unauthorized access.
                     </p>
                   </div>
@@ -73,7 +73,7 @@ const Security = () => {
       {/* why us container */}
       <section className="whyUs-container wrapper mt-md-5">
         <div className="responsive-paragraph ms-auto  text-center text-md-start">
-          <h2>Why Aabhyasa Messenger</h2>
+          <h2>Why TeamChatX</h2>
           <p className="my-2">
             Plan your work schedules and projects on this team chat software
             with:

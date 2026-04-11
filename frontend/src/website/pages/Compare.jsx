@@ -171,6 +171,51 @@ const pricing = {
   troop: { starting: "$2.5", note: "per user / month", highlight: "Premium" },
 };
 
+// ─── Deployment Plans ──────────────────────────────────────────────
+const deploymentPlans = [
+  {
+    type: "Self-Hosted",
+    tagline: "Complete data ownership",
+    price: "Free",
+    priceSub: "open-source core",
+    desc: "Deploy on your own servers. Your data never leaves your infrastructure.",
+    features: [
+      { label: "Unlimited users", included: true },
+      { label: "Full source code access", included: true },
+      { label: "On-premise / private cloud", included: true },
+      { label: "AES-256 encryption at rest", included: true },
+      { label: "Air-gapped deployment", included: true },
+      { label: "Community support", included: true },
+      { label: "Priority support", included: false, note: "Add-on" },
+      { label: "Managed updates", included: false },
+    ],
+    cta: "Deploy Now",
+    ctaLink: "/contact",
+    accent: "#0162c4",
+  },
+  {
+    type: "Cloud-Based",
+    tagline: "Zero infrastructure hassle",
+    price: "$3",
+    priceSub: "per user / month",
+    desc: "We host everything. Start chatting in minutes with zero setup.",
+    features: [
+      { label: "Unlimited users", included: true },
+      { label: "99.9% uptime SLA", included: true },
+      { label: "AWS-hosted infrastructure", included: true },
+      { label: "AES-256 encryption at rest", included: true },
+      { label: "Automatic backups", included: true },
+      { label: "Priority email & chat support", included: true },
+      { label: "Managed updates & patches", included: true },
+      { label: "Custom domain (SSL)", included: true },
+    ],
+    cta: "Start Free Trial",
+    ctaLink: "/auth/register",
+    accent: "#16a34a",
+    popular: true,
+  },
+];
+
 // ─── Icons ──────────────────────────────────────────────────────────
 const Check = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -1015,8 +1060,84 @@ const Compare = () => {
             )}
 
             <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 18, marginBottom: 0 }}>
-              Estimates based on each vendor's published starting price as of 2025. Actual enterprise pricing may vary.
+              Estimates based on each vendor's published starting price as of 2026. Actual enterprise pricing may vary.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Self-Hosted vs Cloud ─────────────────────────────── */}
+      <section style={{ padding: "70px 0", background: "#fff" }}>
+        <div className="container">
+          <div style={{ textAlign: "center", marginBottom: 48 }}>
+            <p style={{ display: "inline-block", background: "#e0e7ff", color: "#4338ca", borderRadius: 999, padding: "5px 14px", fontSize: 11, fontWeight: 700, letterSpacing: 1.2, marginBottom: 14, textTransform: "uppercase" }}>
+              Deployment Options
+            </p>
+            <h2 style={{ fontSize: "clamp(24px, 3.5vw, 38px)", fontWeight: 800, color: "#0f172a", marginBottom: 10 }}>
+              Self-Hosted or Cloud — your choice
+            </h2>
+            <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
+              Unlike Slack and Microsoft Teams, TeamChatX gives you the freedom to deploy on your own infrastructure or let us handle everything.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 24, maxWidth: 900, margin: "0 auto" }}>
+            {deploymentPlans.map((plan) => (
+              <div
+                key={plan.type}
+                style={{
+                  background: plan.popular ? "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)" : "#fafbff",
+                  border: plan.popular ? "2px solid #16a34a" : "1.5px solid #e2e8f0",
+                  borderRadius: 20,
+                  padding: "32px 28px",
+                  position: "relative",
+                  boxShadow: plan.popular ? "0 12px 32px -12px rgba(22,163,74,0.18)" : "none",
+                }}
+              >
+                {plan.popular && (
+                  <div style={{ position: "absolute", top: -12, left: "50%", transform: "translateX(-50%)", background: "#16a34a", color: "#fff", fontSize: 10, fontWeight: 700, padding: "4px 14px", borderRadius: 999, letterSpacing: 1, textTransform: "uppercase" }}>
+                    Most Popular
+                  </div>
+                )}
+                <h3 style={{ fontSize: "1.2rem", fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>{plan.type}</h3>
+                <p style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>{plan.tagline}</p>
+                <div style={{ marginBottom: 20 }}>
+                  <span style={{ fontSize: 36, fontWeight: 800, color: plan.accent }}>{plan.price}</span>
+                  <span style={{ fontSize: 14, color: "#64748b", marginLeft: 6 }}>{plan.priceSub}</span>
+                </div>
+                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.5, marginBottom: 20 }}>{plan.desc}</p>
+                <ul style={{ listStyle: "none", padding: 0, margin: "0 0 24px" }}>
+                  {plan.features.map((f, i) => (
+                    <li key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", fontSize: 14, color: f.included ? "#334155" : "#94a3b8" }}>
+                      {f.included ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#dcfce7" stroke="#16a34a" strokeWidth="1.5" /><path d="M7 12.5l3 3 7-7" stroke="#16a34a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1.5" /><path d="M8 12h8" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" /></svg>
+                      )}
+                      <span>{f.label}</span>
+                      {f.note && <span style={{ fontSize: 11, color: "#d97706", fontWeight: 600, marginLeft: "auto" }}>{f.note}</span>}
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  to={plan.ctaLink}
+                  style={{
+                    display: "block",
+                    textAlign: "center",
+                    background: plan.popular ? plan.accent : "transparent",
+                    color: plan.popular ? "#fff" : plan.accent,
+                    border: plan.popular ? "none" : `2px solid ${plan.accent}`,
+                    padding: "12px 24px",
+                    borderRadius: 10,
+                    fontWeight: 700,
+                    fontSize: 14,
+                    textDecoration: "none",
+                  }}
+                >
+                  {plan.cta}
+                </Link>
+              </div>
+            ))}
           </div>
         </div>
       </section>

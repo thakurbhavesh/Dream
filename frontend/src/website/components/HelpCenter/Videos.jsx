@@ -33,37 +33,37 @@ const Videos = () => {
   const videoData = [
     {
       feature: "Google Drive Integration",
-      title: "Google Drive integration with Troop Messenger",
+      title: "Google Drive integration with TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Forkout",
-      title: "How to use Forkout Feature - Troop Messenger",
+      title: "How to use Forkout Feature - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Burnout",
-      title: "Burnout is an exceptional privacy feature of Troop Messenger",
+      title: "Burnout is an exceptional privacy feature of TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Audio Calling",
-      title: "Audio & Video Calls - Troop Messenger",
+      title: "Audio & Video Calls - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Mute Conversations",
-      title: "Mute Conversations - Troop Messenger",
+      title: "Mute Conversations - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Respond Later",
-      title: "How to Respond Messages Later - Troop Messenger",
+      title: "How to Respond Messages Later - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
       feature: "Message Edit",
-      title: "Edit a Message - Troop Messenger",
+      title: "Edit a Message - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
     {
@@ -73,7 +73,7 @@ const Videos = () => {
     },
     {
       feature: "Audio Messaging",
-      title: "Audio Message - Troop Messenger",
+      title: "Audio Message - TeamChatX",
       thumbnail: "https://via.placeholder.com/300", // Replace with actual thumbnail URL
     },
   ];

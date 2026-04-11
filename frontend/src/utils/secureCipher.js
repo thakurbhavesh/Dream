@@ -1,4 +1,4 @@
-// AES-GCM helpers inspired by desktop messengers such as Troop Messenger.
+// AES-GCM helpers for secure message encryption.
 // encodeURIComponent/decodeURIComponent are intentionally not used - URL encoding alone
 // offers no secrecy compared with the authenticated encryption implemented here.
 const TEXT_ENCODER = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;

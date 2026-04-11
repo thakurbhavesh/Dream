@@ -16,7 +16,7 @@ const Demo = () => {
              
             <p className="">Our Demo Will Include:</p>
             <ul>
-              <li>The sign-up process of the Troop Messenger.</li>
+              <li>The sign-up process of TeamChatX.</li>
               <li>A detailed walk-through of all the core features.</li>
               <li>
                 Make you understand the user-end and admin-end process workflows.

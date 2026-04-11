@@ -56,13 +56,12 @@ const Footer = () => {
     if (apiEmails.length) return apiEmails;
 
     return [
-      "support@aabhyasamessenger.com",
-      "developer@aabhyasamessenger.com",
-      "media@aabhyasamessenger.com",
+      "support@teamchatx.com",
+      "sales@teamchatx.com",
     ];
   }, [siteProfile]);
 
-  const brandName = String(siteProfile?.brand_name || "").trim() || "Aabhyasa Messenger";
+  const brandName = String(siteProfile?.brand_name || "").trim() || "TeamChatX";
 
   const socialLinks = useMemo(
     () => ({
@@ -86,14 +85,12 @@ const Footer = () => {
               {brandName}
             </h5>
             <p className="text-muted fs-6 pe-md-4 ">
-              Give enough space to your business to grow. Make it accessible
-              anytime anywhere. Check out the Troop Messenger Office Chat app –
-              Make your office communication flawless and absolutely secure. Try
-              out Troop Messenger – the best-in-class instant messaging app for
-              business in terms of Data security, ease of use, IP ownership,
-              secured & monitored entry etiquette, and many more. This business
-              chat app has been purposely built for you. Use Troop Messenger
-              work chat app and enjoy the experience!
+              Empower your team with seamless communication. TeamChatX is a
+              secure, self-hosted business messaging platform built for
+              enterprises that demand data privacy, IP ownership, and full
+              control. From instant messaging and video meetings to AI-powered
+              productivity tools — everything your team needs, on your
+              infrastructure.
             </p>
           </div>
 
@@ -235,7 +232,7 @@ const Footer = () => {
 
       {/* Footer Bottom */}
       <div className="text-center py-3 bg-dark text-white">
-        &copy; Copyright 2024. All rights reserved.
+        &copy; {new Date().getFullYear()} TeamChatX. All rights reserved.
       </div>
     </footer>
   );

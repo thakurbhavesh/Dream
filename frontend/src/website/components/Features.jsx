@@ -81,7 +81,7 @@ const Features = () => {
                 <PiScreencast size={48} color="#c489e1" />
                 <h5 className="mt-3">Remote Screen Share</h5>
                 <p>
-                  Reach out to your remotest office teams with Troop Messenger’s
+                  Reach out to your remotest office teams with TeamChatX’s
                   productive and ultra-new screen share feature.
                 </p>
               </div>

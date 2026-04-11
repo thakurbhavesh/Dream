@@ -302,7 +302,7 @@ const Navbar = () => {
               <div className="d-flex flex-column gap-4">
                 <div>
                   <h2 className="modal-title">
-                    Collaborate better with Aabhyasa Messenger!
+                    Collaborate better with TeamChatX!
                   </h2>
                   <p>Start Now</p>
                 </div>
@@ -329,7 +329,7 @@ const Navbar = () => {
                         flexItem
                         sx={{ bgcolor: "#000" }}
                       />
-                      <a className="">support@aabhyasamessenger.com</a>
+                      <a className="">support@teamchatx.com</a>
                     </div>
                   </div>
                 </div>

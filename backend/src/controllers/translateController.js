@@ -1254,7 +1254,7 @@ const transcribeWithGemini = async (audioBuffer, mimeType, apiKey, modelOverride
 
 // ─── AI Help Bot ─────────────────────────────────────────────────────────────
 const APP_KNOWLEDGE = `
-TeamChatX is a business team communication app (like Troop Messenger / Slack). Features:
+TeamChatX is a secure, self-hosted business team communication platform (like Slack / MS Teams). Features:
 
 MESSAGING: One-on-one DM, group chat, text formatting (bold/italic), code blocks, emoji, @mentions, message reply (swipe right), edit (5 min limit), unsend (5 min limit), forward, copy, pin (server-side, visible to all), star/bookmark (local, personal), reactions (emoji), voice messages with 1x/1.5x/2x playback, file/image/video/audio/location/contact sharing, GIF picker (Tenor), polls (single/multi choice), link previews, disappearing messages (24h/7d), broadcast to multiple contacts, draft auto-save.
 

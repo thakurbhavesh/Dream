@@ -149,7 +149,7 @@ const Support = () => {
         <div className="d-flex justify-content-center align-items-center gap-2">
           <PiEnvelopeSimple size={24} />
           <span className="fw-bold text-primary">
-            support@aabhyasamessenger.com
+            support@teamchatx.com
           </span>
         </div>
       </div>

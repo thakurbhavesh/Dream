@@ -26,6 +26,17 @@ const Help = lazy(() => import("../website/pages/Help.jsx"));
 const HowItworks = lazy(() => import("../website/pages/HowItworks.jsx"));
 const Contact = lazy(() => import("../website/pages/Contact.jsx"));
 const Compare = lazy(() => import("../website/pages/Compare.jsx"));
+const Downloads = lazy(() => import("../website/pages/Downloads.jsx"));
+const Blogs = lazy(() => import("../website/pages/Blogs.jsx"));
+const Versions = lazy(() => import("../website/pages/Versions.jsx"));
+const ChannelPartner = lazy(() => import("../website/pages/ChannelPartner.jsx"));
+const Faqs = lazy(() => import("../website/pages/Faqs.jsx"));
+const SupportPage = lazy(() => import("../website/pages/Support.jsx"));
+const SaasPrivacy = lazy(() => import("../website/pages/SaasPrivacy.jsx"));
+const OnPremisePrivacy = lazy(() => import("../website/pages/OnPremisePrivacy.jsx"));
+const AirGappedPrivacy = lazy(() => import("../website/pages/AirGappedPrivacy.jsx"));
+const Gdpr = lazy(() => import("../website/pages/Gdpr.jsx"));
+const RefundPolicy = lazy(() => import("../website/pages/RefundPolicy.jsx"));
 
 export default function Router() {
   const authenticated = authStore.useAuthStatus();
@@ -80,6 +91,17 @@ export default function Router() {
           { path: "how-it-works", element: <HowItworks /> },
           { path: "contact", element: <Contact /> },
           { path: "compare", element: <Compare /> },
+          { path: "downloads", element: <Downloads /> },
+          { path: "blogs", element: <Blogs /> },
+          { path: "versions", element: <Versions /> },
+          { path: "channel-partner", element: <ChannelPartner /> },
+          { path: "faqs", element: <Faqs /> },
+          { path: "support", element: <SupportPage /> },
+          { path: "saas-privacy", element: <SaasPrivacy /> },
+          { path: "on-premise-privacy", element: <OnPremisePrivacy /> },
+          { path: "air-gapped-privacy", element: <AirGappedPrivacy /> },
+          { path: "gdpr", element: <Gdpr /> },
+          { path: "refund-policy", element: <RefundPolicy /> },
         ],
       },
       {

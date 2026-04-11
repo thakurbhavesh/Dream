@@ -14,7 +14,7 @@ const Home = ({ setActiveTab }) => {
             </div>
             <div className="card-body d-flex flex-column justify-content-between align-items-end ">
               <p className="text-muted fs-6">
-                Troop Messenger’s How To guides provide a precise and quick
+                TeamChatX’s How To guides provide a precise and quick
                 feature orientation with step-wise processes.
               </p>
               <button
@@ -59,7 +59,7 @@ const Home = ({ setActiveTab }) => {
             </div>
             <div className="card-body d-flex flex-column justify-content-between align-items-end">
               <p className="text-muted fs-6">
-                Troop Messenger’s feature-videos present a complete overview
+                TeamChatX’s feature-videos present a complete overview
                 of the application's core functionality.
               </p>
               <button

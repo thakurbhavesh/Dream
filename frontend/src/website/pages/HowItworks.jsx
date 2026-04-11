@@ -7,7 +7,7 @@ const HowItWorks = () => {
       number: "1",
       title: "Admin Login",
       description:
-        "Admin Login to Troop Messenger with valid user credentials.",
+        "Admin Login to TeamChatX with valid user credentials.",
       image: "login.gif", // Replace with actual image path
     },
     {

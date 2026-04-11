@@ -53,7 +53,7 @@ const FeaturesCarousel = () => {
           icon: <PiPencil size={48} color="#FFFFFF" />,
           title: "Message Edit",
           description:
-            "Want to make corrections to the delivered chat message? Yes, you can do it with Troop Messenger! Wondering how? Check it out!",
+            "Want to make corrections to the delivered chat message? Yes, you can do it with TeamChatX! Wondering how? Check it out!",
         },
         {
           icon: <PiMicrophone size={48} color="#FFFFFF" />,
@@ -65,13 +65,13 @@ const FeaturesCarousel = () => {
           icon: <PiHandPointing size={48} color="#FFFFFF" />,
           title: "Join Now",
           description:
-            "Did you miss joining a group call? However, you can still join an ongoing call with Join Now from Troop Messenger!",
+            "Did you miss joining a group call? However, you can still join an ongoing call with Join Now from TeamChatX!",
         },
         {
           icon: <PiFileText size={48} color="#FFFFFF" />,
           title: "Attachment Preview",
           description:
-            "Word Doc, Excel, PPTs, PDFs, Images, Videos, and other types of attachments, view them directly on the UI of Troop Messenger.",
+            "Word Doc, Excel, PPTs, PDFs, Images, Videos, and other types of attachments, view them directly on the UI of TeamChatX.",
         },
         {
           icon: <PiUsers size={48} color="#FFFFFF" />,
@@ -101,7 +101,7 @@ const FeaturesCarousel = () => {
           icon: <PiUser size={48} color="#FFFFFF" />,
           title: "Orange Member",
           description:
-            "It helps you invite your customers, stakeholders, non-employees, etc., to Troop Messenger as guest users.",
+            "It helps you invite your customers, stakeholders, non-employees, etc., to TeamChatX as guest users.",
         },
         {
           icon: <PiCode size={48} color="#FFFFFF" />,
