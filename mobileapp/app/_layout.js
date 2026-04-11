@@ -12,9 +12,6 @@ if (!__DEV__) {
 LogBox.ignoreLogs(['Method writeAsStringAsync', 'Non-serializable values']);
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-// KeyboardProvider from react-native-keyboard-controller — enabled in dev/production builds only
-let KeyboardProvider;
-try { KeyboardProvider = require('react-native-keyboard-controller').KeyboardProvider; } catch { KeyboardProvider = null; }
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from '../src/store/AuthContext';
 import { ThemeProvider, useTheme } from '../src/store/ThemeContext';
