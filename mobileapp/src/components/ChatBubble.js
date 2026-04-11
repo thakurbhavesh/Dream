@@ -108,13 +108,18 @@ const isImageUrl = (url) => {
     lower.includes('.gif') || lower.includes('.webp') || lower.includes('.svg') || lower.includes('image/');
 };
 
-// Colors
-const OWN_BG = '#dcf8c6';
-const OWN_TEXT = '#303030';
-const OTHER_BG = '#ffffff';
-const OTHER_TEXT = '#303030';
-const OWN_META = '#6d9b5d';
-const OTHER_META = '#8696a0';
+// Colors — dark mode aware
+const getColors = (isDark) => isDark ? {
+  OWN_BG: '#005c4b', OWN_TEXT: '#e9edef', OTHER_BG: '#1f2c34', OTHER_TEXT: '#e9edef',
+  OWN_META: '#7cb39a', OTHER_META: '#8696a0',
+  DEL_BG: '#1f2c34', DEL_BORDER: '#2a3942', DEL_TEXT: '#8696a0',
+  MENU_BG: '#233138', MENU_BORDER: '#2a3942',
+} : {
+  OWN_BG: '#dcf8c6', OWN_TEXT: '#303030', OTHER_BG: '#ffffff', OTHER_TEXT: '#303030',
+  OWN_META: '#6d9b5d', OTHER_META: '#8696a0',
+  DEL_BG: '#fff', DEL_BORDER: '#e2e8f0', DEL_TEXT: '#8696a0',
+  MENU_BG: '#fff', MENU_BORDER: '#f1f5f9',
+};
 
 // Group sender colors
 const SENDER_COLORS = ['#e15d44', '#ff6f61', '#9b59b6', '#00bcd4', '#e67e22', '#27ae60', '#2980b9', '#8e44ad'];
@@ -277,7 +282,7 @@ function PollWidget({ content, metadata, isOwn, accentColor, onVote, messageId }
   );
 }
 
-export default function ChatBubble({ message, isOwn, showName, onAction, accentColor = '#ea4c89', textSize = 15, onReact, onPollVote, viewerIsAdmin, onImagePress }) {
+export default function ChatBubble({ message, isOwn, showName, onAction, accentColor = '#ea4c89', textSize = 15, onReact, onPollVote, viewerIsAdmin, onImagePress, isDark = false }) {
   const [expanded, setExpanded] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const ACCENT = accentColor;
@@ -308,9 +313,9 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
   if (c?.deleted) {
     return (
       <View style={[z.row, isOwn ? z.rowOwn : z.rowOther]}>
-        <View style={z.delBubble}>
-          <Ionicons name="ban-outline" size={13} color="#8696a0" />
-          <Text style={z.delText}>This message was deleted</Text>
+        <View style={[z.delBubble, { backgroundColor: C.DEL_BG, borderColor: C.DEL_BORDER }]}>
+          <Ionicons name="ban-outline" size={13} color={C.DEL_TEXT} />
+          <Text style={[z.delText, { color: C.DEL_TEXT }]}>This message was deleted</Text>
         </View>
       </View>
     );
@@ -319,9 +324,10 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
   const isUploading = message?._uploading;
   const isFailed = message?.status === 'failed';
 
-  const bg = isOwn ? OWN_BG : OTHER_BG;
-  const metaColor = isOwn ? OWN_META : OTHER_META;
-  const textColor = isOwn ? OWN_TEXT : OTHER_TEXT;
+  const C = getColors(isDark);
+  const bg = isOwn ? C.OWN_BG : C.OTHER_BG;
+  const metaColor = isOwn ? C.OWN_META : C.OTHER_META;
+  const textColor = isOwn ? C.OWN_TEXT : C.OTHER_TEXT;
 
   const Tick = () => {
     if (!isOwn) return null;
@@ -383,11 +389,11 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
       {/* Action Menu Modal */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
         <Pressable style={z.menuOverlay} onPress={() => setShowMenu(false)}>
-          <View style={z.menuCard}>
+          <View style={[z.menuCard, { backgroundColor: C.MENU_BG }]}>
             {/* Quick reactions row */}
-            <View style={z.quickReactRow}>
+            <View style={[z.quickReactRow, { borderBottomColor: C.MENU_BORDER }]}>
               {QUICK_REACTIONS.map(emoji => (
-                <TouchableOpacity key={emoji} style={z.quickReactBtn}
+                <TouchableOpacity key={emoji} style={[z.quickReactBtn, { backgroundColor: isDark ? '#1a2c35' : '#f8fafc' }]}
                   onPress={() => { setShowMenu(false); onReact?.(message?.id, emoji); }} activeOpacity={0.6}>
                   <Text style={z.quickReactEmoji}>{emoji}</Text>
                 </TouchableOpacity>
@@ -395,12 +401,12 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
             </View>
             <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
               {actions.map((a, i) => (
-                <TouchableOpacity key={a.key} style={[z.menuItem, i < actions.length - 1 && z.menuItemBorder]}
+                <TouchableOpacity key={a.key} style={[z.menuItem, i < actions.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.MENU_BORDER }]}
                   onPress={() => handleAction(a.key)} activeOpacity={0.6}>
                   <View style={[z.menuIconWrap, { backgroundColor: `${a.color}12` }]}>
                     <Ionicons name={a.icon} size={16} color={a.color} />
                   </View>
-                  <Text style={[z.menuLabel, { color: a.key === 'delete' || a.key === 'recall' ? a.color : '#334155' }]}>{a.label}</Text>
+                  <Text style={[z.menuLabel, { color: a.key === 'delete' || a.key === 'recall' ? a.color : (isDark ? '#e9edef' : '#334155') }]}>{a.label}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -664,7 +670,7 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
             {reactionList.map(r => {
               const isSelf = r.users.some(u => u.isSelf || String(u.id) === String(message?._viewerId));
               return (
-                <TouchableOpacity key={r.emoji} style={[z.reactionBadge, isSelf && z.reactionSelf]}
+                <TouchableOpacity key={r.emoji} style={[z.reactionBadge, { backgroundColor: isDark ? '#1f2c34' : '#fff', borderColor: isDark ? '#2a3942' : '#f1f5f9' }, isSelf && z.reactionSelf]}
                   onPress={() => onReact?.(message.id, r.emoji)} activeOpacity={0.7}>
                   <Text style={z.reactionEmoji}>{r.emoji}</Text>
                   {r.users.length > 1 && <Text style={z.reactionCount}>{r.users.length}</Text>}
@@ -695,8 +701,8 @@ const z = StyleSheet.create({
   notchOwn: { right: -5 },
   notchOther: { left: -5 },
 
-  delBubble: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff' },
-  delText: { fontSize: 13, color: '#8696a0', fontStyle: 'italic' },
+  delBubble: { borderWidth: 1, borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10 },
+  delText: { fontSize: 13, fontStyle: 'italic' },
 
   sender: { fontSize: 12.5, fontWeight: '700', marginBottom: 2, paddingHorizontal: 12, paddingTop: 8 },
 
@@ -739,7 +745,7 @@ const z = StyleSheet.create({
   videoSize: { fontSize: 11, paddingHorizontal: 10, marginTop: 2 },
 
   // Audio — polished waveform
-  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, minWidth: 220 },
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, minWidth: 180 },
   audioPlayBtn: {
     width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
     // Subtle inner shadow
@@ -750,11 +756,11 @@ const z = StyleSheet.create({
   waveBar: { width: 3, borderRadius: 1.5 },
   audioDurRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 3 },
   audioDur: { fontSize: 11.5, fontWeight: '500', fontVariant: ['tabular-nums'] },
-  speedBtn: { backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  speedBtn: { backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, minWidth: 36, minHeight: 28, alignItems: 'center', justifyContent: 'center' },
   speedText: { fontSize: 11, fontWeight: '800' },
 
   // File — premium card feel
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, paddingRight: 14, minWidth: 240 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, paddingRight: 14, minWidth: 180 },
   fileBadge: {
     width: 46, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 2,
     // Subtle depth
@@ -792,7 +798,7 @@ const z = StyleSheet.create({
     elevation: 16,
     shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.2, shadowRadius: 28,
   },
-  menuIconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  menuIconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 11, minHeight: 44 },
   menuItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
   menuLabel: { fontSize: 14.5, fontWeight: '600', letterSpacing: -0.1 },
@@ -813,7 +819,7 @@ const z = StyleSheet.create({
 
   // Quick reactions — pill-shaped
   quickReactRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
-  quickReactBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center' },
+  quickReactBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   quickReactEmoji: { fontSize: 20 },
 
   // Reactions — floating pills

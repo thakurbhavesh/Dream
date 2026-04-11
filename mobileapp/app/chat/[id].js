@@ -1165,6 +1165,7 @@ export default function ChatScreen() {
                       accentColor={BRAND}
                       textSize={t.fontSize}
                       viewerIsAdmin={isGroupAdmin}
+                      isDark={isDark}
                     />
                   );
                 }}
