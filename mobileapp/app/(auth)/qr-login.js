@@ -3,7 +3,6 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as SecureStore from 'expo-secure-store';
 import api from '../../src/api/config';
 import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
@@ -78,9 +77,7 @@ export default function LinkedDevicesScreen() {
       let qrToken = data;
       try { const parsed = JSON.parse(data); qrToken = parsed.qrToken || parsed.token || data; } catch {}
 
-      const accessToken = await SecureStore.getItemAsync('accessToken');
-      if (!accessToken) { toast('Please login first', 'error'); setMode('list'); return; }
-
+      // api interceptor auto-attaches Bearer token from SecureStore
       const { data: res } = await api.post('/auth/qr/confirm', { qrToken });
       if (res?.status === 'success' || res?.data?.ok) {
         toast('Web browser linked!', 'success');
