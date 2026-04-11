@@ -269,6 +269,24 @@ export default function ProfileScreen() {
         contentContainerStyle={z.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[t.accent]} />}>
 
+        {/* ═══════════ ADMIN (only for admins) ═══════════ */}
+        {(user?.role_id === 1 || user?.role_id === 2 || user?.role_id === 3) && (
+          <>
+            <View style={[z.section, { backgroundColor: t.card, marginTop: 8 }]}>
+              <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/admin')} activeOpacity={0.6}>
+                <View style={[z.sectionIcon, { backgroundColor: '#ef444412' }]}>
+                  <Ionicons name="shield-checkmark" size={17} color="#ef4444" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[z.sectionLabel, { color: t.text }]}>Admin Panel</Text>
+                  <Text style={{ fontSize: 11, color: t.textTer, marginTop: 1 }}>Users, groups, controls, billing</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
         {/* ═══════════ ACCOUNT ═══════════ */}
         <Text style={[z.groupLabel, { color: t.textTer }]}>ACCOUNT</Text>
 
