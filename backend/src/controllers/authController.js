@@ -4991,6 +4991,168 @@ const updateTimezone = async (req, res, next) => {
   }
 };
 
+// ─── QR Code Login ──────────────────────────────────────────────────────────
+
+// 1. Web calls this to generate QR code data
+const qrGenerate = async (req, res, next) => {
+  try {
+    const qrId = crypto.randomUUID();
+    const qrToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await db.query(
+      `INSERT INTO qr_sessions (qr_id, qr_token, ip_address, user_agent, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [qrId, qrToken, req.ip, req.headers['user-agent'] || '', expiresAt]
+    );
+
+    return success(res, { qrId, qrToken, expiresAt }, 'QR session created');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// 2. Mobile calls this after scanning QR — links the session to the user
+const qrConfirm = async (req, res, next) => {
+  try {
+    const { qrToken } = req.body;
+    const mobileUserId = Number(req.user?.sub);
+    const mobileOrgId = Number(req.user?.org || 0);
+
+    if (!qrToken) {
+      const err = new Error('qrToken is required');
+      err.status = 400;
+      throw err;
+    }
+
+    // Find and validate QR session
+    const { rows } = await db.query(
+      `SELECT * FROM qr_sessions WHERE qr_token = $1 LIMIT 1`,
+      [qrToken]
+    );
+
+    if (!rows.length) {
+      const err = new Error('Invalid or expired QR code');
+      err.status = 404;
+      throw err;
+    }
+
+    const session = rows[0];
+
+    if (session.status !== 'pending') {
+      const err = new Error('QR code already used');
+      err.status = 410;
+      throw err;
+    }
+
+    if (new Date(session.expires_at) < new Date()) {
+      await db.query(`UPDATE qr_sessions SET status = 'expired' WHERE qr_id = $1`, [session.qr_id]);
+      const err = new Error('QR code expired');
+      err.status = 410;
+      throw err;
+    }
+
+    // Get user info for token generation
+    const userRes = await db.query(
+      `SELECT u.user_id, u.email, u.name, om.role_id, r.role_key
+       FROM users u
+       LEFT JOIN organization_members om ON om.user_id = u.user_id AND om.organization_id = $2
+       LEFT JOIN roles r ON r.role_id = om.role_id
+       WHERE u.user_id = $1 LIMIT 1`,
+      [mobileUserId, mobileOrgId]
+    );
+
+    if (!userRes.rows.length) {
+      const err = new Error('User not found');
+      err.status = 404;
+      throw err;
+    }
+
+    const user = userRes.rows[0];
+
+    // Generate web access token
+    const webPayload = {
+      sub: user.user_id,
+      email: user.email,
+      org: mobileOrgId,
+      role_id: user.role_id || null,
+      role: user.role_key || null,
+      name: user.name,
+    };
+    const webAccessToken = signAccessToken(webPayload);
+    const webRefreshToken = generateRefreshToken();
+
+    // Update QR session as linked
+    await db.query(
+      `UPDATE qr_sessions
+       SET status = 'linked', user_id = $1, organization_id = $2,
+           web_access_token = $3, web_refresh_token = $4, linked_at = NOW()
+       WHERE qr_id = $5`,
+      [mobileUserId, mobileOrgId, webAccessToken, webRefreshToken, session.qr_id]
+    );
+
+    return success(res, { ok: true }, 'QR login authorized');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// 3. Web polls this to check if mobile has confirmed
+const qrStatus = async (req, res, next) => {
+  try {
+    const { qrId } = req.query;
+
+    if (!qrId) {
+      const err = new Error('qrId is required');
+      err.status = 400;
+      throw err;
+    }
+
+    const { rows } = await db.query(
+      `SELECT status, user_id, organization_id, web_access_token, web_refresh_token, expires_at
+       FROM qr_sessions WHERE qr_id = $1 LIMIT 1`,
+      [qrId]
+    );
+
+    if (!rows.length) {
+      const err = new Error('QR session not found');
+      err.status = 404;
+      throw err;
+    }
+
+    const session = rows[0];
+
+    // Check expiry
+    if (new Date(session.expires_at) < new Date() && session.status === 'pending') {
+      await db.query(`UPDATE qr_sessions SET status = 'expired' WHERE qr_id = $1`, [qrId]);
+      return success(res, { status: 'expired' }, 'QR expired');
+    }
+
+    if (session.status === 'linked') {
+      // Mark as used so it can't be polled again
+      await db.query(`UPDATE qr_sessions SET status = 'used', used_at = NOW() WHERE qr_id = $1`, [qrId]);
+
+      // Get user info
+      const userRes = await db.query(
+        `SELECT u.user_id, u.email, u.name, u.profile_url FROM users u WHERE u.user_id = $1 LIMIT 1`,
+        [session.user_id]
+      );
+      const user = userRes.rows[0] || {};
+
+      return success(res, {
+        status: 'linked',
+        accessToken: session.web_access_token,
+        refreshToken: session.web_refresh_token,
+        user: { id: user.user_id, email: user.email, name: user.name, avatar: user.profile_url },
+      }, 'QR login confirmed');
+    }
+
+    return success(res, { status: session.status }, 'QR status');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 module.exports = {
   register,
   createNewAccount,
@@ -5023,4 +5185,7 @@ module.exports = {
   getOwnerV1SystemStats,
   getCsrfToken,
   updateTimezone,
+  qrGenerate,
+  qrConfirm,
+  qrStatus,
 };

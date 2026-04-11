@@ -262,6 +262,12 @@ export default function LoginScreen() {
                   </LinearGradient>
                 </TouchableOpacity>
 
+                {/* QR Login */}
+                <TouchableOpacity style={z.qrBtn} onPress={() => router.push('/(auth)/qr-login')} activeOpacity={0.7}>
+                  <Ionicons name="qr-code-outline" size={18} color={P} />
+                  <Text style={[z.qrText, { color: P }]}>Login via QR Code</Text>
+                </TouchableOpacity>
+
                 {/* Register link */}
                 <View style={z.regRow}>
                   <Text style={z.regText}>Don't have an account? </Text>
@@ -387,6 +393,8 @@ const z = StyleSheet.create({
   divText: { fontSize: 11, color: '#94a3b8', fontWeight: '600' },
 
   // Register link
+  qrBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 20, paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, borderColor: '#e2e8f0' },
+  qrText: { fontSize: 14, fontWeight: '700' },
   regRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 14 },
   regText: { fontSize: 13, color: '#64748b' },
   regLink: { fontSize: 13, color: P, fontWeight: '800' },

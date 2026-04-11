@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef, memo } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, RefreshControl, Platform, ActivityIndicator,
+  TextInput, RefreshControl, Platform, ActivityIndicator, Vibration, Modal, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -40,19 +40,20 @@ const msgPreview = (msg, type) => {
 
 export default function ChatsScreen() {
   const { user } = useAuth();
-  const { theme: t } = useTheme();
+  const { theme: t, isDark } = useTheme();
   const { on, connected } = useSocket();
   const [threads, setThreads] = useState([]);
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [userStatuses, setUserStatuses] = useState({}); // { odne: 'Online' | 'Away' | 'Idle' | 'offline' }
 
   // Global search
   const [globalSearch, setGlobalSearch] = useState('');
   const [globalResults, setGlobalResults] = useState(null);
   const [globalLoading, setGlobalLoading] = useState(false);
   const [showGlobalSearch, setShowGlobalSearch] = useState(false);
+  const [chatFilter, setChatFilter] = useState('all'); // 'all' | 'groups' | 'unread'
   const globalTimer = useRef(null);
   const searchInputRef = useRef(null);
 
@@ -68,7 +69,13 @@ export default function ChatsScreen() {
     try {
       const data = await getThreads();
       // DMs — backend returns normalized format
-      const dm = (data?.dmThreads || data?.threads || [])
+      // Backend returns { threads: [...] } — all DMs + groups mixed in one array
+      // Split by type: isGroup/threadType === 'group' → group, else DM
+      const allThreads = data?.threads || data?.dmThreads || [];
+      const separateGroups = data?.groupThreads || [];
+
+      const dm = allThreads
+        .filter(th => !th.isGroup && th.threadType !== 'group' && th.type !== 'group')
         .filter(th => th.lastMessageAt || th.lastActivityAt || th.send_time)
         .map(th => ({
           id: th.id || `dm-${th.user_id || th.other_user_id}`,
@@ -81,27 +88,34 @@ export default function ChatsScreen() {
           unread: Number(th.unreadCount ?? th.unread_count ?? 0),
           online: th.status === 'Online',
           senderId: th.lastMessageDirection === 'outgoing' ? user?.id : null,
-          lastStatus: th.lastMessageStatus || null, // 'read' | 'delivered' | 'sent' | null
+          lastStatus: th.lastMessageStatus || null,
           lastDirection: th.lastMessageDirection || null,
+          isGlobal: !!(th.isGlobalMember || th.isGlobal || th.is_global || th.global_user),
           type: 'dm',
         }));
 
-      // Groups — backend returns normalized format
-      const groups = (data?.groupThreads || [])
-        .filter(th => th.lastMessageAt || th.last_message_time)
-        .map(th => ({
+      // Groups — from mixed threads array OR separate groupThreads key
+      const groupRaw = [
+        ...allThreads.filter(th => th.isGroup || th.threadType === 'group' || th.type === 'group'),
+        ...separateGroups,
+      ];
+      const groups = groupRaw.map(th => ({
           id: th.id || `group-${th.group_id || th.groupId}`,
-          name: th.label || th.group_name || th.groupName,
+          name: th.label || th.username || th.group_name || th.groupName,
           avatar: th.profilePicture || th.group_image || th.groupImage,
           description: th.description || th.group_description,
-          lastMsg: msgPreview(th.preview || th.last_message, th.messageType || th.last_message_type),
-          lastMsgType: th.messageType || th.last_message_type,
-          lastTime: th.lastMessageAt || th.last_message_time,
+          lastMsg: msgPreview(th.preview || th.last_message || th.message, th.messageType || th.last_message_type || th.message_type),
+          lastMsgType: th.messageType || th.last_message_type || th.message_type,
+          lastTime: th.lastMessageAt || th.lastActivityAt || th.last_message_time,
           lastSender: th.lastSenderName || th.last_sender_name,
           unread: Number(th.unreadCount ?? th.unread_count ?? 0),
           lastStatus: th.lastMessageStatus || null,
           lastDirection: th.lastMessageDirection || null,
           memberCount: th.memberCount || th.member_count,
+          isAirtime: th.is_airtime,
+          isAdmin: th.isAdmin || th.current_user_is_admin,
+          hasLeft: th.hasLeft || th.membershipStatus === 'left',
+          canChat: th.canChat !== false,
           type: 'group',
         }));
 
@@ -117,7 +131,10 @@ export default function ChatsScreen() {
       });
 
       setThreads(all);
-      cacheThreads(all); // Save to local cache
+      cacheThreads(all);
+      // Update app icon badge with total unread
+      const totalUnread = all.reduce((sum, th) => sum + (th.unread || 0), 0);
+      try { const { setBadgeCount } = require('../../src/services/notifications'); setBadgeCount(totalUnread); } catch {}
     } catch (err) {
       console.warn('[chats]', err?.message);
     } finally { setLoading(false); }
@@ -229,14 +246,24 @@ export default function ChatsScreen() {
       });
     });
 
-    // Online/Offline/Status
+    // Online/Offline/Status — real-time status tracking
     const unsub5 = on('user:online', (data) => {
       const uid = String(data?.userId || data?.user_id || data);
-      if (uid) setOnlineUsers(prev => new Set(prev).add(uid));
+      if (uid) setUserStatuses(prev => ({ ...prev, [uid]: data?.status || 'Online' }));
     });
     const unsub6 = on('user:offline', (data) => {
       const uid = String(data?.userId || data?.user_id || data);
-      if (uid) setOnlineUsers(prev => { const s = new Set(prev); s.delete(uid); return s; });
+      if (uid) setUserStatuses(prev => ({ ...prev, [uid]: 'offline' }));
+    });
+    const unsubStatus = on('user:status', (data) => {
+      const uid = String(data?.userId || data?.user_id || data);
+      if (uid && data?.status) setUserStatuses(prev => ({ ...prev, [uid]: data.status }));
+    });
+    const unsubList = on('users:online_list', (data) => {
+      const list = data?.users || data || [];
+      const map = {};
+      list.forEach(u => { const uid = String(u.userId || u.user_id || u.id || u); map[uid] = u.status || u.activity_status || 'Online'; });
+      setUserStatuses(prev => ({ ...prev, ...map }));
     });
 
     // Read ack — mark our messages as read + update tick
@@ -247,7 +274,7 @@ export default function ChatsScreen() {
       ));
     });
 
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsub8(); unsub9(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsubStatus(); unsubList(); unsub7(); unsub8(); unsub9(); };
   }, [on, user?.id, loadThreads]);
 
   const onRefresh = async () => { setRefreshing(true); await loadThreads(); setRefreshing(false); };
@@ -268,9 +295,62 @@ export default function ChatsScreen() {
     }, 400);
   }, []);
 
-  const filtered = search.trim()
-    ? threads.filter(th => (th.name || '').toLowerCase().includes(search.toLowerCase()) || (th.email || '').toLowerCase().includes(search.toLowerCase()))
-    : threads;
+  // Apply filter + search + pin sort + archive hide
+  const filtered = threads.filter(th => {
+    if (archivedChats?.has?.(th.id)) return false; // hide archived
+    if (chatFilter === 'groups' && th.type !== 'group') return false;
+    if (chatFilter === 'unread' && !th.unread) return false;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      return (th.name || '').toLowerCase().includes(q) || (th.email || '').toLowerCase().includes(q);
+    }
+    return true;
+  }).sort((a, b) => {
+    // Pinned chats first
+    const ap = pinnedChats?.has?.(a.id) ? 1 : 0;
+    const bp = pinnedChats?.has?.(b.id) ? 1 : 0;
+    if (ap !== bp) return bp - ap;
+    return 0; // keep existing time sort
+  });
+
+  const [pinnedChats, setPinnedChats] = useState(() => new Set());
+  const [archivedChats, setArchivedChats] = useState(() => new Set());
+  const [longPressItem, setLongPressItem] = useState(null);
+
+  // Load pinned/archived from storage
+  useEffect(() => {
+    (async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const p = await AsyncStorage.getItem('pinned_chats');
+        const a = await AsyncStorage.getItem('archived_chats');
+        if (p) setPinnedChats(new Set(JSON.parse(p)));
+        if (a) setArchivedChats(new Set(JSON.parse(a)));
+      } catch {}
+    })();
+  }, []);
+
+  const togglePin = async (id) => {
+    const next = new Set(pinnedChats);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setPinnedChats(next);
+    setLongPressItem(null);
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem('pinned_chats', JSON.stringify([...next]));
+    } catch {}
+  };
+
+  const toggleArchive = async (id) => {
+    const next = new Set(archivedChats);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setArchivedChats(next);
+    setLongPressItem(null);
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem('archived_chats', JSON.stringify([...next]));
+    } catch {}
+  };
 
   const openChat = (thread) => {
     router.push(`/chat/${thread.id}?name=${encodeURIComponent(thread.name || '')}&avatar=${encodeURIComponent(thread.avatar || '')}`);
@@ -297,12 +377,15 @@ export default function ChatsScreen() {
       <TouchableOpacity
         style={[s.thread, { borderBottomColor: t.divider || t.borderLight }, item.unread > 0 && { backgroundColor: t.accentSoft || 'rgba(234,76,137,0.04)' }]}
         onPress={() => openChat(item)}
+        onLongPress={() => { Vibration.vibrate(30); setLongPressItem(item); }}
+        delayLongPress={400}
         activeOpacity={0.55}
       >
         {item.unread > 0 && <View style={[s.unreadStripe, { backgroundColor: t.accent }]} />}
         <View style={s.avatarWrap}>
           <Avatar uri={item.avatar} name={isSelf ? '📌' : item.name} size={52}
-            online={!isGroup && !isSelf ? (onlineUsers.has(item.id?.replace('dm-', '')) || item.online) : undefined} />
+            status={!isGroup && !isSelf ? (userStatuses[item.id?.replace('dm-', '')] || (item.online ? 'Online' : undefined)) : undefined}
+            isGlobal={!isGroup && !isSelf && item.isGlobal} />
           {isGroup && (
             <View style={[s.groupBadge, { backgroundColor: t.accent }]}>
               <Ionicons name="people" size={9} color="#fff" />
@@ -315,6 +398,7 @@ export default function ChatsScreen() {
             <Text style={[s.threadName, { color: t.text }, item.unread > 0 && s.bold]} numberOfLines={1}>
               {isSelf ? '📌 Myself' : item.name}
             </Text>
+            {pinnedChats?.has?.(item.id) && <Ionicons name="pin" size={12} color={t.accent} style={{ marginRight: 2 }} />}
             {item.lastTime && (
               <Text style={[s.threadTime, { color: item.unread > 0 ? t.accent : t.textTer }]}>
                 {formatTime(item.lastTime)}
@@ -342,7 +426,7 @@ export default function ChatsScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [t, user?.id]);
+  }, [t, user?.id, pinnedChats, userStatuses, isDark]);
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: t.bg }]} edges={['top']}>
@@ -380,14 +464,44 @@ export default function ChatsScreen() {
         </View>
       )}
 
-      {/* Thread filter search (when not in global search) */}
+      {/* Thread filter search + chips (when not in global search) */}
       {!showGlobalSearch && (
-        <View style={s.searchWrap}>
-          <View style={[s.searchBox, { backgroundColor: t.surfaceAlt }]}>
+        <View style={[s.searchWrap, { backgroundColor: t.card }]}>
+          <View style={[s.searchBox, { backgroundColor: t.surfaceAlt || (isDark ? '#1e293b' : '#f1f5f9') }]}>
             <Ionicons name="search" size={16} color={t.textTer} />
-            <TextInput style={[s.searchInput, { color: t.text }]} placeholder="Filter chats..."
+            <TextInput style={[s.searchInput, { color: t.text }]} placeholder="Search..."
               placeholderTextColor={t.textTer} value={search} onChangeText={setSearch} />
-            {search ? <TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={16} color={t.textTer} /></TouchableOpacity> : null}
+            {search ? <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}><Ionicons name="close-circle" size={16} color={t.textTer} /></TouchableOpacity> : null}
+          </View>
+          {/* Filter chips */}
+          <View style={s.filterRow}>
+            {[
+              { key: 'all', label: 'All', icon: 'chatbubbles-outline' },
+              { key: 'groups', label: 'Groups', icon: 'people-outline' },
+              { key: 'unread', label: 'Unread', icon: 'mail-unread-outline' },
+            ].map(f => {
+              const active = chatFilter === f.key;
+              const count = f.key === 'unread' ? threads.filter(th => th.unread > 0).length
+                : f.key === 'groups' ? threads.filter(th => th.type === 'group').length : 0;
+              return (
+                <TouchableOpacity key={f.key}
+                  style={[s.filterChip, {
+                    backgroundColor: active ? `${t.accent}15` : (isDark ? '#1e293b' : '#f1f5f9'),
+                    borderColor: active ? t.accent : 'transparent',
+                  }]}
+                  onPress={() => setChatFilter(chatFilter === f.key ? 'all' : f.key)}
+                  activeOpacity={0.7}>
+                  <Ionicons name={active ? f.icon.replace('-outline', '') : f.icon} size={14}
+                    color={active ? t.accent : t.textTer} />
+                  <Text style={[s.filterChipText, { color: active ? t.accent : t.textTer }]}>{f.label}</Text>
+                  {count > 0 && f.key !== 'all' && (
+                    <View style={[s.filterCount, { backgroundColor: active ? t.accent : t.textTer }]}>
+                      <Text style={s.filterCountText}>{count}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
       )}
@@ -479,7 +593,32 @@ export default function ChatsScreen() {
         />
       )}
 
-      {/* FAB */}
+      {/* Long-press action sheet */}
+      {longPressItem && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setLongPressItem(null)}>
+          <Pressable style={s.actionOverlay} onPress={() => setLongPressItem(null)}>
+            <View style={[s.actionSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+              <Text style={[s.actionTitle, { color: t.text }]} numberOfLines={1}>{longPressItem.name}</Text>
+              {[
+                { icon: pinnedChats?.has?.(longPressItem.id) ? 'pin' : 'pin-outline', label: pinnedChats?.has?.(longPressItem.id) ? 'Unpin' : 'Pin to top', onPress: () => togglePin(longPressItem.id), color: t.accent },
+                { icon: 'archive-outline', label: 'Archive', onPress: () => toggleArchive(longPressItem.id), color: '#f59e0b' },
+                { icon: 'notifications-off-outline', label: 'Mute', onPress: () => setLongPressItem(null), color: '#64748b' },
+              ].map((a, i) => (
+                <TouchableOpacity key={i} style={[s.actionRow, { borderTopColor: isDark ? '#334155' : '#f1f5f9' }]} onPress={a.onPress} activeOpacity={0.6}>
+                  <Ionicons name={a.icon} size={20} color={a.color} />
+                  <Text style={[s.actionLabel, { color: t.text }]}>{a.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* FABs */}
+      <TouchableOpacity style={[s.fab, s.fabGroup, { backgroundColor: isDark ? '#334155' : '#e2e8f0' }]} activeOpacity={0.85}
+        onPress={() => router.push('/chat/create-group')}>
+        <Ionicons name="people" size={20} color={t.accent} />
+      </TouchableOpacity>
       <TouchableOpacity style={[s.fab, { backgroundColor: t.accent }]} activeOpacity={0.85}
         onPress={() => router.push('/(tabs)/contacts')}>
         <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
@@ -503,10 +642,15 @@ const s = StyleSheet.create({
   globalSearchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, height: 40, marginLeft: 10 },
   globalSearchInput: { flex: 1, fontSize: 14, fontWeight: '500' },
 
-  // Filter search
-  searchWrap: { paddingHorizontal: 16, paddingVertical: 6 },
+  // Filter search + chips
+  searchWrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 8 },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 14, paddingHorizontal: 14, height: 42 },
   searchInput: { flex: 1, fontSize: 15, fontWeight: '400' },
+  filterRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1.5 },
+  filterChipText: { fontSize: 13, fontWeight: '700' },
+  filterCount: { minWidth: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  filterCountText: { fontSize: 10, fontWeight: '800', color: '#fff' },
 
   // Global search results
   resultCount: { fontSize: 12, fontWeight: '600', paddingHorizontal: 18, paddingVertical: 8 },
@@ -539,4 +683,12 @@ const s = StyleSheet.create({
     width: 56, height: 56, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
     ...Platform.select({ ios: { shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }, android: { elevation: 10 } }),
   },
+  fabGroup: { bottom: 88, width: 46, height: 46, borderRadius: 14, elevation: 6 },
+
+  // Long-press action sheet
+  actionOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  actionSheet: { borderRadius: 20, width: 260, paddingVertical: 12, paddingHorizontal: 4, elevation: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.2, shadowRadius: 20 },
+  actionTitle: { fontSize: 16, fontWeight: '800', paddingHorizontal: 16, paddingBottom: 10, textAlign: 'center' },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth },
+  actionLabel: { fontSize: 15, fontWeight: '600' },
 });

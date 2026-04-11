@@ -16,7 +16,29 @@ const getStableKey = (url) => {
   } catch { return url; }
 };
 
-export default function Avatar({ uri: rawUri, name, size = 44, online, style, border = true }) {
+// Status → dot color mapping
+const STATUS_COLORS = {
+  online: '#22c55e',   // green
+  Online: '#22c55e',
+  away: '#f59e0b',     // amber
+  Away: '#f59e0b',
+  idle: '#f59e0b',     // amber (same as away)
+  Idle: '#f59e0b',
+  busy: '#ef4444',     // red
+  Busy: '#ef4444',
+  dnd: '#ef4444',      // red
+  DND: '#ef4444',
+  offline: '#94a3b8',  // grey
+  Offline: '#94a3b8',
+};
+
+const getStatusColor = (status) => {
+  if (typeof status === 'boolean') return status ? '#22c55e' : '#94a3b8';
+  if (typeof status === 'string') return STATUS_COLORS[status] || '#94a3b8';
+  return '#94a3b8';
+};
+
+export default function Avatar({ uri: rawUri, name, size = 44, online, status, isGlobal, style, border = true }) {
   const uri = rawUri && rawUri !== 'undefined' && rawUri !== 'null' && rawUri !== '' && rawUri.length > 5 ? rawUri : null;
   const [failed, setFailed] = useState(false);
   const label = (name || '?').trim();
@@ -27,6 +49,9 @@ export default function Avatar({ uri: rawUri, name, size = 44, online, style, bo
   const badgeSize = Math.max(size * 0.26, 11);
 
   const showImage = uri && !failed;
+  // Global member → always orange dot, overrides status
+  const showBadge = isGlobal || status !== undefined || online !== undefined;
+  const dotColor = isGlobal ? '#FFB020' : (status ? getStatusColor(status) : (online !== undefined ? getStatusColor(online) : null));
 
   return (
     <View style={[z.wrap, { width: size, height: size }, style]}>
@@ -38,9 +63,9 @@ export default function Avatar({ uri: rawUri, name, size = 44, online, style, bo
           <Text style={[z.initials, { fontSize: size * 0.36 }]}>{initials}</Text>
         </View>
       )}
-      {online !== undefined && (
+      {showBadge && dotColor && (
         <View style={[z.badgeOuter, { width: badgeSize + 3, height: badgeSize + 3, borderRadius: (badgeSize + 3) / 2, bottom: -1, right: -1 }]}>
-          <View style={[z.badge, { width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2, backgroundColor: online ? '#22c55e' : '#94a3b8' }]} />
+          <View style={[z.badge, { width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2, backgroundColor: dotColor }]} />
         </View>
       )}
     </View>

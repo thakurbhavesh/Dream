@@ -1,10 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Linking, Dimensions, Modal, Pressable, Vibration, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Linking, Dimensions, Modal, Pressable, Vibration, Platform, ScrollView, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
 const TEXT_LIMIT = 300; // chars before "Show more"
+
+// Detect emoji-only messages (1-8 emoji, no other text)
+const EMOJI_REGEX = /^(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D|\u20E3|[\u{1F1E0}-\u{1F1FF}])+$/u;
+const isEmojiOnly = (txt) => {
+  if (!txt || txt.length > 32) return false;
+  const trimmed = txt.trim();
+  return EMOJI_REGEX.test(trimmed) && trimmed.length <= 32;
+};
 
 // Links → external browser, Files/Images/Videos → in-app preview
 const openInApp = (url, color) => url && WebBrowser.openBrowserAsync(url, { presentationStyle: 'pageSheet', controlsColor: color || '#ea4c89' });
@@ -116,14 +124,27 @@ const getSenderColor = (name) => {
   return SENDER_COLORS[Math.abs(hash) % SENDER_COLORS.length];
 };
 
+// Time limits (same as web frontend default: 5 minutes)
+const EDIT_LIMIT_MS = 5 * 60 * 1000;
+const RECALL_LIMIT_MS = 5 * 60 * 1000;
+
+const isWithinTimeLimit = (createdAt, limitMs) => {
+  if (!createdAt) return false;
+  const created = new Date(createdAt).getTime();
+  return created + limitMs > Date.now();
+};
+
 // Message action menu items
-const getActions = (isOwn, type) => {
+const getActions = (isOwn, type, message, viewerIsAdmin) => {
   const actions = [];
-  // Destructive
-  if (isOwn) {
+  const createdAt = message?.createdAt || message?.metadata?.sentAt;
+  // Destructive — admins can delete/recall any message
+  if (isOwn || viewerIsAdmin) {
     actions.push({ key: 'delete', icon: 'trash-outline', label: 'Delete', color: '#ef4444' });
-    actions.push({ key: 'recall', icon: 'arrow-undo-outline', label: 'Unsend', color: '#f59e0b' });
-    if (type === 'text' || type === 'link' || type === 'code') {
+    if (isOwn && isWithinTimeLimit(createdAt, RECALL_LIMIT_MS)) {
+      actions.push({ key: 'recall', icon: 'arrow-undo-outline', label: 'Unsend', color: '#f59e0b' });
+    }
+    if (isOwn && (type === 'text' || type === 'link' || type === 'code') && isWithinTimeLimit(createdAt, EDIT_LIMIT_MS)) {
       actions.push({ key: 'edit', icon: 'create-outline', label: 'Edit', color: '#64748b' });
     }
   } else {
@@ -144,14 +165,20 @@ const getActions = (isOwn, type) => {
   actions.push({ key: 'reply', icon: 'arrow-undo', label: 'Reply', color: '#3b82f6' });
   actions.push({ key: 'forward', icon: 'share-outline', label: 'Forward', color: '#8b5cf6' });
   actions.push({ key: 'info', icon: 'information-circle-outline', label: 'Info', color: '#3b82f6' });
-  actions.push({ key: 'pin', icon: 'pin-outline', label: 'Pin', color: '#f59e0b' });
+  const isPinned = message?.metadata?.pinned;
+  actions.push({ key: 'pin', icon: isPinned ? 'pin' : 'pin-outline', label: isPinned ? 'Unpin' : 'Pin', color: '#f59e0b' });
+  const isStarred = message?.metadata?.starred;
+  actions.push({ key: 'star', icon: isStarred ? 'star' : 'star-outline', label: isStarred ? 'Unstar' : 'Star', color: '#eab308' });
   return actions;
 };
+
+const SPEEDS = [1, 1.5, 2];
 
 // ─── Audio Player Sub-component ───
 function AudioPlayerWidget({ url, duration: metaDuration, isOwn, metaColor, Footer }) {
   const player = useAudioPlayer(url || '');
   const status = useAudioPlayerStatus(player);
+  const [speedIdx, setSpeedIdx] = useState(0);
 
   const isPlaying = status?.playing || false;
   const currentTime = status?.currentTime || 0;
@@ -168,6 +195,12 @@ function AudioPlayerWidget({ url, duration: metaDuration, isOwn, metaColor, Foot
       if (isPlaying) { player.pause(); }
       else { player.play(); }
     } catch {}
+  };
+
+  const cycleSpeed = () => {
+    const next = (speedIdx + 1) % SPEEDS.length;
+    setSpeedIdx(next);
+    try { player.rate = SPEEDS[next]; } catch {}
   };
 
   const displayTime = isPlaying || currentTime > 0.5
@@ -190,6 +223,9 @@ function AudioPlayerWidget({ url, duration: metaDuration, isOwn, metaColor, Foot
         </View>
         <View style={z.audioDurRow}>
           <Text style={[z.audioDur, { color: metaColor }]}>{displayTime}</Text>
+          <TouchableOpacity onPress={cycleSpeed} style={z.speedBtn} activeOpacity={0.6}>
+            <Text style={[z.speedText, { color: isOwn ? '#4caf50' : '#ea4c89' }]}>{SPEEDS[speedIdx]}x</Text>
+          </TouchableOpacity>
           {Footer}
         </View>
       </View>
@@ -197,7 +233,51 @@ function AudioPlayerWidget({ url, duration: metaDuration, isOwn, metaColor, Foot
   );
 }
 
-export default function ChatBubble({ message, isOwn, showName, onAction, accentColor = '#ea4c89', textSize = 15 }) {
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🙄', '🥰', '🔥', '😭'];
+
+// Poll sub-component
+function PollWidget({ content, metadata, isOwn, accentColor, onVote, messageId }) {
+  const question = content?.question || metadata?.question || '';
+  const options = content?.options || metadata?.options || [];
+  const votes = content?.votes || metadata?.votes || {};
+  const multiChoice = content?.multiChoice || metadata?.multiChoice || false;
+  const totalVotes = Object.values(votes).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : (arr || 0)), 0);
+
+  return (
+    <View style={{ padding: 10, minWidth: 220 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Ionicons name="stats-chart" size={14} color={accentColor} />
+        <Text style={{ fontSize: 10, fontWeight: '700', color: accentColor, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {multiChoice ? 'Multiple Choice' : 'Poll'}
+        </Text>
+      </View>
+      <Text style={{ fontSize: 15, fontWeight: '700', color: isOwn ? '#303030' : '#303030', marginBottom: 10 }}>{question}</Text>
+      {options.map((opt, i) => {
+        const optText = typeof opt === 'string' ? opt : opt.text;
+        const optVotes = Array.isArray(votes[i]) ? votes[i].length : (votes[i] || 0);
+        const pct = totalVotes > 0 ? Math.round((optVotes / totalVotes) * 100) : 0;
+        return (
+          <TouchableOpacity key={i} style={{
+            borderWidth: 1.5, borderColor: accentColor + '30', borderRadius: 10, marginBottom: 6,
+            paddingHorizontal: 12, paddingVertical: 10, position: 'relative', overflow: 'hidden',
+          }} onPress={() => onVote?.(messageId, i)} activeOpacity={0.7}>
+            <View style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct}%`,
+              backgroundColor: accentColor + '15', borderRadius: 10,
+            }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#303030', flex: 1 }}>{optText}</Text>
+              {totalVotes > 0 && <Text style={{ fontSize: 12, fontWeight: '700', color: accentColor }}>{pct}%</Text>}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+      <Text style={{ fontSize: 11, color: '#8696a0', marginTop: 4 }}>{totalVotes} vote{totalVotes !== 1 ? 's' : ''}</Text>
+    </View>
+  );
+}
+
+export default function ChatBubble({ message, isOwn, showName, onAction, accentColor = '#ea4c89', textSize = 15, onReact, onPollVote, viewerIsAdmin, onImagePress }) {
   const [expanded, setExpanded] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const ACCENT = accentColor;
@@ -216,7 +296,8 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
   const mime = resolveMime(c, m);
   const fi = getFileInfo(name, mime);
 
-  const showImage = (type === 'image' || (type === 'file' && isImageUrl(url || name))) && url;
+  const localUri = c?._localUri;
+  const showImage = (type === 'image' || (type === 'file' && isImageUrl(url || name))) && (url || localUri);
   // Show link card for any link-type message (with or without preview)
   const isLink = type === 'link';
 
@@ -234,6 +315,9 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
       </View>
     );
   }
+
+  const isUploading = message?._uploading;
+  const isFailed = message?.status === 'failed';
 
   const bg = isOwn ? OWN_BG : OTHER_BG;
   const metaColor = isOwn ? OWN_META : OTHER_META;
@@ -269,14 +353,46 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
     onAction?.(key, message);
   };
 
-  const actions = getActions(isOwn, type);
+  // Swipe to reply
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 15 && Math.abs(g.dy) < 15,
+    onPanResponderMove: (_, g) => {
+      if (g.dx > 0) swipeX.setValue(Math.min(g.dx, 80)); // only swipe right
+    },
+    onPanResponderRelease: (_, g) => {
+      if (g.dx > 60) {
+        Vibration.vibrate(20);
+        onAction?.('reply', message);
+      }
+      Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, tension: 40, friction: 8 }).start();
+    },
+  })).current;
+
+  const actions = getActions(isOwn, type, message, viewerIsAdmin);
+
+  const replyIconOpacity = swipeX.interpolate({ inputRange: [0, 40, 60], outputRange: [0, 0.5, 1], extrapolate: 'clamp' });
+  const replyIconScale = swipeX.interpolate({ inputRange: [0, 60], outputRange: [0.5, 1], extrapolate: 'clamp' });
 
   return (
     <View style={[z.row, isOwn ? z.rowOwn : z.rowOther]}>
+      {/* Swipe reply icon behind bubble */}
+      <Animated.View style={[z.swipeReplyIcon, { opacity: replyIconOpacity, transform: [{ scale: replyIconScale }] }]}>
+        <Ionicons name="arrow-undo" size={18} color="#3b82f6" />
+      </Animated.View>
       {/* Action Menu Modal */}
       <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
         <Pressable style={z.menuOverlay} onPress={() => setShowMenu(false)}>
           <View style={z.menuCard}>
+            {/* Quick reactions row */}
+            <View style={z.quickReactRow}>
+              {QUICK_REACTIONS.map(emoji => (
+                <TouchableOpacity key={emoji} style={z.quickReactBtn}
+                  onPress={() => { setShowMenu(false); onReact?.(message?.id, emoji); }} activeOpacity={0.6}>
+                  <Text style={z.quickReactEmoji}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight: 400 }}>
               {actions.map((a, i) => (
                 <TouchableOpacity key={a.key} style={[z.menuItem, i < actions.length - 1 && z.menuItemBorder]}
@@ -292,9 +408,23 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
         </Pressable>
       </Modal>
 
-      {/* Tail */}
-      <Pressable onLongPress={handleLongPress} delayLongPress={300}
+      {/* Tail — swipeable */}
+      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX: swipeX }], opacity: isUploading ? 0.7 : 1 }}>
+      <Pressable onLongPress={isUploading ? undefined : handleLongPress} delayLongPress={300}
         style={[z.bubble, { backgroundColor: bg, maxWidth: MAX_BUB }]}>
+        {/* Uploading overlay */}
+        {isUploading && (
+          <View style={z.uploadingOverlay}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={z.uploadingText}>Sending...</Text>
+          </View>
+        )}
+        {isFailed && (
+          <View style={[z.uploadingOverlay, { backgroundColor: 'rgba(239,68,68,0.85)' }]}>
+            <Ionicons name="alert-circle" size={18} color="#fff" />
+            <Text style={z.uploadingText}>Failed</Text>
+          </View>
+        )}
         {/* Notch */}
         <View style={[z.notch, isOwn ? z.notchOwn : z.notchOther, { borderBottomColor: bg }]} />
 
@@ -318,6 +448,14 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
           </View>
         )}
 
+        {/* Pinned indicator */}
+        {m?.pinned && (
+          <View style={z.fwdRow}>
+            <Ionicons name="pin" size={11} color="#f59e0b" />
+            <Text style={[z.fwdText, { color: '#f59e0b' }]}>Pinned</Text>
+          </View>
+        )}
+
         {/* Forwarded */}
         {forwarded && (
           <View style={z.fwdRow}>
@@ -326,10 +464,26 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
           </View>
         )}
 
+        {/* ── Poll ── */}
+        {type === 'poll' && (
+          <>
+            <PollWidget content={c} metadata={m} isOwn={isOwn} accentColor={ACCENT} onVote={onPollVote} messageId={message?.id} />
+            <Footer />
+          </>
+        )}
+
+        {/* ── GIF ── */}
+        {type === 'gif' && (
+          <View style={{ margin: 3, borderRadius: 8, overflow: 'hidden' }}>
+            <Image source={{ uri: c?.url || c?.gifUrl || url }} style={{ width: MAX_BUB - 10, height: 200, borderRadius: 8 }} resizeMode="cover" />
+            <View style={z.imgOverlay}><Footer inline /></View>
+          </View>
+        )}
+
         {/* ── Image ── */}
         {showImage && (
-          <TouchableOpacity activeOpacity={0.9} onPress={() => openInApp(url, ACCENT)} style={z.imgWrap}>
-            <Image source={{ uri: url }} style={z.img} resizeMode="cover" />
+          <TouchableOpacity activeOpacity={0.9} onPress={() => !isUploading && (onImagePress ? onImagePress(url || localUri, text) : openInApp(url, ACCENT))} style={z.imgWrap}>
+            <Image source={{ uri: url || localUri }} style={z.img} resizeMode="cover" />
             {/* Gradient overlay for time on image */}
             <View style={z.imgOverlay}>
               <Footer inline />
@@ -431,8 +585,31 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
           );
         })()}
 
+        {/* ── Emoji-only large display ── */}
+        {!showImage && !isLink && !isMedia && isEmojiOnly(text) ? (
+          <View style={z.emojiOnlyWrap}>
+            <Text style={z.emojiOnlyText}>{text}</Text>
+            <Footer />
+          </View>
+        ) : null}
+
+        {/* ── Code Snippet ── */}
+        {type === 'code' && !showImage && (() => {
+          const code = c?.code || text || '';
+          const lang = c?.language || '';
+          return (
+            <View style={z.codeWrap}>
+              {lang ? <Text style={z.codeLang}>{lang.toUpperCase()}</Text> : null}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={z.codeScroll}>
+                <Text style={z.codeText}>{code}</Text>
+              </ScrollView>
+              <Footer />
+            </View>
+          );
+        })()}
+
         {/* ── Text with auto-linked URLs + Show more/less ── */}
-        {!showImage && !isLink && (text || (!isMedia)) ? (() => {
+        {!showImage && !isLink && !isEmojiOnly(text) && type !== 'code' && (text || (!isMedia)) ? (() => {
           const isLong = text.length > TEXT_LIMIT;
           const display = isLong && !expanded ? text.slice(0, TEXT_LIMIT) + '...' : text;
           const linkColor = isOwn ? '#054640' : '#027eb5';
@@ -470,109 +647,201 @@ export default function ChatBubble({ message, isOwn, showName, onAction, accentC
         {/* Footer for non-text (file/video/link) */}
         {(type === 'file' && !showImage) || isLink || (type === 'video' && !showImage) ? null : (!showImage && !isMedia && !isLink) ? null : null}
       </Pressable>
+      </Animated.View>
+
+      {/* ── Reactions display ── */}
+      {(() => {
+        // Backend sends metadata.reactions as array: [{emoji, users: [{id,name}]}]
+        const raw = message?.metadata?.reactions || message?.reactions;
+        if (!raw) return null;
+        // Normalize: support both array format and object format
+        const reactionList = Array.isArray(raw)
+          ? raw.filter(r => r?.emoji && r?.users?.length > 0)
+          : Object.entries(raw).map(([emoji, users]) => ({ emoji, users: Array.isArray(users) ? users : [] })).filter(r => r.users.length > 0);
+        if (reactionList.length === 0) return null;
+        return (
+          <View style={[z.reactionsRow, isOwn ? z.reactionsOwn : z.reactionsOther]}>
+            {reactionList.map(r => {
+              const isSelf = r.users.some(u => u.isSelf || String(u.id) === String(message?._viewerId));
+              return (
+                <TouchableOpacity key={r.emoji} style={[z.reactionBadge, isSelf && z.reactionSelf]}
+                  onPress={() => onReact?.(message.id, r.emoji)} activeOpacity={0.7}>
+                  <Text style={z.reactionEmoji}>{r.emoji}</Text>
+                  {r.users.length > 1 && <Text style={z.reactionCount}>{r.users.length}</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        );
+      })()}
     </View>
   );
 }
 
 const z = StyleSheet.create({
-  row: { marginVertical: 3, paddingHorizontal: 8 },
+  row: { marginVertical: 2, paddingHorizontal: 10 },
   rowOwn: { alignItems: 'flex-end' },
   rowOther: { alignItems: 'flex-start' },
 
   bubble: {
-    borderRadius: 10, overflow: 'visible',
+    borderRadius: 18, overflow: 'visible',
+    // Layered shadows for natural depth
     elevation: 1,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 0.5 }, shadowOpacity: 0.08, shadowRadius: 1,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3,
   },
 
-  // WhatsApp-style notch
+  // WhatsApp-style notch — concentric radius with bubble
   notch: { position: 'absolute', top: 0, width: 0, height: 0, borderLeftWidth: 6, borderRightWidth: 6, borderBottomWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent' },
-  notchOwn: { right: -6 },
-  notchOther: { left: -6 },
+  notchOwn: { right: -5 },
+  notchOther: { left: -5 },
 
-  delBubble: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#fff' },
+  delBubble: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 16, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: '#fff' },
   delText: { fontSize: 13, color: '#8696a0', fontStyle: 'italic' },
 
-  sender: { fontSize: 12, fontWeight: '700', marginBottom: 1, paddingHorizontal: 10, paddingTop: 6 },
+  sender: { fontSize: 12.5, fontWeight: '700', marginBottom: 2, paddingHorizontal: 12, paddingTop: 8 },
 
-  // Reply context in bubble
-  replyCtx: { flexDirection: 'row', marginHorizontal: 4, marginTop: 4, marginBottom: 2, borderRadius: 6, overflow: 'hidden' },
-  replyCtxAccent: { width: 3 },
-  replyCtxBody: { flex: 1, paddingHorizontal: 8, paddingVertical: 5 },
-  replyCtxAuthor: { fontSize: 11, fontWeight: '700', marginBottom: 1 },
-  replyCtxSnippet: { fontSize: 12, lineHeight: 16 },
+  // Reply context — concentric radius (outer 18 - padding 4 = inner 14)
+  replyCtx: { flexDirection: 'row', marginHorizontal: 6, marginTop: 6, marginBottom: 3, borderRadius: 12, overflow: 'hidden' },
+  replyCtxAccent: { width: 3.5 },
+  replyCtxBody: { flex: 1, paddingHorizontal: 10, paddingVertical: 6 },
+  replyCtxAuthor: { fontSize: 11.5, fontWeight: '800', marginBottom: 2 },
+  replyCtxSnippet: { fontSize: 12.5, lineHeight: 17 },
 
-  fwdRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingTop: 4 },
-  fwdText: { fontSize: 11, color: '#8696a0', fontStyle: 'italic' },
+  fwdRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingTop: 6 },
+  fwdText: { fontSize: 11, color: '#8696a0', fontStyle: 'italic', fontWeight: '500' },
 
-  // Image
-  imgWrap: { borderRadius: 6, overflow: 'hidden', margin: 3 },
-  img: { width: MAX_BUB - 10, height: 220, borderRadius: 6 },
-  imgOverlay: { position: 'absolute', bottom: 0, right: 0, paddingHorizontal: 8, paddingVertical: 4, borderTopLeftRadius: 8, backgroundColor: 'rgba(0,0,0,0.35)' },
-  imgCaption: { padding: 6, paddingTop: 4 },
-
-  // Video
-  videoWrap: { padding: 4, paddingBottom: 6 },
-  videoThumb: { width: '100%', height: 160, backgroundColor: '#1a1a2e', borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  videoPlay: { width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.8)' },
-  videoBadge: { position: 'absolute', top: 8, left: 8, flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  videoDur: { fontSize: 10, color: '#fff', fontWeight: '600' },
-  videoName: { fontSize: 13, fontWeight: '500', paddingHorizontal: 8, marginTop: 4 },
-  videoSize: { fontSize: 11, paddingHorizontal: 8, marginTop: 1 },
-
-  // Audio
-  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, minWidth: 200 },
-  audioPlayBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  audioCenter: { flex: 1 },
-  wave: { flexDirection: 'row', alignItems: 'center', gap: 1.5 },
-  waveBar: { width: 2.5, borderRadius: 1.25 },
-  audioDurRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
-  audioDur: { fontSize: 11 },
-
-  // File
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 8, paddingRight: 12, minWidth: 220 },
-  fileBadge: { width: 42, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', gap: 1 },
-  badgeLabel: { fontSize: 7, fontWeight: '900', letterSpacing: 0.3 },
-  fileInfo: { flex: 1 },
-  fName: { fontSize: 13, fontWeight: '600' },
-  fileMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  fSize: { fontSize: 11 },
-  fDot: { fontSize: 11 },
-
-  // Link preview
-  linkCard: { margin: 4, borderRadius: 8, overflow: 'hidden', minWidth: 240 },
-  linkThumb: { width: '100%', height: 130 },
-  linkPreviewBody: { flexDirection: 'row', borderRadius: 6 },
-  linkAccent: { width: 4, borderTopLeftRadius: 6, borderBottomLeftRadius: 6 },
-  linkContent: { flex: 1, padding: 8, paddingLeft: 10 },
-  linkTitle: { fontSize: 14, fontWeight: '700', marginBottom: 2, lineHeight: 19 },
-  linkDesc: { fontSize: 12, lineHeight: 17, marginBottom: 3 },
-  linkHostRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  linkHostText: { fontSize: 11, fontWeight: '500' },
-  linkUrlWrap: { paddingHorizontal: 6, paddingTop: 6, paddingBottom: 2 },
-  linkFullUrl: { fontSize: 14, lineHeight: 19, textDecorationLine: 'underline' },
-
-  // Text
-  textWrap: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 6 },
-  text: { fontSize: 15, lineHeight: 21 },
-
-  // Action menu
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
-  menuCard: {
-    backgroundColor: '#fff', borderRadius: 18, width: 220, paddingVertical: 6,
-    elevation: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 24,
+  // Image — concentric radius (outer 18 - margin 4 = inner 14)
+  imgWrap: { borderRadius: 14, overflow: 'hidden', margin: 4 },
+  img: { width: MAX_BUB - 12, height: 240, borderRadius: 14 },
+  imgOverlay: {
+    position: 'absolute', bottom: 0, right: 0, paddingHorizontal: 10, paddingVertical: 5,
+    borderTopLeftRadius: 12, backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  menuIconWrap: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  imgCaption: { padding: 8, paddingTop: 5 },
+
+  // Video — premium player look
+  videoWrap: { padding: 5, paddingBottom: 8 },
+  videoThumb: {
+    width: '100%', height: 180, backgroundColor: '#0f172a', borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  videoPlay: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2.5, borderColor: 'rgba(255,255,255,0.85)',
+  },
+  videoBadge: {
+    position: 'absolute', top: 10, left: 10, flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  videoDur: { fontSize: 10, color: '#fff', fontWeight: '700', fontVariant: ['tabular-nums'] },
+  videoName: { fontSize: 13, fontWeight: '600', paddingHorizontal: 10, marginTop: 6 },
+  videoSize: { fontSize: 11, paddingHorizontal: 10, marginTop: 2 },
+
+  // Audio — polished waveform
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, minWidth: 220 },
+  audioPlayBtn: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    // Subtle inner shadow
+    elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4,
+  },
+  audioCenter: { flex: 1 },
+  wave: { flexDirection: 'row', alignItems: 'center', gap: 1.8 },
+  waveBar: { width: 3, borderRadius: 1.5 },
+  audioDurRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 3 },
+  audioDur: { fontSize: 11.5, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  speedBtn: { backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2 },
+  speedText: { fontSize: 11, fontWeight: '800' },
+
+  // File — premium card feel
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, paddingRight: 14, minWidth: 240 },
+  fileBadge: {
+    width: 46, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 2,
+    // Subtle depth
+    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2,
+  },
+  badgeLabel: { fontSize: 7.5, fontWeight: '900', letterSpacing: 0.4 },
+  fileInfo: { flex: 1 },
+  fName: { fontSize: 13.5, fontWeight: '700', letterSpacing: -0.1 },
+  fileMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  fSize: { fontSize: 11.5 },
+  fDot: { fontSize: 11.5 },
+
+  // Link preview — premium card
+  linkCard: { margin: 5, borderRadius: 14, overflow: 'hidden', minWidth: 240 },
+  linkThumb: { width: '100%', height: 140 },
+  linkPreviewBody: { flexDirection: 'row', borderRadius: 10 },
+  linkAccent: { width: 4, borderTopLeftRadius: 10, borderBottomLeftRadius: 10 },
+  linkContent: { flex: 1, padding: 10, paddingLeft: 12 },
+  linkTitle: { fontSize: 14.5, fontWeight: '800', marginBottom: 3, lineHeight: 20, letterSpacing: -0.2 },
+  linkDesc: { fontSize: 12.5, lineHeight: 18, marginBottom: 4 },
+  linkHostRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  linkHostText: { fontSize: 11, fontWeight: '600' },
+  linkUrlWrap: { paddingHorizontal: 8, paddingTop: 6, paddingBottom: 3 },
+  linkFullUrl: { fontSize: 14, lineHeight: 20, textDecorationLine: 'underline' },
+
+  // Text — refined typography
+  textWrap: { paddingHorizontal: 12, paddingTop: 7, paddingBottom: 7 },
+  text: { fontSize: 15.5, lineHeight: 22, letterSpacing: -0.1 },
+
+  // Action menu — frosted glass effect
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
+  menuCard: {
+    backgroundColor: '#fff', borderRadius: 20, width: 230, paddingVertical: 6,
+    // Premium layered shadow
+    elevation: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.2, shadowRadius: 28,
+  },
+  menuIconWrap: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 11, minHeight: 44 },
   menuItemBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
-  menuLabel: { fontSize: 14, fontWeight: '600' },
+  menuLabel: { fontSize: 14.5, fontWeight: '600', letterSpacing: -0.1 },
+
+  // Emoji-only — expressive
+  emojiOnlyWrap: { paddingHorizontal: 8, paddingTop: 6, paddingBottom: 4, alignItems: 'center' },
+  emojiOnlyText: { fontSize: 52, lineHeight: 62 },
+
+  // Code snippet — dev-grade
+  codeWrap: { padding: 10, paddingBottom: 8 },
+  codeLang: { fontSize: 9.5, fontWeight: '900', color: '#8b5cf6', letterSpacing: 0.8, marginBottom: 6, textTransform: 'uppercase' },
+  codeScroll: { backgroundColor: '#0f172a', borderRadius: 12, padding: 12, maxHeight: 220 },
+  codeText: { fontSize: 12.5, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', color: '#e2e8f0', lineHeight: 19 },
 
   // Show more/less
-  showMoreBtn: { marginTop: 4 },
-  showMoreText: { fontSize: 13, fontWeight: '600' },
+  showMoreBtn: { marginTop: 5, paddingVertical: 2 },
+  showMoreText: { fontSize: 13, fontWeight: '700' },
 
-  // Footer
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginTop: 2, paddingLeft: 8 },
+  // Quick reactions — pill-shaped
+  quickReactRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f1f5f9' },
+  quickReactBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center' },
+  quickReactEmoji: { fontSize: 20 },
+
+  // Reactions — floating pills
+  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: -6, marginBottom: 4 },
+  reactionsOwn: { justifyContent: 'flex-end', paddingRight: 12 },
+  reactionsOther: { justifyContent: 'flex-start', paddingLeft: 12 },
+  reactionBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#fff',
+    borderRadius: 14, paddingHorizontal: 7, paddingVertical: 3,
+    elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4,
+    borderWidth: 1.5, borderColor: '#f1f5f9',
+  },
+  reactionSelf: { borderColor: '#3b82f6', backgroundColor: '#eff6ff' },
+  reactionEmoji: { fontSize: 15 },
+  reactionCount: { fontSize: 11, fontWeight: '800', color: '#64748b' },
+
+  // Uploading overlay
+  uploadingOverlay: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center', gap: 4, zIndex: 10,
+  },
+  uploadingText: { fontSize: 11, fontWeight: '700', color: '#fff' },
+
+  // Swipe reply icon
+  swipeReplyIcon: { position: 'absolute', left: 16, top: '50%', marginTop: -15, width: 30, height: 30, borderRadius: 15, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center' },
+
+  // Footer — timestamp row
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 3, paddingLeft: 10, paddingRight: 2 },
   footerInline: { marginTop: 0, paddingLeft: 0 },
-  ft: { fontSize: 11 },
+  ft: { fontSize: 11, fontWeight: '400', fontVariant: ['tabular-nums'] },
 });

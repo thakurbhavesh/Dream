@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, ScrollView, Modal, Image,
-  Platform, ActivityIndicator, ImageBackground, Keyboard, KeyboardAvoidingView,
-  Animated, Dimensions,
+  Platform, ActivityIndicator, ImageBackground, Keyboard,
+  Animated, Dimensions, Pressable, KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -16,6 +16,10 @@ import { useAudioRecorder, RecordingPresets, AudioModule } from 'expo-audio';
 import Avatar from '../../src/components/Avatar';
 import ChatBubble from '../../src/components/ChatBubble';
 import EmojiPicker from '../../src/components/EmojiPicker';
+import GifPicker from '../../src/components/GifPicker';
+import PollCreator from '../../src/components/PollCreator';
+import ImageViewer from '../../src/components/ImageViewer';
+import { toggleStarredMessage } from './starred';
 import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
 import { getMessages, uploadFile, sendMessageRest } from '../../src/api/chat';
@@ -23,6 +27,7 @@ import { getCachedMessages, cacheMessages, appendCachedMessage, updateCachedMess
 import api from '../../src/api/config';
 import useSocket from '../../src/hooks/useSocket';
 import { useAuth } from '../../src/store/AuthContext';
+import { useCall } from '../../src/store/CallContext';
 
 const chatBg = require('../../assets/chat-bg-pattern.png');
 const { width: W } = Dimensions.get('window');
@@ -61,6 +66,7 @@ export default function ChatScreen() {
   const { user } = useAuth();
   const { theme: t, isDark } = useTheme();
   const { sendMessage, on, focusThread, emit, connected, reconnect } = useSocket();
+  const { startCall } = useCall();
   const toast = useToast();
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState([]);
@@ -84,6 +90,24 @@ export default function ChatScreen() {
   const [translateMsg, setTranslateMsg] = useState(null); // { text, original } — shows language picker
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  // New features
+  const [typingUsers, setTypingUsers] = useState([]);
+  const [onlineStatus, setOnlineStatus] = useState(null); // { online, lastSeen }
+  const [isMuted, setIsMuted] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [drafts, setDrafts] = useState({});
+  const [showGif, setShowGif] = useState(false);
+  const [showPoll, setShowPoll] = useState(false);
+  const [showFormatBar, setShowFormatBar] = useState(false);
+  const [viewImage, setViewImage] = useState(null); // { uri, caption }
+  const [chatWallpaper, setChatWallpaper] = useState(null);
+  const [mentionQuery, setMentionQuery] = useState(null); // string or null
+  const [mentionList, setMentionList] = useState([]);
+  // Group state
+  const [groupInfo, setGroupInfo] = useState(null); // { is_airtime, is_admin, memberStatus }
+  const isAirtime = isGroup && groupInfo?.is_airtime;
+  const isGroupAdmin = groupInfo?.is_admin;
+  const hasLeftGroup = isGroup && (groupInfo?.memberStatus === 'left' || groupInfo?.memberStatus === 'kicked');
   const recordingTimer = useRef(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [showForward, setShowForward] = useState(false);
@@ -96,9 +120,8 @@ export default function ChatScreen() {
   const searchTimer = useRef(null);
   const isGroup = threadId?.startsWith('group-');
 
-  // Keyboard — on Android softwareKeyboardLayoutMode:"resize" handles it natively
-  // On iOS we need KeyboardAvoidingView (handled at root level)
-  // No manual animation needed — removes double-offset bug
+  // Keyboard handled by react-native-keyboard-controller (KeyboardProvider in _layout.js)
+  // No manual tracking needed
 
   // Scroll-to-bottom fab
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -107,6 +130,17 @@ export default function ChatScreen() {
   useEffect(() => {
     Animated.timing(scrollBtnAnim, { toValue: showScrollBtn ? 1 : 0, duration: 200, useNativeDriver: true }).start();
   }, [showScrollBtn]);
+
+  // Load wallpaper
+  useEffect(() => {
+    (async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const wp = await AsyncStorage.getItem(`wallpaper-${threadId}`);
+        if (wp) setChatWallpaper(wp);
+      } catch {}
+    })();
+  }, [threadId]);
 
   useEffect(() => {
     (async () => {
@@ -133,6 +167,26 @@ export default function ChatScreen() {
       // Suppress notifications for this thread
       import('../../src/services/notifications').then(n => n.setActiveThread(threadId));
     }
+    // Load group info for admin checks
+    if (isGroup) {
+      const gId = threadId.replace('group-', '');
+      (async () => {
+        try {
+          const [gRes, mRes] = await Promise.all([
+            api.get(`/groups/${gId}`).catch(() => null),
+            api.get(`/group-members?group_id=${gId}&limit=500`).catch(() => null),
+          ]);
+          const g = gRes?.data?.data || gRes?.data || {};
+          const mems = mRes?.data?.data?.rows || mRes?.data?.data || mRes?.data?.rows || [];
+          const me = mems.find(m => String(m.user_id || m.id) === String(user?.id));
+          setGroupInfo({
+            is_airtime: !!g.is_airtime,
+            is_admin: !!(me?.is_admin || String(g.created_by) === String(user?.id) || user?.role_id === 1),
+            memberStatus: me?.status || 'active',
+          });
+        } catch {}
+      })();
+    }
     return () => {
       focusThread(null);
       import('../../src/services/notifications').then(n => n.setActiveThread(null));
@@ -141,7 +195,7 @@ export default function ChatScreen() {
 
   // When socket reconnects, refresh messages to catch missed ones
   useEffect(() => {
-    if (connected && !loading) {
+    if (connected && !loading && !hasLeftGroup) {
       focusThread(threadId);
       // Reload messages to catch any missed during disconnect
       (async () => {
@@ -183,9 +237,18 @@ export default function ChatScreen() {
 
   useEffect(() => {
     const unsub1 = on('message:new', (data) => {
-      if (data?.threadId === threadId && data?.message) {
-        setMessages(prev => [...prev, data.message]);
-        appendCachedMessage(threadId, data.message); // Cache new message
+      if (data?.threadId === threadId && data?.message && !hasLeftGroup) {
+        const msg = data.message;
+        setMessages(prev => {
+          // Skip if this is our own message (already shown optimistically)
+          const isOwnEcho = String(msg?.author?.id) === String(user?.id) && prev.some(m => m.id?.startsWith('temp-') && m.content?.text === msg?.content?.text);
+          if (isOwnEcho) {
+            // Replace temp with real
+            return prev.map(m => (m.id?.startsWith('temp-') && m.content?.text === msg?.content?.text) ? { ...msg, status: 'sent' } : m);
+          }
+          return [...prev, msg];
+        });
+        appendCachedMessage(threadId, msg);
       }
     });
 
@@ -217,8 +280,206 @@ export default function ChatScreen() {
       }
     });
 
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
-  }, [threadId, on]);
+    // Typing indicator
+    const unsub5 = on('typing:update', (data) => {
+      if (data?.threadId === threadId) {
+        setTypingUsers(data.users?.filter(u => String(u.id) !== String(user?.id)) || []);
+      }
+    });
+
+    // Online status — real-time
+    const otherId = threadId?.replace('dm-', '').replace('group-', '');
+    const unsub6 = on('user:online', (data) => {
+      if (String(data?.userId) === String(otherId)) setOnlineStatus({ online: true, status: data?.status || 'Online' });
+    });
+    const unsub7 = on('user:offline', (data) => {
+      if (String(data?.userId) === String(otherId)) setOnlineStatus({ online: false, lastSeen: data?.lastSeen || new Date().toISOString() });
+    });
+    // Status change (Away/Busy/DND)
+    const unsubStatus = on('user:status', (data) => {
+      if (String(data?.userId) === String(otherId)) setOnlineStatus({ online: true, status: data?.status });
+    });
+    // Bulk online list on connect — get initial status
+    const unsubOnlineList = on('users:online_list', (data) => {
+      const list = data?.users || data || [];
+      const found = list.find(u => String(u.userId || u.user_id || u.id) === String(otherId));
+      if (found) setOnlineStatus({ online: true, status: found.status || found.activity_status || 'Online' });
+      else if (!isGroup) setOnlineStatus({ online: false });
+    });
+
+    // Reactions
+    // Reactions — backend sends array format: [{emoji, users: [{id, name}]}]
+    const unsub8 = on('message:reacted', (data) => {
+      if (data?.threadId === threadId && data?.messageId) {
+        setMessages(prev => prev.map(m => {
+          if (m.id !== data.messageId) return m;
+          const meta = { ...(m.metadata || {}) };
+          // Clone reactions array from metadata
+          const reactions = Array.isArray(meta.reactions) ? meta.reactions.map(r => ({ ...r, users: [...r.users] })) : [];
+          const emoji = data.emoji;
+          const existingIdx = reactions.findIndex(r => r.emoji === emoji);
+
+          if (data.action === 'removed' || data.action === 'remove') {
+            if (existingIdx >= 0) {
+              reactions[existingIdx].users = reactions[existingIdx].users.filter(u => String(u.id) !== String(data.userId));
+              if (reactions[existingIdx].users.length === 0) reactions.splice(existingIdx, 1);
+            }
+          } else {
+            // added
+            if (existingIdx >= 0) {
+              if (!reactions[existingIdx].users.find(u => String(u.id) === String(data.userId))) {
+                reactions[existingIdx].users.push({ id: data.userId, name: data.userName });
+              }
+            } else {
+              reactions.push({ emoji, users: [{ id: data.userId, name: data.userName }] });
+            }
+          }
+          meta.reactions = reactions;
+          return { ...m, metadata: meta, _viewerId: user?.id };
+        }));
+      }
+    });
+
+    // Mute sync
+    const unsub9 = on('thread:mute_update', (data) => {
+      if (data?.threadId === threadId) setIsMuted(!!data.muted);
+    });
+
+    // Pin sync from other users
+    const unsub10 = on('message:pinned', (data) => {
+      if (data?.threadId === threadId && data?.messageId) {
+        setMessages(prev => prev.map(m =>
+          m.id === data.messageId ? { ...m, metadata: { ...m.metadata, pinned: !!data.pinned, pinnedBy: data.pinnedBy } } : m
+        ));
+      }
+    });
+
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsubStatus(); unsubOnlineList(); unsub8(); unsub9(); unsub10(); };
+  }, [threadId, on, user?.id]);
+
+  // Text formatting helpers
+  const applyFormat = useCallback((type) => {
+    const wrap = type === 'bold' ? '**' : type === 'italic' ? '_' : '~~';
+    setText(prev => prev + wrap + wrap);
+    inputRef.current?.focus();
+  }, []);
+
+  // Typing indicator — emit on text change
+  const typingTimer = useRef(null);
+  const handleTextChange = useCallback((val) => {
+    setText(val);
+    // @mention detection
+    const mentionMatch = val.match(/@(\w*)$/);
+    if (mentionMatch && isGroup) {
+      setMentionQuery(mentionMatch[1]);
+    } else {
+      setMentionQuery(null);
+    }
+    if (connected && val.trim()) {
+      emit('typing:start', { threadId });
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      typingTimer.current = setTimeout(() => emit('typing:stop', { threadId }), 2000);
+    }
+  }, [connected, emit, threadId, isGroup]);
+
+  // Draft save/load
+  useEffect(() => {
+    (async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const draft = await AsyncStorage.getItem(`draft-${threadId}`);
+        if (draft) setText(draft);
+      } catch {}
+    })();
+  }, [threadId]);
+
+  useEffect(() => {
+    const saveDraft = async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        if (text.trim()) await AsyncStorage.setItem(`draft-${threadId}`, text);
+        else await AsyncStorage.removeItem(`draft-${threadId}`);
+      } catch {}
+    };
+    const timer = setTimeout(saveDraft, 500);
+    return () => clearTimeout(timer);
+  }, [text, threadId]);
+
+  // Reaction handler
+  const handleReact = useCallback(async (messageId, emoji) => {
+    try {
+      await emit('message:react', { threadId, messageId, emoji });
+    } catch { toast('Reaction failed', 'error'); }
+  }, [threadId, emit, toast]);
+
+  // Mute toggle
+  const handleMuteToggle = useCallback(async () => {
+    try {
+      await emit('thread:mute', { threadId, muted: !isMuted });
+      setIsMuted(!isMuted);
+      toast(isMuted ? 'Unmuted' : 'Muted', 'success');
+    } catch { toast('Failed', 'error'); }
+  }, [threadId, emit, isMuted, toast]);
+
+  // @mention — load group members
+  useEffect(() => {
+    if (isGroup && mentionQuery !== null) {
+      (async () => {
+        try {
+          const { data } = await api.get(`/chat/threads/${threadId}/members`);
+          const members = data?.data?.members || data?.members || data?.data || [];
+          const filtered = members.filter(m =>
+            String(m.id || m.user_id) !== String(user?.id) &&
+            (!mentionQuery || (m.name || '').toLowerCase().includes(mentionQuery.toLowerCase()))
+          ).slice(0, 6);
+          setMentionList(filtered);
+        } catch { setMentionList([]); }
+      })();
+    } else {
+      setMentionList([]);
+    }
+  }, [mentionQuery, isGroup, threadId, user?.id]);
+
+  const handleMentionSelect = useCallback((member) => {
+    setText(prev => prev.replace(/@\w*$/, `@${member.name || member.email} `));
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  }, []);
+
+  // GIF send
+  const handleGifSelect = useCallback(async (gif) => {
+    setShowGif(false);
+    try {
+      const res = connected ? await sendMessage(threadId, gif.url, 'gif', { gifUrl: gif.url, previewUrl: gif.previewUrl, source: gif.source }) : null;
+      if (res?.ok && res?.message) setMessages(prev => [...prev, res.message]);
+      else {
+        const restRes = await sendMessageRest(threadId, gif.url, 'gif', { gifUrl: gif.url, previewUrl: gif.previewUrl, source: gif.source });
+        if (restRes) setMessages(prev => [...prev, restRes]);
+      }
+    } catch { toast('Failed to send GIF', 'error'); }
+  }, [threadId, sendMessage, connected, toast]);
+
+  // Poll send
+  const handlePollSubmit = useCallback(async (poll) => {
+    setShowPoll(false);
+    try {
+      const meta = { question: poll.question, options: poll.options, multiChoice: poll.multiChoice, votes: {} };
+      const res = connected ? await sendMessage(threadId, poll.question, 'poll', meta) : null;
+      if (res?.ok && res?.message) setMessages(prev => [...prev, res.message]);
+      else {
+        const restRes = await sendMessageRest(threadId, poll.question, 'poll', meta);
+        if (restRes) setMessages(prev => [...prev, restRes]);
+      }
+      toast('Poll sent', 'success');
+    } catch { toast('Failed to send poll', 'error'); }
+  }, [threadId, sendMessage, connected, toast]);
+
+  // Poll vote
+  const handlePollVote = useCallback(async (messageId, optionIndex) => {
+    try {
+      await emit('message:poll_vote', { threadId, messageId, optionIndex });
+    } catch { toast('Vote failed', 'error'); }
+  }, [threadId, emit, toast]);
 
   const scrollToEnd = useCallback(() => {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -229,6 +490,9 @@ export default function ChatScreen() {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     setSending(true); setText(''); setShowEmoji(false); setShowAttach(false);
+    // Clear draft & stop typing
+    try { const AS = require('@react-native-async-storage/async-storage').default; AS.removeItem(`draft-${threadId}`); } catch {}
+    if (connected) emit('typing:stop', { threadId });
 
     try {
       // ─── EDIT MODE ───
@@ -237,18 +501,19 @@ export default function ChatScreen() {
         const editText = editingMsg.text;
         setEditingMsg(null);
         try {
-          // Try socket first
+          // Try REST first (more reliable), then socket
           let success = false;
-          if (connected) {
-            const res = await emit('message:edit', { threadId, messageId: editId, message: trimmed });
-            success = !!(res?.ok || res?.message);
-          }
-          // Fallback to REST
-          if (!success) {
-            try {
-              await api.put(`/chat/threads/${threadId}/messages/${editId}`, { message: trimmed });
-              success = true;
-            } catch {}
+          try {
+            await api.put(`/chat/threads/${threadId}/messages/${editId}`, { message: trimmed });
+            success = true;
+          } catch {
+            // Fallback to socket
+            if (connected) {
+              try {
+                const res = await emit('message:edit', { threadId, messageId: editId, message: trimmed });
+                success = !!(res?.ok || res?.message);
+              } catch {}
+            }
           }
           if (success) {
             setMessages(prev => prev.map(m =>
@@ -270,42 +535,48 @@ export default function ChatScreen() {
         return;
       }
 
-      // ─── NORMAL SEND ───
+      // ─── NORMAL SEND — OPTIMISTIC ───
       const meta = replyTo ? { replyTo } : null;
       setReplyTo(null);
+      setSending(false); // unlock button immediately
 
-      // Try socket first
-      let res = null;
-      let usedSocket = false;
-      if (connected) {
-        res = await sendMessage(threadId, trimmed, 'text', meta);
-        usedSocket = true;
-      }
+      // Add optimistic message instantly
+      const tempId = `temp-${Date.now()}`;
+      const optimistic = {
+        id: tempId,
+        type: 'text',
+        direction: 'outgoing',
+        author: { id: user?.id, name: user?.name },
+        content: { text: trimmed },
+        metadata: { sentAt: new Date().toISOString(), ...(meta || {}) },
+        status: 'sending',
+        createdAt: new Date().toISOString(),
+      };
+      setMessages(prev => [...prev, optimistic]);
+      setTimeout(scrollToEnd, 50);
 
-      // Socket failed — fallback to REST
-      if (!usedSocket || res?.error) {
-        try {
-          const restRes = await sendMessageRest(threadId, trimmed, 'text', meta);
-          if (restRes) {
-            setMessages(prev => [...prev, restRes]);
-            setTimeout(scrollToEnd, 100);
-            return;
-          }
-        } catch (restErr) {
-          toast(restErr?.response?.data?.message || 'Send failed', 'error');
-          setText(trimmed);
-          return;
+      // Send in background
+      try {
+        let realMsg = null;
+        if (connected) {
+          const res = await sendMessage(threadId, trimmed, 'text', meta);
+          realMsg = res?.message || (res?.ok ? res : null);
         }
+        if (!realMsg) {
+          const restRes = await sendMessageRest(threadId, trimmed, 'text', meta);
+          realMsg = restRes;
+        }
+        // Replace optimistic with real message
+        if (realMsg) {
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...realMsg, status: 'sent' } : m));
+        } else {
+          setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'sent' } : m));
+        }
+      } catch {
+        // Mark as failed
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed' } : m));
       }
-
-      // Socket succeeded
-      if (res?.ok && res?.message) {
-        setMessages(prev => [...prev, res.message]);
-        setTimeout(scrollToEnd, 100);
-      } else if (res?.message) {
-        setMessages(prev => [...prev, res.message]);
-        setTimeout(scrollToEnd, 100);
-      }
+      return; // already handled setSending above
     } catch (e) {
       toast('Failed to send', 'error');
       setText(trimmed);
@@ -425,22 +696,50 @@ export default function ChatScreen() {
     setPendingFiles(prev => prev.filter(f => f.id !== id));
   }, []);
 
-  // Send all pending files
+  // Send all pending files — optimistic: show in chat immediately with progress
   const sendPendingFiles = useCallback(async () => {
     if (!pendingFiles.length) return;
     const filesToSend = [...pendingFiles];
     setPendingFiles([]);
-    setSending(true);
-    try {
-      for (const file of filesToSend) {
+
+    // Add optimistic placeholder messages immediately
+    const placeholders = filesToSend.map(file => ({
+      id: `temp-${file.id}`,
+      type: file.type,
+      direction: 'outgoing',
+      author: { id: user?.id, name: user?.name },
+      content: { fileName: file.name, text: '', _localUri: file.uri },
+      metadata: { sentAt: new Date().toISOString() },
+      status: 'uploading',
+      _uploading: true,
+      createdAt: new Date().toISOString(),
+    }));
+    setMessages(prev => [...prev, ...placeholders]);
+    setTimeout(scrollToEnd, 100);
+
+    // Upload each file in background
+    for (const file of filesToSend) {
+      const tempId = `temp-${file.id}`;
+      try {
         const uploaded = await uploadFile({ uri: file.uri, mimeType: file.mimeType, name: file.name });
         const meta = { fileName: uploaded.file_name, fileUrl: uploaded.file_url, fileKey: uploaded.file_key, fileType: uploaded.file_type, fileSize: uploaded.file_size };
-        await sendFileMessage(file.type, meta);
+        // Send via socket/REST
+        const res = connected ? await sendMessage(threadId, '', file.type, meta) : null;
+        let realMsg = res?.message || res;
+        if (!realMsg || res?.error) {
+          try {
+            realMsg = await sendMessageRest(threadId, '', file.type, meta);
+          } catch {}
+        }
+        // Replace placeholder with real message
+        setMessages(prev => prev.map(m => m.id === tempId ? (realMsg ? { ...realMsg, _uploading: false } : { ...m, status: 'sent', _uploading: false }) : m));
+      } catch (err) {
+        // Mark as failed
+        setMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: 'failed', _uploading: false } : m));
+        toast(err?.message || 'Upload failed', 'error');
       }
-      toast(filesToSend.length > 1 ? `${filesToSend.length} files sent` : 'File sent', 'success');
-    } catch (err) { toast(err?.message || 'Upload failed', 'error'); }
-    finally { setSending(false); }
-  }, [pendingFiles, sendFileMessage, toast]);
+    }
+  }, [pendingFiles, user, connected, sendMessage, threadId, toast, scrollToEnd]);
 
   // ─── Audio Recording (expo-audio) ───
   const startRecording = useCallback(async () => {
@@ -626,9 +925,11 @@ export default function ChatScreen() {
         setForwardContacts(rows);
       } catch {}
     } else if (action === 'pin') {
+      const isPinned = msg?.metadata?.pinned;
       try {
-        await emit('message:pin', { threadId, messageId: msgId });
-        toast('Message pinned', 'success');
+        await emit('message:pin', { threadId, messageId: msgId, pinned: !isPinned });
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, metadata: { ...m.metadata, pinned: !isPinned } } : m));
+        toast(isPinned ? 'Unpinned' : 'Pinned', 'success');
       } catch { toast('Pin failed', 'error'); }
     } else if (action === 'translate') {
       const msgText = msg?.content?.text || msg?.content?.url || msg?.content?.code || '';
@@ -666,6 +967,12 @@ export default function ChatScreen() {
         m.id === msgId ? { ...m, _selected: !m._selected } : m
       ));
       toast('Tap messages to select, long press for actions', 'info');
+    } else if (action === 'star') {
+      try {
+        const starred = await toggleStarredMessage(msg, threadId);
+        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, metadata: { ...m.metadata, starred } } : m));
+        toast(starred ? 'Starred' : 'Unstarred', 'success');
+      } catch { toast('Failed', 'error'); }
     }
   }, [threadId, emit, toast]);
 
@@ -684,7 +991,7 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView
       style={[z.root, { backgroundColor: chatBgColor }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={0}
     >
       <StatusBar style="light" />
@@ -695,21 +1002,55 @@ export default function ChatScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={z.headerTap} activeOpacity={0.7}
           onPress={() => {
-            const otherId = threadId?.replace('dm-', '').replace('group-', '');
-            router.push(`/chat/profile?threadId=${threadId}&userId=${otherId}&name=${encodeURIComponent(name || '')}&avatar=${encodeURIComponent(avatar || '')}`);
+            if (isGroup) {
+              router.push(`/chat/group-info?threadId=${threadId}&name=${encodeURIComponent(name || '')}&avatar=${encodeURIComponent(avatar || '')}`);
+            } else {
+              const otherId = threadId?.replace('dm-', '');
+              router.push(`/chat/profile?threadId=${threadId}&userId=${otherId}&name=${encodeURIComponent(name || '')}&avatar=${encodeURIComponent(avatar || '')}`);
+            }
           }}>
           <Avatar uri={avatar} name={name} size={36} />
           <View style={z.headerInfo}>
             <Text style={z.headerName} numberOfLines={1}>{name}</Text>
-            <Text style={[z.headerStatus, !connected && { color: '#fca5a5' }]}>
-              {connected ? 'Online' : 'Connecting...'}
+            <Text style={[z.headerStatus,
+              !connected && { color: '#fca5a5' },
+              onlineStatus?.online === true && { color: '#86efac' },
+              onlineStatus?.status === 'Away' && { color: '#fcd34d' },
+              onlineStatus?.status === 'Busy' && { color: '#fca5a5' },
+            ]}>
+              {typingUsers.length > 0
+                ? (isGroup ? `${typingUsers.map(u => u.name?.split(' ')[0]).join(', ')} typing...` : 'typing...')
+                : !connected ? 'Connecting...'
+                : onlineStatus?.online === true ? (onlineStatus?.status === 'Away' ? 'Away' : onlineStatus?.status === 'Busy' ? 'Busy' : onlineStatus?.status === 'DND' ? 'Do Not Disturb' : 'Online')
+                : onlineStatus?.lastSeen ? `Last seen ${new Date(onlineStatus.lastSeen).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`
+                : onlineStatus?.online === false ? 'Offline'
+                : isGroup ? 'tap for info'
+                : 'tap for info'}
             </Text>
           </View>
         </TouchableOpacity>
+        {!threadId?.startsWith('group-') && (
+          <>
+            <TouchableOpacity style={z.hdrBtn} onPress={() => {
+              const otherId = threadId?.replace('dm-', '');
+              startCall({ id: otherId, name, avatar }, 'video');
+              router.push('/call?type=video');
+            }}>
+              <Ionicons name="videocam" size={19} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={z.hdrBtn} onPress={() => {
+              const otherId = threadId?.replace('dm-', '');
+              startCall({ id: otherId, name, avatar }, 'audio');
+              router.push('/call?type=audio');
+            }}>
+              <Ionicons name="call" size={18} color="#fff" />
+            </TouchableOpacity>
+          </>
+        )}
         <TouchableOpacity style={z.hdrBtn} onPress={() => { setShowSearch(!showSearch); setSearchQuery(''); setSearchResults(null); setSearchType(null); setTimeout(() => searchRef.current?.focus(), 200); }}>
           <Ionicons name={showSearch ? 'close' : 'search'} size={19} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={z.hdrBtn}><Ionicons name="ellipsis-vertical" size={18} color="#fff" /></TouchableOpacity>
+        <TouchableOpacity style={z.hdrBtn} onPress={() => setShowMenu(true)}><Ionicons name="ellipsis-vertical" size={18} color="#fff" /></TouchableOpacity>
       </View>
 
       {/* Advanced search bar */}
@@ -779,10 +1120,19 @@ export default function ChatScreen() {
 
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
-          <ImageBackground source={chatBg} style={{ flex: 1 }} resizeMode="repeat"
-            imageStyle={{ opacity: isDark ? 0.03 : 0.08, tintColor: isDark ? '#fff' : undefined }}>
+          <ImageBackground source={chatWallpaper ? { uri: chatWallpaper } : chatBg} style={{ flex: 1 }}
+            resizeMode={chatWallpaper ? 'cover' : 'repeat'}
+            imageStyle={chatWallpaper ? { opacity: 0.15 } : { opacity: isDark ? 0.03 : 0.08, tintColor: isDark ? '#fff' : undefined }}>
             {loading ? (
               <View style={z.loader}><ActivityIndicator size="large" color={BRAND} /></View>
+            ) : data.length === 0 ? (
+              <View style={z.emptyState}>
+                <Ionicons name="chatbubbles-outline" size={64} color={isDark ? '#3a4a54' : '#c8d6de'} />
+                <Text style={[z.emptyTitle, { color: isDark ? '#8696a0' : '#667781' }]}>No messages yet</Text>
+                <Text style={[z.emptySubtitle, { color: isDark ? '#5a6b75' : '#8696a0' }]}>
+                  Send a message to start the conversation
+                </Text>
+              </View>
             ) : (
               <FlatList
                 ref={flatListRef}
@@ -800,16 +1150,20 @@ export default function ChatScreen() {
                   }
                   return (
                     <ChatBubble
-                      message={item}
+                      message={{ ...item, _viewerId: user?.id }}
                       isOwn={item.direction === 'outgoing' || String(item.author?.id) === String(user?.id)}
                       showName={isGroup}
                       onAction={(action, msg) => handleMessageAction(action, msg)}
+                      onReact={handleReact}
+                      onPollVote={handlePollVote}
+                      onImagePress={(uri, caption) => setViewImage({ uri, caption })}
                       accentColor={BRAND}
                       textSize={t.fontSize}
+                      viewerIsAdmin={isGroupAdmin}
                     />
                   );
                 }}
-                contentContainerStyle={z.msgList}
+                contentContainerStyle={[z.msgList, data.length === 0 && { flex: 1 }]}
                 inverted
                 showsVerticalScrollIndicator={false}
                 onScroll={handleScroll}
@@ -844,6 +1198,18 @@ export default function ChatScreen() {
               { icon: 'musical-notes', label: 'Audio', color: '#f59e0b', bg: '#fef3c7', onPress: handleAudioPick },
               { icon: 'location', label: 'Location', color: '#22c55e', bg: '#dcfce7', onPress: handleLocationSend },
               { icon: 'person', label: 'Contact', color: '#2563eb', bg: '#dbeafe', onPress: handleContactShare },
+              { icon: 'videocam', label: 'Video', color: '#f59e0b', bg: '#fef3c7', onPress: async () => {
+                setShowAttach(false);
+                if (!(await ensurePermission('camera'))) return;
+                try {
+                  const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['videos'], quality: 0.7, videoMaxDuration: 120 });
+                  if (result.canceled || !result.assets?.[0]) return;
+                  const a = result.assets[0];
+                  setPendingFiles(prev => [...prev, { id: `${Date.now()}-vid`, uri: a.uri, name: `video-${Date.now()}.mp4`, mimeType: a.mimeType || 'video/mp4', size: a.fileSize || 0, type: 'video' }]);
+                } catch { toast('Video recording failed', 'error'); }
+              }},
+              { icon: 'logo-youtube', label: 'GIF', color: '#ec4899', bg: '#fce7f3', onPress: () => { setShowAttach(false); setShowGif(true); } },
+              { icon: 'stats-chart', label: 'Poll', color: '#8b5cf6', bg: '#ede9fe', onPress: () => { setShowAttach(false); setShowPoll(true); } },
             ].map(a => (
               <TouchableOpacity key={a.label} style={z.attachItem} onPress={a.onPress} activeOpacity={0.7}>
                 <View style={[z.attachIcon, { backgroundColor: a.bg }]}>
@@ -1206,10 +1572,126 @@ export default function ChatScreen() {
           </Modal>
         )}
 
+        {/* ─── Header Menu Modal ─── */}
+        {showMenu && (
+          <Modal visible transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
+            <Pressable style={z.menuOverlay} onPress={() => setShowMenu(false)}>
+              <View style={[z.menuSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+                {[
+                  { icon: isMuted ? 'notifications-outline' : 'notifications-off-outline', label: isMuted ? 'Unmute' : 'Mute', onPress: () => { setShowMenu(false); handleMuteToggle(); } },
+                  { icon: 'images-outline', label: 'Media & Files', onPress: () => { setShowMenu(false); router.push(`/chat/media?threadId=${threadId}&name=${encodeURIComponent(name || '')}`); } },
+                  { icon: 'star-outline', label: 'Starred Messages', onPress: () => { setShowMenu(false); router.push('/chat/starred'); } },
+                  { icon: 'image-outline', label: 'Set Wallpaper', onPress: async () => {
+                    setShowMenu(false);
+                    try {
+                      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 });
+                      if (!result.canceled && result.assets?.[0]) {
+                        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                        await AsyncStorage.setItem(`wallpaper-${threadId}`, result.assets[0].uri);
+                        setChatWallpaper(result.assets[0].uri);
+                        toast('Wallpaper set', 'success');
+                      }
+                    } catch { toast('Failed', 'error'); }
+                  }},
+                  ...(chatWallpaper ? [{ icon: 'close-circle-outline', label: 'Remove Wallpaper', onPress: async () => {
+                    setShowMenu(false);
+                    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+                    await AsyncStorage.removeItem(`wallpaper-${threadId}`);
+                    setChatWallpaper(null);
+                    toast('Wallpaper removed', 'success');
+                  }}] : []),
+                  { icon: 'timer-outline', label: 'Disappearing Messages', onPress: () => {
+                    setShowMenu(false);
+                    const { Alert } = require('react-native');
+                    Alert.alert('Disappearing Messages', 'Auto-delete messages after:', [
+                      { text: 'Off', onPress: () => { emit('thread:disappearing', { threadId, duration: 0 }); toast('Disappearing off', 'info'); } },
+                      { text: '24 Hours', onPress: () => { emit('thread:disappearing', { threadId, duration: 86400 }); toast('Messages disappear after 24h', 'success'); } },
+                      { text: '7 Days', onPress: () => { emit('thread:disappearing', { threadId, duration: 604800 }); toast('Messages disappear after 7 days', 'success'); } },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }},
+                  { icon: 'download-outline', label: 'Export Chat', onPress: async () => {
+                    setShowMenu(false);
+                    try {
+                      const txt = messages.map(m => {
+                        const t = m?.createdAt ? new Date(m.createdAt).toLocaleString() : '';
+                        const author = m?.author?.name || (m?.direction === 'outgoing' ? 'You' : name);
+                        const content = m?.content?.text || m?.content?.fileName || m?.type || '';
+                        return `[${t}] ${author}: ${content}`;
+                      }).join('\n');
+                      const { File, Paths } = require('expo-file-system/next');
+                      const Sharing = require('expo-sharing');
+                      const file = new File(Paths.cache, `chat-export-${Date.now()}.txt`);
+                      file.text = txt;
+                      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri);
+                      else toast('Sharing not available', 'error');
+                    } catch { toast('Export failed', 'error'); }
+                  }},
+                ].map((item, i) => (
+                  <TouchableOpacity key={i} style={[z.menuItem, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
+                    onPress={item.onPress} activeOpacity={0.6}>
+                    <Ionicons name={item.icon} size={20} color={isDark ? '#94a3b8' : '#64748b'} />
+                    <Text style={[z.menuItemText, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{item.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Pressable>
+          </Modal>
+        )}
+
+        {/* ─── @Mention suggestions ─── */}
+        {mentionList.length > 0 && (
+          <View style={[z.mentionBar, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+            {mentionList.map(m => (
+              <TouchableOpacity key={m.id || m.user_id} style={[z.mentionItem, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
+                onPress={() => handleMentionSelect(m)} activeOpacity={0.6}>
+                <Avatar uri={m.profile_url || m.avatar} name={m.name} size={30} />
+                <Text style={[z.mentionName, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{m.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* ─── Formatting toolbar ─── */}
+        {showFormatBar && (
+          <View style={[z.formatBar, { backgroundColor: isDark ? '#1e293b' : '#f8fafc' }]}>
+            {[
+              { icon: 'text', label: 'B', style: { fontWeight: '900' }, type: 'bold' },
+              { icon: 'text', label: 'I', style: { fontStyle: 'italic' }, type: 'italic' },
+              { icon: 'text', label: 'S', style: { textDecorationLine: 'line-through' }, type: 'strike' },
+            ].map(f => (
+              <TouchableOpacity key={f.type} style={[z.formatBtn, { backgroundColor: isDark ? '#0f172a' : '#fff' }]}
+                onPress={() => applyFormat(f.type)} activeOpacity={0.7}>
+                <Text style={[z.formatLabel, { color: isDark ? '#f1f5f9' : '#0f172a' }, f.style]}>{f.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* ─── Left group banner ─── */}
+        {hasLeftGroup ? (
+          <View style={[z.airtimeBanner, { backgroundColor: isDark ? '#1e293b' : '#fee2e2' }]}>
+            <Ionicons name="exit-outline" size={18} color="#ef4444" />
+            <Text style={[z.airtimeText, { color: isDark ? '#fca5a5' : '#991b1b' }]}>
+              {groupInfo?.memberStatus === 'kicked' ? 'You were removed from this group' : 'You left this group'}
+            </Text>
+          </View>
+        ) : (isAirtime && !isGroupAdmin) ? (
+          <View style={[z.airtimeBanner, { backgroundColor: isDark ? '#1e293b' : '#fef3c7' }]}>
+            <Ionicons name="megaphone-outline" size={18} color="#f59e0b" />
+            <Text style={[z.airtimeText, { color: isDark ? '#fbbf24' : '#92400e' }]}>Only admins can send messages</Text>
+          </View>
+        ) : null}
+
         {/* ─── Footer ─── */}
-        <View style={[z.footer, { backgroundColor: footerBg, paddingBottom: Math.max(insets.bottom, 6) }]}>
+        <View style={[z.footer, {
+          backgroundColor: footerBg,
+          paddingBottom: Math.max(insets.bottom, 6),
+          display: (hasLeftGroup || (isAirtime && !isGroupAdmin)) ? 'none' : 'flex',
+        }]}>
+          {!isRecording && (
           <View style={[z.inputRow, { backgroundColor: inputBg, borderColor: inputBorder }]}>
-            <TouchableOpacity onPress={() => { setShowEmoji(!showEmoji); setShowAttach(false); Keyboard.dismiss(); }} style={z.footerIcon}>
+            <TouchableOpacity onPress={() => { setShowEmoji(!showEmoji); setShowAttach(false); setShowGif(false); Keyboard.dismiss(); }} style={z.footerIcon}>
               <Ionicons name={showEmoji ? 'keypad' : 'happy-outline'} size={23} color={isDark ? '#8696a0' : '#54656f'} />
             </TouchableOpacity>
 
@@ -1219,7 +1701,7 @@ export default function ChatScreen() {
               placeholder="Message"
               placeholderTextColor={isDark ? '#8696a0' : '#99a5ad'}
               value={text}
-              onChangeText={setText}
+              onChangeText={handleTextChange}
               multiline
               maxLength={5000}
               onFocus={() => { setShowEmoji(false); setShowAttach(false); }}
@@ -1229,16 +1711,21 @@ export default function ChatScreen() {
               <Ionicons name="attach" size={23} color={isDark ? '#8696a0' : '#54656f'} style={{ transform: [{ rotate: '-45deg' }] }} />
             </TouchableOpacity>
 
+            <TouchableOpacity onPress={() => setShowFormatBar(!showFormatBar)} style={z.footerIcon}>
+              <Ionicons name="text" size={19} color={showFormatBar ? BRAND : (isDark ? '#8696a0' : '#54656f')} />
+            </TouchableOpacity>
+
             {!text.trim() && (
               <TouchableOpacity onPress={handleCameraPick} style={z.footerIcon}>
                 <Ionicons name="camera" size={21} color={isDark ? '#8696a0' : '#54656f'} />
               </TouchableOpacity>
             )}
           </View>
+          )}
 
           {/* Send / Mic button */}
           {isRecording ? (
-            /* Recording mode — cancel + stop/send */
+            /* Recording mode — hide input row, show recording controls */
             <View style={z.recordingRow}>
               <TouchableOpacity onPress={cancelRecording} style={[z.recordCancelBtn, { backgroundColor: `${t.red}15` }]}>
                 <Ionicons name="trash-outline" size={18} color={t.red} />
@@ -1270,6 +1757,27 @@ export default function ChatScreen() {
 
         {/* ─── Emoji Picker ─── */}
         {showEmoji && <EmojiPicker onSelect={e => setText(prev => prev + e)} onClose={() => setShowEmoji(false)} />}
+
+        {/* ─── GIF Picker ─── */}
+        {showGif && (
+          <Modal visible transparent animationType="slide" onRequestClose={() => setShowGif(false)}>
+            <View style={z.aiOverlay}>
+              <GifPicker onSelect={handleGifSelect} onClose={() => setShowGif(false)} />
+            </View>
+          </Modal>
+        )}
+
+        {/* ─── Poll Creator ─── */}
+        {showPoll && (
+          <Modal visible transparent animationType="slide" onRequestClose={() => setShowPoll(false)}>
+            <View style={z.aiOverlay}>
+              <PollCreator onSubmit={handlePollSubmit} onClose={() => setShowPoll(false)} accentColor={BRAND} />
+            </View>
+          </Modal>
+        )}
+
+        {/* ─── Image Viewer ─── */}
+        <ImageViewer visible={!!viewImage} uri={viewImage?.uri} caption={viewImage?.caption} onClose={() => setViewImage(null)} />
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -1279,38 +1787,42 @@ export default function ChatScreen() {
 const z = StyleSheet.create({
   root: { flex: 1 },
 
-  // Header — WhatsApp green
+  // Header — premium elevated
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 6, paddingRight: 4, paddingBottom: 10,
-    elevation: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4,
+    paddingHorizontal: 8, paddingRight: 4, paddingBottom: 12,
+    elevation: 6,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 8,
     zIndex: 10,
   },
-  backBtn: { padding: 6 },
+  backBtn: { padding: 8, minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   offlineBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#ef4444', paddingVertical: 6 },
   offlineText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
-  // Advanced search
+  // Advanced search — premium
   searchWrap: {
-    paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4,
-    elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6,
+    paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6,
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8,
   },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  searchInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12, height: 38 },
-  searchInput: { flex: 1, fontSize: 14, fontWeight: '500' },
-  searchCount: { fontSize: 13, fontWeight: '800', minWidth: 24, textAlign: 'center' },
-  chipRow: { gap: 6, paddingBottom: 4 },
-  chip: { width: 36, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
-  chipText: { fontSize: 14, fontWeight: '800' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  searchInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, paddingHorizontal: 14, height: 40 },
+  searchInput: { flex: 1, fontSize: 14.5, fontWeight: '500' },
+  searchCount: { fontSize: 13, fontWeight: '900', minWidth: 26, textAlign: 'center' },
+  chipRow: { gap: 7, paddingBottom: 6 },
+  chip: { width: 38, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
+  chipText: { fontSize: 14, fontWeight: '900' },
 
-  // Reply bar
-  replyBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 8, marginBottom: 4, borderRadius: 12, overflow: 'hidden', elevation: 1 },
+  // Reply bar — premium elevated
+  replyBar: {
+    flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginBottom: 4,
+    borderRadius: 16, overflow: 'hidden',
+    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4,
+  },
   replyAccent: { width: 4, alignSelf: 'stretch' },
-  replyBody: { flex: 1, paddingHorizontal: 10, paddingVertical: 8 },
-  replyAuthor: { fontSize: 12, fontWeight: '700', marginBottom: 1 },
-  replySnippet: { fontSize: 13 },
-  replyClose: { padding: 10 },
+  replyBody: { flex: 1, paddingHorizontal: 12, paddingVertical: 10 },
+  replyAuthor: { fontSize: 12.5, fontWeight: '800', marginBottom: 2 },
+  replySnippet: { fontSize: 13, lineHeight: 18 },
+  replyClose: { padding: 12, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
 
   // Forward modal
   fwdOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
@@ -1323,60 +1835,69 @@ const z = StyleSheet.create({
   fwdName: { flex: 1, fontSize: 15, fontWeight: '600' },
   fwdEmpty: { textAlign: 'center', paddingVertical: 30, fontSize: 14 },
   contactAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  headerTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 4 },
+  headerTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, marginRight: 4 },
   headerInfo: { flex: 1, marginRight: 4 },
-  headerName: { fontSize: 17, fontWeight: '600', color: '#fff' },
-  headerStatus: { fontSize: 12, color: 'rgba(255,255,255,0.8)' },
-  hdrBtn: { padding: 8, minWidth: 36, alignItems: 'center' },
+  headerName: { fontSize: 17, fontWeight: '700', color: '#fff', letterSpacing: -0.2 },
+  headerStatus: { fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '500', marginTop: 1 },
+  hdrBtn: { padding: 8, minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
 
   // Messages
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   msgList: { paddingVertical: 6, paddingBottom: 8 },
+  emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptySubtitle: { fontSize: 13, marginTop: 6 },
 
-  // Date separator
-  dateRow: { alignItems: 'center', marginVertical: 8 },
+  // Date separator — frosted pill
+  dateRow: { alignItems: 'center', marginVertical: 10 },
   dateBadge: {
-    paddingHorizontal: 14, paddingVertical: 5, borderRadius: 8,
-    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 0.5 }, shadowOpacity: 0.08, shadowRadius: 1,
+    paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20,
+    elevation: 2,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4,
   },
-  dateText: { fontSize: 12, fontWeight: '600' },
+  dateText: { fontSize: 11.5, fontWeight: '700', letterSpacing: 0.2 },
 
-  // Scroll FAB
+  // Scroll FAB — premium floating
   scrollFab: {
-    position: 'absolute', bottom: 8, right: 12,
-    width: 38, height: 38, borderRadius: 19,
-    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 4,
+    position: 'absolute', bottom: 10, right: 14,
+    width: 40, height: 40, borderRadius: 20,
+    elevation: 6,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8,
   },
   scrollFabBtn: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // Attachment menu
+  // Attachment menu — premium grid
   attachMenu: {
     flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
-    paddingVertical: 20, paddingHorizontal: 16, gap: 20,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.1, shadowRadius: 8,
+    paddingVertical: 24, paddingHorizontal: 16, gap: 16,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    elevation: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.12, shadowRadius: 16,
   },
   attachItem: { alignItems: 'center', width: (W - 64) / 3 },
-  attachIcon: { width: 54, height: 54, borderRadius: 27, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
-  attachLabel: { fontSize: 12, fontWeight: '500' },
+  attachIcon: {
+    width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4,
+  },
+  attachLabel: { fontSize: 12, fontWeight: '600' },
 
-  // Footer
+  // Footer — premium input area
   footer: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 6,
-    paddingHorizontal: 6, paddingTop: 6,
+    flexDirection: 'row', alignItems: 'flex-end', gap: 7,
+    paddingHorizontal: 8, paddingTop: 6,
   },
   inputRow: {
     flex: 1, flexDirection: 'row', alignItems: 'flex-end',
-    borderRadius: 24, borderWidth: 1,
+    borderRadius: 25, borderWidth: 1.5,
     paddingHorizontal: 4, paddingVertical: Platform.OS === 'ios' ? 4 : 0,
-    minHeight: 46, maxHeight: 120,
+    minHeight: 48, maxHeight: 130,
   },
-  footerIcon: { padding: 8, paddingBottom: Platform.OS === 'ios' ? 8 : 10 },
+  footerIcon: { padding: 8, paddingBottom: Platform.OS === 'ios' ? 8 : 10, minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' },
   textInput: {
-    flex: 1, fontSize: 16, paddingHorizontal: 4,
-    paddingTop: Platform.OS === 'ios' ? 8 : 10,
-    paddingBottom: Platform.OS === 'ios' ? 8 : 10,
-    maxHeight: 100,
+    flex: 1, fontSize: 16, paddingHorizontal: 6,
+    paddingTop: Platform.OS === 'ios' ? 10 : 12,
+    paddingBottom: Platform.OS === 'ios' ? 10 : 12,
+    maxHeight: 110, letterSpacing: -0.1,
   },
   // AI result + Info modals
   aiOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -1419,28 +1940,68 @@ const z = StyleSheet.create({
   timelineLabel: { fontSize: 13, fontWeight: '600' },
   timelineTime: { fontSize: 11, marginTop: 1 },
 
-  // File preview
-  previewBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 8, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.06)' },
-  previewScroll: { gap: 8 },
-  previewItem: { width: 110, borderRadius: 12, padding: 6, alignItems: 'center', position: 'relative' },
-  previewClose: { position: 'absolute', top: -6, right: -6, zIndex: 2, backgroundColor: '#fff', borderRadius: 10 },
-  previewThumb: { width: 96, height: 72, borderRadius: 8, marginBottom: 4 },
-  previewFileBadge: { width: 96, height: 72, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  previewExt: { fontSize: 14, fontWeight: '800' },
-  previewName: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
-  previewSize: { fontSize: 9, marginTop: 1 },
-  previewSendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-
-  // Recording
-  recordingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
-  recordCancelBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  recordingInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  recordDot: { width: 8, height: 8, borderRadius: 4 },
-  recordTime: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
-
-  sendBtn: {
-    width: 46, height: 46, borderRadius: 23,
-    alignItems: 'center', justifyContent: 'center',
-    elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2,
+  // File preview — premium cards
+  previewBar: {
+    flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10, paddingVertical: 10, gap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.06)',
   },
+  previewScroll: { gap: 10 },
+  previewItem: {
+    width: 115, borderRadius: 14, padding: 8, alignItems: 'center', position: 'relative',
+    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3,
+  },
+  previewClose: {
+    position: 'absolute', top: -7, right: -7, zIndex: 2, backgroundColor: '#fff', borderRadius: 12,
+    elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 3,
+  },
+  previewThumb: { width: 98, height: 74, borderRadius: 10, marginBottom: 6 },
+  previewFileBadge: { width: 98, height: 74, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  previewExt: { fontSize: 14, fontWeight: '900' },
+  previewName: { fontSize: 10, fontWeight: '700', textAlign: 'center' },
+  previewSize: { fontSize: 9, marginTop: 2, fontWeight: '500' },
+  previewSendBtn: {
+    width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', alignSelf: 'center',
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6,
+  },
+
+  // Recording — premium recording UI
+  recordingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  recordCancelBtn: {
+    width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+    elevation: 1,
+  },
+  recordingInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  recordDot: { width: 10, height: 10, borderRadius: 5 },
+  recordTime: { fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.5 },
+
+  // Send button — premium floating
+  sendBtn: {
+    width: 48, height: 48, borderRadius: 24,
+    alignItems: 'center', justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 6,
+  },
+
+  // Airtime banner
+  airtimeBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, paddingHorizontal: 16 },
+  airtimeText: { fontSize: 13, fontWeight: '600' },
+
+  // Formatting toolbar
+  formatBar: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  formatBtn: { width: 36, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', elevation: 1 },
+  formatLabel: { fontSize: 16, fontWeight: '700' },
+
+  // @Mention suggestions
+  mentionBar: { maxHeight: 200, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(0,0,0,0.06)' },
+  mentionItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  mentionName: { fontSize: 14, fontWeight: '600' },
+
+  // Header menu modal
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' },
+  menuSheet: {
+    position: 'absolute', top: 80, right: 12, borderRadius: 14, paddingVertical: 4, minWidth: 200,
+    elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12,
+  },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  menuItemText: { fontSize: 15, fontWeight: '600' },
 });

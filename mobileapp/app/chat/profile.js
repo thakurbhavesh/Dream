@@ -159,7 +159,7 @@ export default function ChatProfileScreen() {
         </View>
       )}
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 50 }}
         style={{ marginTop: showSearch ? 0 : -20 }} keyboardShouldPersistTaps="handled">
 
         {/* ─── Search Results ─── */}
@@ -419,94 +419,111 @@ function StatCard({ icon, label, value, color, isDark }) {
 const z = StyleSheet.create({
   root: { flex: 1 },
 
-  // Header
-  headerGrad: { paddingBottom: 40 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, marginBottom: 16 },
-  backBtn: { padding: 6 },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  // Header — gradient with depth
+  headerGrad: { paddingBottom: 44 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, marginBottom: 20 },
+  backBtn: { padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: -0.2 },
 
-  // Hero
-  hero: { alignItems: 'center', paddingBottom: 8 },
-  ring: { width: 94, height: 94, borderRadius: 47, borderWidth: 3, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' },
-  heroName: { fontSize: 22, fontWeight: '800', color: '#fff', marginTop: 10 },
-  heroSub: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
-  rolePill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.18)', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, marginTop: 8 },
-  roleLabel: { fontSize: 10, fontWeight: '800', color: '#fff', textTransform: 'uppercase' },
+  // Hero — prominent profile
+  hero: { alignItems: 'center', paddingBottom: 12 },
+  ring: {
+    width: 100, height: 100, borderRadius: 50, borderWidth: 3.5, borderColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center', justifyContent: 'center',
+    elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10,
+  },
+  heroName: { fontSize: 24, fontWeight: '900', color: '#fff', marginTop: 12, letterSpacing: -0.3 },
+  heroSub: { fontSize: 14, color: 'rgba(255,255,255,0.75)', marginTop: 3, fontWeight: '500' },
+  rolePill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, marginTop: 10 },
+  roleLabel: { fontSize: 10, fontWeight: '900', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  // Search bar
-  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 12, marginTop: -10, marginBottom: 4, paddingHorizontal: 14, height: 44, borderRadius: 22, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6 },
-  searchInput: { flex: 1, fontSize: 14, fontWeight: '500' },
+  // Search bar — floating pill
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 14, marginTop: -10, marginBottom: 4,
+    paddingHorizontal: 16, height: 46, borderRadius: 23,
+    elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 8,
+  },
+  searchInput: { flex: 1, fontSize: 14.5, fontWeight: '500' },
 
   // Search results
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  searchTop: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
-  searchName: { fontSize: 13, fontWeight: '700' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  searchTop: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 3 },
+  searchName: { fontSize: 13, fontWeight: '800' },
   searchGroup: { fontSize: 11, fontWeight: '600' },
   searchTime: { fontSize: 10, marginLeft: 'auto' },
-  searchMsg: { fontSize: 13, lineHeight: 18 },
+  searchMsg: { fontSize: 13, lineHeight: 19 },
 
-  // Card
-  card: { marginHorizontal: 12, marginTop: 10, borderRadius: 18, padding: 16, ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 10 }, android: { elevation: 2 } }) },
+  // Card — premium elevated
+  card: {
+    marginHorizontal: 14, marginTop: 12, borderRadius: 20, padding: 18,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 12 },
+      android: { elevation: 3 },
+    }),
+  },
 
-  // Actions
-  actionsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 4 },
-  actionItem: { alignItems: 'center', gap: 6 },
-  actionCircle: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
-  actionLabel: { fontSize: 11, fontWeight: '600' },
+  // Quick Actions — premium circles
+  actionsRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 6 },
+  actionItem: { alignItems: 'center', gap: 8 },
+  actionCircle: {
+    width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center',
+    elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 3,
+  },
+  actionLabel: { fontSize: 11, fontWeight: '700' },
 
   // Section
-  secTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10 },
+  secTitle: { fontSize: 16, fontWeight: '900', marginBottom: 12, letterSpacing: -0.2 },
 
-  // Info
-  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
-  infoIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  infoLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, textTransform: 'uppercase' },
-  infoVal: { fontSize: 14, fontWeight: '500', marginTop: 1 },
+  // Info rows — refined spacing
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 13, minHeight: 52 },
+  infoIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  infoLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
+  infoVal: { fontSize: 14.5, fontWeight: '500', marginTop: 2 },
 
-  // Stats
-  statsGrid: { flexDirection: 'row', gap: 10 },
-  statBox: { flex: 1, alignItems: 'center', paddingVertical: 16, borderRadius: 14, gap: 4 },
-  statIconWrap: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  statNum: { fontSize: 22, fontWeight: '900' },
-  statLabel: { fontSize: 11, fontWeight: '500' },
+  // Stats — premium cards
+  statsGrid: { flexDirection: 'row', gap: 12 },
+  statBox: { flex: 1, alignItems: 'center', paddingVertical: 18, borderRadius: 16, gap: 5 },
+  statIconWrap: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  statNum: { fontSize: 24, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  statLabel: { fontSize: 11, fontWeight: '600' },
 
-  // Tabs — pill style
-  tabBar: { flexDirection: 'row', borderRadius: 12, padding: 3, marginBottom: 14 },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 10 },
-  tabActive: { elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
-  tabLabel: { fontSize: 12, fontWeight: '700' },
+  // Tabs — premium segmented
+  tabBar: { flexDirection: 'row', borderRadius: 14, padding: 4, marginBottom: 16 },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
+  tabActive: { elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6 },
+  tabLabel: { fontSize: 12.5, fontWeight: '800' },
 
-  // Image grid
-  imgGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 2 },
-  gridImg: { width: IMG_COL, height: IMG_COL, borderRadius: 6 },
+  // Image grid — clean gaps
+  imgGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 3 },
+  gridImg: { width: IMG_COL, height: IMG_COL, borderRadius: 8 },
 
-  // Links
-  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, marginBottom: 6 },
-  linkThumb: { width: 50, height: 50, borderRadius: 10 },
-  linkIcon: { width: 50, height: 50, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  linkTitle: { fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  linkHost: { fontSize: 12, fontWeight: '500', marginTop: 2 },
-  linkTime: { fontSize: 10, marginTop: 2 },
+  // Links — premium rows
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 16, marginBottom: 8 },
+  linkThumb: { width: 52, height: 52, borderRadius: 12 },
+  linkIcon: { width: 52, height: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  linkTitle: { fontSize: 14, fontWeight: '700', lineHeight: 19 },
+  linkHost: { fontSize: 12, fontWeight: '600', marginTop: 3 },
+  linkTime: { fontSize: 10, marginTop: 3, fontWeight: '500' },
 
-  // Docs
-  docRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14, marginBottom: 6 },
-  docBadge: { width: 46, height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center', gap: 1 },
-  docExt: { fontSize: 7, fontWeight: '900', letterSpacing: 0.3 },
-  docName: { fontSize: 13, fontWeight: '600' },
-  docMeta: { fontSize: 11, marginTop: 2 },
-  dlBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  // Docs — premium rows
+  docRow: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 16, marginBottom: 8 },
+  docBadge: { width: 48, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  docExt: { fontSize: 7.5, fontWeight: '900', letterSpacing: 0.4 },
+  docName: { fontSize: 14, fontWeight: '700' },
+  docMeta: { fontSize: 11, marginTop: 3, fontWeight: '500' },
+  dlBtn: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 
-  // Image preview modal
+  // Image preview — full-screen
   pvOverlay: { flex: 1, backgroundColor: '#000' },
-  pvHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: 'rgba(0,0,0,0.7)' },
-  pvName: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  pvMeta: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 1 },
+  pvHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingBottom: 14, backgroundColor: 'rgba(0,0,0,0.75)' },
+  pvName: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  pvMeta: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 2 },
   pvBody: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   pvImage: { width: W, height: W * 1.2 },
 
   // Empty
-  emptyMedia: { alignItems: 'center', paddingVertical: 28, gap: 6 },
-  emptyCircle: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
-  emptyTitle: { fontSize: 14, fontWeight: '700' },
-  emptySub: { fontSize: 12, textAlign: 'center', paddingHorizontal: 20, lineHeight: 17 },
+  emptyMedia: { alignItems: 'center', paddingVertical: 32, gap: 8 },
+  emptyCircle: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  emptyTitle: { fontSize: 15, fontWeight: '800' },
+  emptySub: { fontSize: 12.5, textAlign: 'center', paddingHorizontal: 24, lineHeight: 18 },
 });

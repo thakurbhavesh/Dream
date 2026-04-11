@@ -1,8 +1,9 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-// Change this to your backend URL
-export const API_BASE_URL = 'https://dream-s3pi.onrender.com';
+// Production URL — update before Play Store release
+// EAS build uses env.API_BASE_URL from eas.json
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://dream-s3pi.onrender.com';
 export const SOCKET_URL = API_BASE_URL;
 
 const api = axios.create({

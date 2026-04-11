@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Switch, AppState,
-  Platform, TextInput, ActivityIndicator, Keyboard, RefreshControl, Linking,
+  Platform, TextInput, ActivityIndicator, Keyboard, RefreshControl, Linking, Modal, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -56,6 +56,31 @@ export default function ProfileScreen() {
   // Customize
   const [hexInput, setHexInput] = useState(currentBrand || '#ea4c89');
   useEffect(() => { setHexInput(currentBrand); }, [currentBrand]);
+
+  // App Lock state
+  const [appLockEnabled, setAppLockState] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const { isAppLockEnabled } = require('../../src/components/AppLock');
+        setAppLockState(await isAppLockEnabled());
+      } catch {}
+    })();
+  }, []);
+
+  // Custom status
+  const STATUS_OPTIONS = [
+    { key: 'Available', icon: 'ellipse', color: '#22c55e', label: 'Available' },
+    { key: 'Busy', icon: 'ellipse', color: '#ef4444', label: 'Busy' },
+    { key: 'Away', icon: 'ellipse', color: '#f59e0b', label: 'Away' },
+    { key: 'DND', icon: 'remove-circle', color: '#ef4444', label: 'Do Not Disturb' },
+    { key: 'Offline', icon: 'ellipse-outline', color: '#94a3b8', label: 'Appear Offline' },
+  ];
+  const [myStatus, setMyStatus] = useState('Available');
+  const [statusText, setStatusText] = useState('');
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
 
   // Permissions
   const [perms, setPerms] = useState({});
@@ -126,10 +151,24 @@ export default function ProfileScreen() {
   const loadProfile = useCallback(async () => {
     try {
       const raw = await getMe();
+      // raw = { user, organization, user_role, organization_member, ... }
       const u = raw?.user || raw;
       const org = raw?.organization || {};
-      setProfile({ ...u, company_name: org?.name || '', custom_domain: org?.custom_domain || '', department_name: u?.department_name || '', designation_name: u?.designation_name || '', location_name: u?.location_name || '' });
-    } catch {}
+      const userRole = raw?.user_role || {};
+      const mem = raw?.organization_member || {};
+      console.log('[profile] user_role:', JSON.stringify(userRole));
+      setProfile({
+        ...u,
+        company_name: org?.name || '',
+        custom_domain: org?.custom_domain || '',
+        department_name: mem?.department_name || u?.department_name || '',
+        designation_name: mem?.designation_name || u?.designation_name || '',
+        location_name: mem?.location_name || u?.location_name || '',
+        role_id: userRole.role_id || mem?.role_id || u?.role_id,
+        role_key: userRole.role_key || mem?.role_key || u?.role_key,
+        role_name: userRole.role_name || mem?.role_name || u?.role_name,
+      });
+    } catch (e) { console.log('[profile] error:', e?.message); }
   }, []);
 
   const loadDevices = useCallback(async () => {
@@ -176,7 +215,10 @@ export default function ProfileScreen() {
 
   const toggle = (key) => setExpanded(expanded === key ? null : key);
   const p = profile || user || {};
-  const role = p.role_key || p.role_name || 'member';
+  // Role — try every possible source
+  const ROLE_LABELS = { 1: 'Owner', 2: 'Admin', 3: 'Super Admin', 4: 'User', owner: 'Owner', admin: 'Admin', super_admin: 'Super Admin', users: 'User' };
+  const rawRole = p.role_name || p.role_key || profile?.role_name || profile?.role_key || user?.role_name || user?.role_key;
+  const role = rawRole || ROLE_LABELS[p.role_id || user?.role_id] || 'Member';
 
   // Section component
   const Section = ({ id, icon, label, badge, children }) => {
@@ -198,26 +240,34 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={[z.root, { backgroundColor: t.bg }]} edges={['top']}>
+      {/* ─── Fixed Profile Header ─── */}
+      <View style={[z.profileCard, { backgroundColor: t.card }]}>
+        <View style={z.profileTop}>
+          <Avatar uri={p.profile_url || p.avatar} name={p.name} size={62} />
+          <View style={z.profileInfo}>
+            <Text style={[z.profileName, { color: t.text }]}>{p.name || 'User'}</Text>
+            <Text style={[z.profileEmail, { color: t.textSec }]}>{p.email}</Text>
+            <View style={[z.rolePill, { backgroundColor: `${t.accent}12` }]}>
+              <Text style={[z.roleText, { color: t.accent }]}>{role}</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={[z.logoutBtn, { backgroundColor: `${t.red}10` }]} onPress={handleLogout} activeOpacity={0.7}>
+            <Ionicons name="log-out-outline" size={18} color={t.red} />
+          </TouchableOpacity>
+        </View>
+        {/* Status bar */}
+        <TouchableOpacity style={[z.statusBar, { backgroundColor: isDark ? '#0f172a' : '#f8fafc', borderColor: t.divider }]}
+          onPress={() => setShowStatusPicker(true)} activeOpacity={0.7}>
+          <View style={[z.statusDot, { backgroundColor: STATUS_OPTIONS.find(s => s.key === myStatus)?.color || '#22c55e' }]} />
+          <Text style={[z.statusLabel, { color: t.text }]}>{myStatus}</Text>
+          {statusText ? <Text style={[z.statusCustom, { color: t.textSec }]} numberOfLines={1}> — {statusText}</Text> : null}
+          <Ionicons name="chevron-forward" size={14} color={t.textTer} style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+      </View>
+
       <ScrollView showsVerticalScrollIndicator={false}
         contentContainerStyle={z.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[t.accent]} />}>
-
-        {/* ─── Profile Header ─── */}
-        <View style={[z.profileCard, { backgroundColor: t.card }]}>
-          <View style={z.profileTop}>
-            <Avatar uri={p.profile_url || p.avatar} name={p.name} size={62} />
-            <View style={z.profileInfo}>
-              <Text style={[z.profileName, { color: t.text }]}>{p.name || 'User'}</Text>
-              <Text style={[z.profileEmail, { color: t.textSec }]}>{p.email}</Text>
-              <View style={[z.rolePill, { backgroundColor: `${t.accent}12` }]}>
-                <Text style={[z.roleText, { color: t.accent }]}>{role}</Text>
-              </View>
-            </View>
-            <TouchableOpacity style={[z.logoutBtn, { backgroundColor: `${t.red}10` }]} onPress={handleLogout} activeOpacity={0.7}>
-              <Ionicons name="log-out-outline" size={18} color={t.red} />
-            </TouchableOpacity>
-          </View>
-        </View>
 
         {/* ─── Profile Info ─── */}
         <Section id="profile" icon="person-outline" label="Profile Info">
@@ -424,7 +474,134 @@ export default function ProfileScreen() {
           })}
         </Section>
 
-        {/* ─── About ─── */}
+        {/* ─── Notifications ─── */}
+        <Section id="notifications" icon="notifications-outline" label="Notifications">
+          <View style={z.appearRow}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Do Not Disturb</Text>
+            <Switch value={false} onValueChange={() => toast('DND scheduling coming soon', 'info')}
+              trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
+          </View>
+          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>Mute all notifications during set hours</Text>
+          <View style={[z.appearRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.divider }]}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Notification Tone</Text>
+            <TouchableOpacity onPress={() => toast('Tone selection coming soon', 'info')}>
+              <Text style={{ color: t.accent, fontWeight: '700', fontSize: 14 }}>Default</Text>
+            </TouchableOpacity>
+          </View>
+        </Section>
+
+        {/* ─── App Lock ─── */}
+        <Section id="applock" icon="lock-closed-outline" label="App Lock">
+          <View style={z.appearRow}>
+            <Text style={[z.appearLabel, { color: t.text }]}>Enable App Lock</Text>
+            <Switch value={appLockEnabled} onValueChange={(v) => {
+              if (v) { setPinInput(''); setShowPinSetup(true); }
+              else {
+                (async () => {
+                  const { setAppLockEnabled } = require('../../src/components/AppLock');
+                  await setAppLockEnabled(false);
+                  setAppLockState(false);
+                  toast('App Lock disabled', 'info');
+                })();
+              }
+            }} trackColor={{ false: '#e2e8f0', true: `${t.accent}50` }} />
+          </View>
+          <Text style={[z.permHint, { color: t.textTer, marginTop: 4 }]}>Lock app with PIN or biometric when you leave</Text>
+
+          {/* PIN Setup inline */}
+          {showPinSetup && (
+            <View style={[z.pinSetupRow, { borderTopColor: t.divider }]}>
+              <Text style={[z.fieldLabel, { color: t.textTer }]}>SET 4-DIGIT PIN</Text>
+              <View style={[z.field, { borderColor: t.border, backgroundColor: t.inputBg }]}>
+                <Ionicons name="lock-closed-outline" size={16} color={t.icon} />
+                <TextInput style={[z.input, { color: t.text }]} placeholder="Enter 4-digit PIN"
+                  placeholderTextColor={t.textTer} value={pinInput} onChangeText={setPinInput}
+                  keyboardType="number-pad" maxLength={4} secureTextEntry />
+              </View>
+              <TouchableOpacity style={[z.saveBtn, { backgroundColor: pinInput.length === 4 ? t.accent : t.border, marginTop: 10 }]}
+                disabled={pinInput.length !== 4}
+                onPress={async () => {
+                  const { setAppLockEnabled } = require('../../src/components/AppLock');
+                  await setAppLockEnabled(true, pinInput);
+                  setAppLockState(true);
+                  setShowPinSetup(false);
+                  setPinInput('');
+                  toast('App Lock enabled!', 'success');
+                }} activeOpacity={0.8}>
+                <Text style={z.saveBtnText}>Set PIN & Enable</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Section>
+
+        {/* ─── Link a Device (QR Login) ─── */}
+        <View style={[z.section, { backgroundColor: t.card }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/(auth)/qr-login')} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: '#3b82f610' }]}>
+              <Ionicons name="qr-code-outline" size={17} color="#3b82f6" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[z.sectionLabel, { color: t.text }]}>Linked Devices</Text>
+              <Text style={{ fontSize: 11, color: t.textTer, marginTop: 1 }}>Scan QR to login on web browser</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── Storage & Data ─── */}
+        <View style={[z.section, { backgroundColor: t.card }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/storage')} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: `${t.accent}10` }]}>
+              <Ionicons name="server-outline" size={17} color={t.accent} />
+            </View>
+            <Text style={[z.sectionLabel, { color: t.text }]}>Storage & Data</Text>
+            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── Starred Messages ─── */}
+        <View style={[z.section, { backgroundColor: t.card }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/starred')} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: '#eab30810' }]}>
+              <Ionicons name="star-outline" size={17} color="#eab308" />
+            </View>
+            <Text style={[z.sectionLabel, { color: t.text }]}>Starred Messages</Text>
+            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── Broadcast ─── */}
+        <View style={[z.section, { backgroundColor: t.card }]}>
+          <TouchableOpacity style={z.sectionHeader} onPress={() => router.push('/chat/broadcast')} activeOpacity={0.6}>
+            <View style={[z.sectionIcon, { backgroundColor: '#3b82f610' }]}>
+              <Ionicons name="megaphone-outline" size={17} color="#3b82f6" />
+            </View>
+            <Text style={[z.sectionLabel, { color: t.text }]}>Broadcast Message</Text>
+            <Ionicons name="chevron-forward" size={18} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── App Guide + Features ─── */}
+        <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 12, marginTop: 8 }}>
+          <TouchableOpacity style={[z.quickLink, { backgroundColor: t.card }]}
+            onPress={() => router.push('/chat/guide')} activeOpacity={0.6}>
+            <View style={[z.quickLinkIcon, { backgroundColor: '#06b6d412' }]}>
+              <Ionicons name="book" size={20} color="#06b6d4" />
+            </View>
+            <Text style={[z.quickLinkTitle, { color: t.text }]}>App Guide</Text>
+            <Text style={[z.quickLinkSub, { color: t.textTer }]}>Help & FAQ</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[z.quickLink, { backgroundColor: t.card }]}
+            onPress={() => router.push('/chat/assistant')} activeOpacity={0.6}>
+            <View style={[z.quickLinkIcon, { backgroundColor: `${t.accent}12` }]}>
+              <Ionicons name="sparkles" size={20} color={t.accent} />
+            </View>
+            <Text style={[z.quickLinkTitle, { color: t.text }]}>AI Assistant</Text>
+            <Text style={[z.quickLinkSub, { color: t.textTer }]}>Ask anything</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ─── Legal & About ─── */}
         <View style={[z.section, { backgroundColor: t.card }]}>
           <View style={z.aboutRow}>
             <Ionicons name="information-circle-outline" size={17} color={t.textTer} />
@@ -432,9 +609,53 @@ export default function ProfileScreen() {
             <Text style={[z.aboutValue, { color: t.textTer }]}>1.0.0</Text>
           </View>
         </View>
+        <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 12, marginTop: 8 }}>
+          <TouchableOpacity style={[z.legalBtn, { backgroundColor: t.card }]}
+            onPress={() => router.push('/chat/legal?type=privacy')} activeOpacity={0.6}>
+            <Ionicons name="shield-checkmark" size={20} color="#3b82f6" />
+            <Text style={[z.legalBtnText, { color: t.text }]}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={14} color={t.textTer} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[z.legalBtn, { backgroundColor: t.card }]}
+            onPress={() => router.push('/chat/legal?type=terms')} activeOpacity={0.6}>
+            <Ionicons name="document-text" size={20} color="#8b5cf6" />
+            <Text style={[z.legalBtnText, { color: t.text }]}>Terms of Service</Text>
+            <Ionicons name="chevron-forward" size={14} color={t.textTer} />
+          </TouchableOpacity>
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Status Picker Modal */}
+      {showStatusPicker && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setShowStatusPicker(false)}>
+          <Pressable style={z.statusOverlay} onPress={() => setShowStatusPicker(false)}>
+            <View style={[z.statusSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+              <Text style={[z.statusSheetTitle, { color: t.text }]}>Set Your Status</Text>
+              {STATUS_OPTIONS.map(s => (
+                <TouchableOpacity key={s.key}
+                  style={[z.statusOption, myStatus === s.key && { backgroundColor: `${s.color}12` }, { borderBottomColor: t.divider }]}
+                  onPress={() => { setMyStatus(s.key); try { const emit = require('../../src/hooks/useSocket').default; } catch {} }}
+                  activeOpacity={0.6}>
+                  <Ionicons name={s.icon} size={14} color={s.color} />
+                  <Text style={[z.statusOptLabel, { color: t.text }]}>{s.label}</Text>
+                  {myStatus === s.key && <Ionicons name="checkmark" size={18} color={s.color} />}
+                </TouchableOpacity>
+              ))}
+              <View style={[z.statusTextRow, { borderTopColor: t.divider }]}>
+                <TextInput style={[z.statusTextInput, { color: t.text, backgroundColor: isDark ? '#0f172a' : '#f8fafc' }]}
+                  placeholder="What's your status?" placeholderTextColor={t.textTer}
+                  value={statusText} onChangeText={setStatusText} maxLength={100} />
+              </View>
+              <TouchableOpacity style={[z.statusSaveBtn, { backgroundColor: t.accent }]}
+                onPress={() => { setShowStatusPicker(false); toast(`Status: ${myStatus}`, 'success'); }} activeOpacity={0.8}>
+                <Text style={z.statusSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -456,7 +677,7 @@ function InfoRow({ icon, label, value, t, last }) {
 // ─── Styles ─────────────────────────────────────────────────────────────────
 const z = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { paddingBottom: 20 },
+  scroll: { paddingBottom: 60 },
 
   // Profile header
   profileCard: {
@@ -546,4 +767,34 @@ const z = StyleSheet.create({
   aboutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   aboutLabel: { flex: 1, fontSize: 14, fontWeight: '500' },
   aboutValue: { fontSize: 13 },
+
+  // Quick links (Guide + Features)
+  quickLink: { flex: 1, alignItems: 'center', padding: 18, borderRadius: 18, elevation: 1, gap: 6 },
+  quickLinkIcon: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  quickLinkTitle: { fontSize: 14, fontWeight: '800' },
+  quickLinkSub: { fontSize: 11 },
+
+  // Legal buttons
+  legalBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, borderRadius: 16, elevation: 1 },
+  legalBtnText: { flex: 1, fontSize: 12, fontWeight: '700' },
+
+  // PIN setup
+  pinSetupRow: { paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+
+  // Status bar under profile
+  statusBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1 },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
+  statusLabel: { fontSize: 14, fontWeight: '700' },
+  statusCustom: { fontSize: 13, flex: 1 },
+
+  // Status picker modal
+  statusOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  statusSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 20, paddingBottom: 30 },
+  statusSheetTitle: { fontSize: 18, fontWeight: '800', paddingHorizontal: 20, marginBottom: 12 },
+  statusOption: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  statusOptLabel: { flex: 1, fontSize: 15, fontWeight: '600' },
+  statusTextRow: { paddingHorizontal: 20, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth },
+  statusTextInput: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14 },
+  statusSaveBtn: { marginHorizontal: 20, marginTop: 10, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
+  statusSaveText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

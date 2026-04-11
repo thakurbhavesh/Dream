@@ -1,13 +1,28 @@
 import { useEffect } from 'react';
-import { Text, TextInput, Platform } from 'react-native';
+import { Text, TextInput, Platform, LogBox } from 'react-native';
 import { Stack, router } from 'expo-router';
+
+// Suppress console logs in production builds
+if (!__DEV__) {
+  console.log = () => {};
+  console.warn = () => {};
+  console.info = () => {};
+}
+// Suppress known non-critical warnings in dev
+LogBox.ignoreLogs(['Method writeAsStringAsync', 'Non-serializable values']);
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+// KeyboardProvider from react-native-keyboard-controller — enabled in dev/production builds only
+let KeyboardProvider;
+try { KeyboardProvider = require('react-native-keyboard-controller').KeyboardProvider; } catch { KeyboardProvider = null; }
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from '../src/store/AuthContext';
 import { ThemeProvider, useTheme } from '../src/store/ThemeContext';
 import { ToastProvider } from '../src/components/Toast';
+import { CallProvider, useCall } from '../src/store/CallContext';
+import IncomingCall from '../src/components/IncomingCall';
 import useSocket from '../src/hooks/useSocket';
+import AppLock from '../src/components/AppLock';
 import {
   requestNotificationPermission,
   setupNotificationChannel,
@@ -86,6 +101,19 @@ function NotificationListener() {
   return null;
 }
 
+function IncomingCallOverlay() {
+  const { callState, callType, remoteUser, acceptCall, rejectCall } = useCall();
+  return (
+    <IncomingCall
+      callState={callState}
+      callType={callType}
+      remoteUser={remoteUser}
+      onAccept={acceptCall}
+      onReject={rejectCall}
+    />
+  );
+}
+
 function InnerLayout() {
   const { isDark, theme } = useTheme();
   return (
@@ -98,7 +126,9 @@ function InnerLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat" />
+        <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       </Stack>
+      <IncomingCallOverlay />
     </>
   );
 }
@@ -109,7 +139,11 @@ export default function RootLayout() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <InnerLayout />
+            <CallProvider>
+              <AppLock>
+                <InnerLayout />
+              </AppLock>
+            </CallProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>

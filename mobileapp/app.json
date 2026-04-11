@@ -27,8 +27,8 @@
     },
     "android": {
       "package": "com.teamchatx.app",
+      "versionCode": 1,
       "windowSoftInputMode": "adjustResize",
-      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -52,7 +52,10 @@
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
         "READ_MEDIA_AUDIO",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
       ]
     },
     "web": {
@@ -104,6 +107,13 @@
         {
           "icon": "./assets/icon.png",
           "color": "#ea4c89"
+        }
+      ],
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "TeamChatX needs camera access for video calls.",
+          "microphonePermission": "TeamChatX needs microphone access for audio and video calls."
         }
       ]
     ]

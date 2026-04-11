@@ -1252,4 +1252,100 @@ const transcribeWithGemini = async (audioBuffer, mimeType, apiKey, modelOverride
   return (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
 };
 
-module.exports = { translate, summarize, smartReply, grammarCorrect, toneAdjust, semanticSearch, generateCallNotes, smartCompose, transcribeAudio };
+// ─── AI Help Bot ─────────────────────────────────────────────────────────────
+const APP_KNOWLEDGE = `
+TeamChatX is a business team communication app (like Troop Messenger / Slack). Features:
+
+MESSAGING: One-on-one DM, group chat, text formatting (bold/italic), code blocks, emoji, @mentions, message reply (swipe right), edit (5 min limit), unsend (5 min limit), forward, copy, pin (server-side, visible to all), star/bookmark (local, personal), reactions (emoji), voice messages with 1x/1.5x/2x playback, file/image/video/audio/location/contact sharing, GIF picker (Tenor), polls (single/multi choice), link previews, disappearing messages (24h/7d), broadcast to multiple contacts, draft auto-save.
+
+GROUPS: Create group, announcement/airtime mode (only admins post), admin controls (add/remove members, promote/demote admin, delete any message), group timeline (event history), leave group (can only read old messages after leaving).
+
+CALLS: Audio and video calls via WebRTC (requires dev build, not Expo Go).
+
+SEARCH: In-chat search with type filters (text/image/video/file/link/audio/code), global search across all chats.
+
+CONTACTS: People tab (alphabetical, department filter chips), Groups tab (with left/kicked status), online/away/idle/busy/offline status dots, global member orange badge.
+
+CHAT LIST: Filter chips (All/Groups/Unread), long-press to pin to top or archive, unread count badges on app icon.
+
+SETTINGS: Profile info, change password, active devices, linked devices (QR login), appearance (dark/light/system theme), customize (brand color hex, font, font size), app lock (4-digit PIN + biometric, auto-locks after 30s), notifications (DND, tone), permissions toggle, storage manager (clear cache/drafts/downloads), starred messages, broadcast, app guide.
+
+SECURITY: App lock PIN + biometric, QR code login (scan from web to login desktop), disappearing messages, edit/unsend time limits.
+
+MEDIA: Chat wallpaper (per chat, set/remove), full-screen image viewer (double-tap zoom), media/files/links/pinned tabs per chat, chat export as text file.
+
+ROLES: Owner, Admin, Super Admin, User. Admins can manage groups. Global members have orange dot badge.
+`;
+
+const appHelp = async (req, res, next) => {
+  try {
+    const { question, history = [] } = req.body;
+    if (!question) {
+      const e = new Error('question is required');
+      e.status = 400;
+      throw e;
+    }
+
+    const ai = await resolveAIProvider();
+
+    const systemPrompt = `You are TeamChatX Help Assistant — a friendly, concise AI helper for the TeamChatX business chat app. Answer user questions about app features, how-to guides, and troubleshooting.
+
+${APP_KNOWLEDGE}
+
+RULES:
+- Answer in the same language the user asks (Hindi/Hinglish/English)
+- Be concise — max 3-4 sentences unless the user asks for detail
+- If you don't know, say "I'm not sure about that. Contact support at support@teamchatx.com"
+- Use bullet points for step-by-step instructions
+- Never make up features that don't exist`;
+
+    const conversationHistory = history.slice(-6).map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`).join('\n');
+    const fullPrompt = `${systemPrompt}\n\n${conversationHistory ? 'Previous conversation:\n' + conversationHistory + '\n\n' : ''}User: ${question}\n\nAssistant:`;
+
+    let answer = '';
+
+    if (ai.provider === 'gemini') {
+      const model = ai.model || 'gemini-2.0-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ai.apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          generationConfig: { temperature: 0.5, maxOutputTokens: 400 },
+        }),
+      });
+      if (!response.ok) throw Object.assign(new Error('AI error'), { status: 502 });
+      const data = await response.json();
+      answer = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+    } else if (ai.provider === 'openai') {
+      const model = ai.model || 'gpt-4o-mini';
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ai.apiKey}` },
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, ...history.slice(-6).map(m => ({ role: m.role, content: m.text })), { role: 'user', content: question }], temperature: 0.5, max_tokens: 400 }),
+      });
+      if (!response.ok) throw Object.assign(new Error('AI error'), { status: 502 });
+      const data = await response.json();
+      answer = data?.choices?.[0]?.message?.content?.trim() || '';
+    } else if (ai.provider === 'anthropic') {
+      const model = ai.model || 'claude-sonnet-4-6';
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ai.apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model, max_tokens: 400, system: systemPrompt, messages: [...history.slice(-6).map(m => ({ role: m.role, content: m.text })), { role: 'user', content: question }] }),
+      });
+      if (!response.ok) throw Object.assign(new Error('AI error'), { status: 502 });
+      const data = await response.json();
+      answer = data?.content?.[0]?.text?.trim() || '';
+    }
+
+    if (!answer) answer = "I couldn't process that. Please try again or contact support@teamchatx.com";
+
+    return success(res, { answer }, 'Help response');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { translate, summarize, smartReply, grammarCorrect, toneAdjust, semanticSearch, generateCallNotes, smartCompose, transcribeAudio, appHelp };

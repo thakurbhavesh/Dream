@@ -42,4 +42,9 @@ router.post('/owner/v1/owners', auth, requireOwner, authController.createOwnerV1
 // ─── Owner: System & Socket Monitoring ─────────────────────────────────────
 router.get('/owner/v1/system/socket-stats', auth, requireOwner, authController.getOwnerV1SystemStats);
 
+// ─── QR Code Login ─────────────────────────────────────────────────────────
+router.get('/qr', authController.qrGenerate);            // Web: get QR data (no auth needed)
+router.post('/qr/confirm', auth, authController.qrConfirm); // Mobile: confirm QR (needs auth)
+router.get('/qr/status', authController.qrStatus);       // Web: poll status (no auth needed)
+
 module.exports = router;

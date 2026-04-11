@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { Link as RouterLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Link,
@@ -11,7 +11,12 @@ import {
   Snackbar,
   Alert,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  Box,
 } from "@mui/material";
+import { PiQrCode } from "react-icons/pi";
 import { useForm, Controller } from "react-hook-form";
 import * as Yup from "yup";
 import { yupResolver } from "@hookform/resolvers/yup";
@@ -197,6 +202,68 @@ const Login = () => {
   const resendCooldown = useOtpResendCooldown(0);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // ─── QR Code Login ───
+  const [showQr, setShowQr] = useState(false);
+  const [qrData, setQrData] = useState(null); // { qrId, qrToken }
+  const [qrStatus, setQrStatus] = useState("idle"); // idle | loading | ready | polling | linked | expired | error
+  const qrPollRef = useRef(null);
+
+  const startQrLogin = useCallback(async () => {
+    setShowQr(true);
+    setQrStatus("loading");
+    try {
+      const res = await fetchJson(`${API_BASE_URL}/auth/qr`);
+      const d = res?.data || res;
+      if (d?.qrId && d?.qrToken) {
+        setQrData(d);
+        setQrStatus("ready");
+        // Start polling
+        qrPollRef.current = setInterval(async () => {
+          try {
+            const poll = await fetchJson(`${API_BASE_URL}/auth/qr/status?qrId=${d.qrId}`);
+            const pd = poll?.data || poll;
+            if (pd?.status === "linked" && pd?.accessToken) {
+              clearInterval(qrPollRef.current);
+              setQrStatus("linked");
+              // Auto login with received token
+              const decoded = decodeJwtPayload(pd.accessToken);
+              const u = pd.user || {};
+              await authStore.login({
+                token: pd.accessToken,
+                refreshToken: pd.refreshToken || "",
+                id: decoded.sub || u.id,
+                email: decoded.email || u.email,
+                name: decoded.name || u.name,
+                organization: String(decoded.org || ""),
+                role: decoded.role || "",
+              });
+              setTimeout(() => navigate("/app", { replace: true }), 500);
+            } else if (pd?.status === "expired") {
+              clearInterval(qrPollRef.current);
+              setQrStatus("expired");
+            }
+          } catch {}
+        }, 2000);
+      } else {
+        setQrStatus("error");
+      }
+    } catch {
+      setQrStatus("error");
+    }
+  }, [navigate]);
+
+  // Cleanup polling on unmount or close
+  useEffect(() => {
+    return () => { if (qrPollRef.current) clearInterval(qrPollRef.current); };
+  }, []);
+
+  const closeQr = () => {
+    if (qrPollRef.current) clearInterval(qrPollRef.current);
+    setShowQr(false);
+    setQrData(null);
+    setQrStatus("idle");
+  };
 
   const schema = useMemo(
     () =>
@@ -606,25 +673,46 @@ const Login = () => {
               </Button>
 
               {step === 1 ? (
-                <Button
-                  fullWidth
-                  size="large"
-                  variant="outlined"
-                  startIcon={<FcGoogle />}
-                  sx={{
-                    bgcolor: "background.default",
-                    borderColor: (t) => t.palette.grey[300],
-                    color: "text.primary",
-                    textTransform: "capitalize",
-                    "&:hover": {
-                      borderColor: "text.primary",
-                      bgcolor: "common.white",
-                      color: "text.secondary",
-                    },
-                  }}
-                >
-                  Sign in with Google
-                </Button>
+                <>
+                  <Button
+                    fullWidth
+                    size="large"
+                    variant="outlined"
+                    startIcon={<FcGoogle />}
+                    sx={{
+                      bgcolor: "background.default",
+                      borderColor: (t) => t.palette.grey[300],
+                      color: "text.primary",
+                      textTransform: "capitalize",
+                      "&:hover": {
+                        borderColor: "text.primary",
+                        bgcolor: "common.white",
+                        color: "text.secondary",
+                      },
+                    }}
+                  >
+                    Sign in with Google
+                  </Button>
+
+                  <Button
+                    fullWidth
+                    size="large"
+                    variant="outlined"
+                    startIcon={<PiQrCode size={20} />}
+                    onClick={startQrLogin}
+                    sx={{
+                      borderColor: (t) => t.palette.grey[300],
+                      color: "text.primary",
+                      textTransform: "capitalize",
+                      "&:hover": {
+                        borderColor: "primary.main",
+                        bgcolor: "primary.lighter",
+                      },
+                    }}
+                  >
+                    Login via QR Code
+                  </Button>
+                </>
               ) : null}
             </Stack>
           </Stack>
@@ -641,6 +729,82 @@ const Login = () => {
           </Alert>
         </Snackbar>
       </>
+
+      {/* ─── QR Code Login Dialog ─── */}
+      <Dialog open={showQr} onClose={closeQr} maxWidth="xs" fullWidth
+        PaperProps={{ sx: { borderRadius: 4, p: 2, textAlign: "center" } }}>
+        <DialogTitle sx={{ fontWeight: 800, fontSize: 20 }}>
+          Login via QR Code
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            Scan this QR code with the TeamChatX mobile app
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          {qrStatus === "loading" && (
+            <Box sx={{ py: 6 }}>
+              <CircularProgress />
+              <Typography variant="body2" sx={{ mt: 2 }}>Generating QR code...</Typography>
+            </Box>
+          )}
+
+          {qrStatus === "ready" && qrData && (
+            <Box sx={{ py: 2 }}>
+              {/* QR Code rendered as SVG using simple encoding */}
+              <Box sx={{
+                width: 220, height: 220, mx: "auto", mb: 2, p: 2,
+                border: "2px solid", borderColor: "divider", borderRadius: 3,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                bgcolor: "#fff",
+              }}>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(JSON.stringify({ qrToken: qrData.qrToken }))}`}
+                  alt="QR Code"
+                  style={{ width: 200, height: 200 }}
+                />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                Open TeamChatX app → Login → QR Code
+              </Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ display: "block", mt: 1 }}>
+                QR expires in 5 minutes
+              </Typography>
+            </Box>
+          )}
+
+          {qrStatus === "linked" && (
+            <Box sx={{ py: 4 }}>
+              <Typography variant="h5" sx={{ color: "success.main", fontWeight: 800 }}>
+                ✓ Login Successful!
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Redirecting...
+              </Typography>
+            </Box>
+          )}
+
+          {qrStatus === "expired" && (
+            <Box sx={{ py: 4 }}>
+              <Typography variant="body1" color="error" sx={{ fontWeight: 700 }}>
+                QR Code Expired
+              </Typography>
+              <Button variant="outlined" onClick={() => { closeQr(); startQrLogin(); }} sx={{ mt: 2 }}>
+                Generate New QR
+              </Button>
+            </Box>
+          )}
+
+          {qrStatus === "error" && (
+            <Box sx={{ py: 4 }}>
+              <Typography variant="body1" color="error" sx={{ fontWeight: 700 }}>
+                Failed to generate QR
+              </Typography>
+              <Button variant="outlined" onClick={() => { closeQr(); startQrLogin(); }} sx={{ mt: 2 }}>
+                Try Again
+              </Button>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </AuthSplitLayout>
   );
 };
