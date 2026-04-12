@@ -2,10 +2,10 @@
 -- Safe to run multiple times (ON CONFLICT)
 
 -- ═══ Create new categories ═══
-INSERT INTO feature_categories (category_key, category_name, display_order) VALUES
+INSERT INTO feature_categories (category_key, category_label, display_order) VALUES
 ('mobile', 'Mobile', 9),
 ('web_desktop', 'Web & Desktop', 10)
-ON CONFLICT (category_key) DO UPDATE SET category_name = EXCLUDED.category_name;
+ON CONFLICT (category_key) DO UPDATE SET category_label = EXCLUDED.category_label;
 
 -- ═══ MOBILE FEATURES ═══
 INSERT INTO feature_items (feature_category_id, title, description, display_order) VALUES
