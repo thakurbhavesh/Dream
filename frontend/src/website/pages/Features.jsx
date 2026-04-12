@@ -36,6 +36,8 @@ const CATEGORY_ICONS = {
   ai_features: "\u2728",
   integrations_cs: "\uD83D\uDD0C",
   automation_cs: "\uD83E\uDD16",
+  mobile: "\uD83D\uDCF1",
+  web_desktop: "\uD83D\uDCBB",
 };
 
 const getCategoryIcon = (key) => CATEGORY_ICONS[String(key || "").toLowerCase()] || "\u2B50";

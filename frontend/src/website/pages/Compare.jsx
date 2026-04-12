@@ -49,12 +49,13 @@ const CATEGORY_SHORT_LABELS = {
   "AI & Smart Features": "AI",
   "Privacy & Security": "Privacy",
   "Admin & Management": "Admin",
-  "Platform": "Platform",
+  "Mobile": "Mobile",
+  "Web & Desktop": "Web/Desktop",
 };
 
 // Support map: true = full, "partial" = limited / paid only, false = none
 const features = [
-  // ─── Messaging ──────────────────────────────────────────
+  // ═══ MESSAGING ═══════════════════════════════════════════
   { category: "Messaging", feature: "1-on-1 Direct Messaging", desc: "Private direct messages between users", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Messaging", feature: "Group Messaging", desc: "Multi-member group conversations", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Messaging", feature: "Threads / Replies", desc: "Threaded reply conversations", support: { teamchatx: true, slack: true, teams: true, troop: true } },
@@ -62,19 +63,25 @@ const features = [
   { category: "Messaging", feature: "Broadcast to Groups", desc: "Broadcast directly to multiple groups in one shot", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "Messaging", feature: "Broadcast with File Attachments", desc: "Attach files when broadcasting to contacts & groups", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "Messaging", feature: "File & Image Sharing (up to 2 GB)", desc: "Share documents, images, and media files", support: { teamchatx: true, slack: "partial", teams: true, troop: true } },
-  { category: "Messaging", feature: "Voice-to-Text Messages", desc: "Convert voice recordings to text automatically", support: { teamchatx: true, slack: false, teams: "partial", troop: false } },
+  { category: "Messaging", feature: "Voice Messages", desc: "Record and send voice messages", support: { teamchatx: true, slack: false, teams: false, troop: true } },
+  { category: "Messaging", feature: "Voice-to-Text Transcription", desc: "Convert voice recordings to text automatically", support: { teamchatx: true, slack: false, teams: "partial", troop: false } },
   { category: "Messaging", feature: "GIF Picker (Tenor)", desc: "Search and send animated GIFs in chat", support: { teamchatx: true, slack: true, teams: true, troop: false } },
   { category: "Messaging", feature: "Emoji Reactions", desc: "React to messages with emojis", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Messaging", feature: "Reply / Forward / Pin", desc: "Reply to, forward, or pin important messages", support: { teamchatx: true, slack: "partial", teams: true, troop: true } },
+  { category: "Messaging", feature: "Forward to Multiple Contacts", desc: "Forward a message to multiple contacts simultaneously", support: { teamchatx: true, slack: false, teams: false, troop: true } },
   { category: "Messaging", feature: "Edit & Delete Messages", desc: "Edit sent messages or delete them for everyone", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Messaging", feature: "Disappearing Messages", desc: "Auto-delete messages after a set timer", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "Messaging", feature: "Scheduled Messages", desc: "Schedule a message to send at a future time", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Messaging", feature: "Starred / Bookmarked Messages", desc: "Star important messages for quick access in a dedicated screen", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Messaging", feature: "Pin / Archive Chats", desc: "Pin important chats to top, archive old ones to hide", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Messaging", feature: "Read Receipts", desc: "See when your message has been read", support: { teamchatx: true, slack: false, teams: true, troop: true } },
   { category: "Messaging", feature: "Typing Indicators", desc: "See when someone is typing", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Messaging", feature: "Offline Message Queue", desc: "Messages queued when offline, auto-sent on reconnect with retry", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  { category: "Messaging", feature: "Chat Export", desc: "Export entire chat history as shareable text file", support: { teamchatx: true, slack: true, teams: "partial", troop: false } },
   { category: "Messaging", feature: "End-to-End Encryption (AES-256)", desc: "Messages encrypted at rest with AES-256-GCM", support: { teamchatx: true, slack: "partial", teams: "partial", troop: true } },
 
-  // ─── Audio & Video ──────────────────────────────────────
-  { category: "Audio & Video", feature: "1-on-1 Audio Call", desc: "Voice calls between two users", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  // ═══ AUDIO & VIDEO ═══════════════════════════════════════
+  { category: "Audio & Video", feature: "1-on-1 Audio Call", desc: "Voice calls between two users via WebRTC", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Audio & Video", feature: "1-on-1 Video Call", desc: "Video calls between two users", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Audio & Video", feature: "Group Video Meetings", desc: "Multi-participant video conferences", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Audio & Video", feature: "In-Meeting Chat", desc: "Send text messages during a live meeting", support: { teamchatx: true, slack: true, teams: true, troop: false } },
@@ -85,8 +92,9 @@ const features = [
   { category: "Audio & Video", feature: "Screen Sharing", desc: "Share your screen during calls or meetings", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Audio & Video", feature: "Screen Annotation", desc: "Draw and annotate on shared screens in real-time", support: { teamchatx: true, slack: false, teams: true, troop: false } },
   { category: "Audio & Video", feature: "Remote Desktop Control", desc: "Take control of a shared screen remotely", support: { teamchatx: true, slack: false, teams: true, troop: false } },
+  { category: "Audio & Video", feature: "Voice Playback Speed (1x/1.5x/2x)", desc: "Play voice messages at adjustable speed", support: { teamchatx: true, slack: false, teams: false, troop: false } },
 
-  // ─── Meeting & Scheduling ───────────────────────────────
+  // ═══ MEETING & SCHEDULING ════════════════════════════════
   { category: "Meeting & Scheduling", feature: "Instant Meeting (1-Click)", desc: "Start a meeting instantly with one click", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Meeting & Scheduling", feature: "Schedule Meeting", desc: "Schedule meetings for a future date and time", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Meeting & Scheduling", feature: "Join by Meeting ID", desc: "Join meetings using a unique meeting code", support: { teamchatx: true, slack: true, teams: true, troop: true } },
@@ -95,8 +103,9 @@ const features = [
   { category: "Meeting & Scheduling", feature: "Email Invitations (HTML)", desc: "Send meeting invites via professional HTML emails", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Meeting & Scheduling", feature: "Meeting Duration Tracker", desc: "Track how long each meeting lasts", support: { teamchatx: true, slack: false, teams: true, troop: false } },
 
-  // ─── AI & Smart Features ────────────────────────────────
-  { category: "AI & Smart Features", feature: "AI Live Assistant", desc: "Built-in AI chatbot for instant answers", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  // ═══ AI & SMART FEATURES ═════════════════════════════════
+  { category: "AI & Smart Features", feature: "AI Live Assistant", desc: "Built-in AI chatbot for instant answers and troubleshooting", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  { category: "AI & Smart Features", feature: "AI App Guide", desc: "In-app AI chatbot for help, how-to guides in English/Hindi/Hinglish", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "AI & Smart Features", feature: "Smart Compose (Auto-Complete)", desc: "AI-powered auto-complete as you type", support: { teamchatx: true, slack: false, teams: "partial", troop: false } },
   { category: "AI & Smart Features", feature: "Grammar Check", desc: "Automatic grammar correction before sending", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "AI & Smart Features", feature: "Auto Translate (14 Languages)", desc: "Translate messages instantly to any of 14 languages", support: { teamchatx: true, slack: "partial", teams: true, troop: false } },
@@ -105,62 +114,64 @@ const features = [
   { category: "AI & Smart Features", feature: "AI Call Notes", desc: "Auto-generate meeting summary, key points, action items", support: { teamchatx: true, slack: "partial", teams: true, troop: false } },
   { category: "AI & Smart Features", feature: "AI Semantic Search", desc: "Search by meaning, not exact keywords", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
 
-  // ─── Privacy & Security ─────────────────────────────────
+  // ═══ PRIVACY & SECURITY ══════════════════════════════════
   { category: "Privacy & Security", feature: "Chat Lock (PIN)", desc: "Lock individual chats behind a PIN", support: { teamchatx: true, slack: false, teams: false, troop: false } },
   { category: "Privacy & Security", feature: "Mute / DND per Thread", desc: "Mute notifications for specific conversations", support: { teamchatx: true, slack: true, teams: true, troop: true } },
   { category: "Privacy & Security", feature: "Custom Notification Sounds", desc: "Set different sounds for different chats", support: { teamchatx: true, slack: true, teams: false, troop: false } },
   { category: "Privacy & Security", feature: "Presence Indicators", desc: "See who's online, offline, or idle", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Privacy & Security", feature: "IP & Platform Restrictions", desc: "Restrict workspace access by network and platform", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  { category: "Privacy & Security", feature: "IP & Platform Restrictions", desc: "Restrict workspace access by IP range and platform type", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
   { category: "Privacy & Security", feature: "Trusted Device Management", desc: "View, manage, and revoke trusted devices", support: { teamchatx: true, slack: true, teams: true, troop: false } },
-  { category: "Privacy & Security", feature: "Dangerous File Blocking", desc: "Block .exe, .bat, macros, and harmful uploads", support: { teamchatx: true, slack: true, teams: true, troop: false } },
-
-  // ─── Admin & Management ─────────────────────────────────
-  { category: "Admin & Management", feature: "Admin Dashboard", desc: "Central dashboard for managing users and settings", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Admin & Management", feature: "Bulk User Upload (CSV)", desc: "Import hundreds of users via CSV at once", support: { teamchatx: true, slack: true, teams: true, troop: false } },
-  { category: "Admin & Management", feature: "Role-Based Access (RBAC)", desc: "Owner, Admin, Member, Restricted role permissions", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Admin & Management", feature: "Department & Designation Management", desc: "Organize users by departments, designations, and locations", support: { teamchatx: true, slack: false, teams: "partial", troop: false } },
-  { category: "Admin & Management", feature: "Activity Logs (Audit Trail)", desc: "Track user actions and system events", support: { teamchatx: true, slack: "partial", teams: true, troop: true } },
-  { category: "Admin & Management", feature: "Self-Hosted Deployment", desc: "Deploy on your own servers / on-prem", support: { teamchatx: true, slack: false, teams: false, troop: true } },
-
-  // ─── Platform & Pricing ─────────────────────────────────
-  { category: "Platform", feature: "Web App (Browser)", desc: "Access from any modern browser", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Platform", feature: "Windows Desktop App", desc: "Native Windows application", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Platform", feature: "Multi-Organization Support", desc: "Switch between multiple organizations / workspaces", support: { teamchatx: true, slack: true, teams: true, troop: false } },
-  { category: "Platform", feature: "S3 Cloud Storage", desc: "AWS S3 integration for file storage", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Platform", feature: "Stripe Built-In Billing", desc: "Built-in subscription, invoices, and payment management", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Platform", feature: "Mobile App (iOS & Android)", desc: "Native mobile application with full feature parity", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Platform", feature: "Mobile Admin Panel", desc: "Full admin panel on mobile — users, groups, controls, billing", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-
-  // ─── Mobile-First Features ─────────────────────────────
-  { category: "Messaging", feature: "Swipe to Reply", desc: "Swipe right on any message to instantly reply with haptic feedback", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Messaging", feature: "Starred / Bookmarked Messages", desc: "Star important messages for quick access in a dedicated screen", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Messaging", feature: "Offline Message Queue", desc: "Messages queued when offline, auto-sent on reconnect with retry", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
-  { category: "Messaging", feature: "Forward to Multiple", desc: "Forward a message to multiple contacts simultaneously", support: { teamchatx: true, slack: false, teams: false, troop: true } },
-  { category: "Messaging", feature: "Voice Playback Speed", desc: "Play voice messages at 1x, 1.5x, or 2x speed", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Messaging", feature: "Chat Export", desc: "Export entire chat history as shareable text file", support: { teamchatx: true, slack: true, teams: "partial", troop: false } },
-
-  // ─── Security Extras ───────────────────────────────────
-  { category: "Privacy & Security", feature: "QR Code Login", desc: "Scan QR from web browser to login without typing credentials", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Privacy & Security", feature: "Biometric Login", desc: "Fingerprint / Face ID login after first-time OTP verification", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Privacy & Security", feature: "Dangerous File Blocking", desc: "Block .exe, .bat, .sh, macros, and harmful uploads server-side", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Privacy & Security", feature: "XSS & Input Sanitization", desc: "Server-side sanitization of all user input to prevent XSS attacks", support: { teamchatx: true, slack: true, teams: true, troop: "partial" } },
   { category: "Privacy & Security", feature: "Device Limit (Max 3)", desc: "Maximum 3 simultaneous logins with device management", support: { teamchatx: true, slack: false, teams: false, troop: true } },
-  { category: "Privacy & Security", feature: "XSS & Input Sanitization", desc: "Server-side sanitization of all messages to prevent XSS attacks", support: { teamchatx: true, slack: true, teams: true, troop: "partial" } },
-  { category: "Privacy & Security", feature: "Password Strength Meter", desc: "Visual strength indicator on registration and password change", support: { teamchatx: true, slack: true, teams: true, troop: false } },
-  { category: "Privacy & Security", feature: "Account Deletion (GDPR)", desc: "Self-service account deletion with data removal for compliance", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Privacy & Security", feature: "Password Strength Meter", desc: "Visual 4-level strength indicator on registration", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Privacy & Security", feature: "Account Deletion (GDPR)", desc: "Self-service account deletion with complete data removal", support: { teamchatx: true, slack: true, teams: true, troop: false } },
   { category: "Privacy & Security", feature: "Terms & Privacy Acceptance", desc: "Mandatory acceptance on registration with linked legal documents", support: { teamchatx: true, slack: true, teams: true, troop: true } },
 
-  // ─── Productivity Extras ───────────────────────────────
-  { category: "Messaging", feature: "Chat Wallpaper", desc: "Set custom background per chat for personalized experience", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Messaging", feature: "Pin / Archive Chats", desc: "Pin important chats to top, archive old ones to hide", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-
-  // ─── Admin Extras ──────────────────────────────────────
-  { category: "Admin & Management", feature: "OTP Verification Logs", desc: "View all OTP verifications with codes (Super Admin), attempts, IP", support: { teamchatx: true, slack: false, teams: false, troop: false } },
-  { category: "Admin & Management", feature: "Payment History & Invoices", desc: "Complete payment history with invoice details and billing info", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  // ═══ ADMIN & MANAGEMENT ══════════════════════════════════
+  { category: "Admin & Management", feature: "Admin Dashboard", desc: "Central dashboard for managing users, groups, and settings", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Admin & Management", feature: "Role-Based Access (RBAC)", desc: "Owner, Admin, Super Admin, Member role permissions", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Admin & Management", feature: "Department & Designation Management", desc: "Organize users by departments, designations, and locations", support: { teamchatx: true, slack: false, teams: "partial", troop: false } },
   { category: "Admin & Management", feature: "Bulk User Upload (CSV)", desc: "Import users via CSV with auto role and department assignment", support: { teamchatx: true, slack: true, teams: true, troop: false } },
   { category: "Admin & Management", feature: "Email Invitations", desc: "Send branded HTML email invitations with one-click join", support: { teamchatx: true, slack: true, teams: true, troop: true } },
-  { category: "Admin & Management", feature: "IP & Platform Restrictions", desc: "Restrict access by IP range and platform for enterprise security", support: { teamchatx: true, slack: "partial", teams: true, troop: false } },
+  { category: "Admin & Management", feature: "Activity Logs (Audit Trail)", desc: "Track user actions and system events with timestamps", support: { teamchatx: true, slack: "partial", teams: true, troop: true } },
+  { category: "Admin & Management", feature: "OTP Verification Logs", desc: "View all OTP verifications with codes (Super Admin), attempts, IP", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Admin & Management", feature: "Payment History & Invoices", desc: "Complete payment history with invoice details and billing info", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Admin & Management", feature: "Self-Hosted Deployment", desc: "Deploy on your own servers / private cloud / air-gapped", support: { teamchatx: true, slack: false, teams: false, troop: true } },
 
-  // ─── AI Extras ─────────────────────────────────────────
-  { category: "AI & Smart Features", feature: "AI App Guide", desc: "In-app AI chatbot for help, how-to, and troubleshooting", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  // ═══ MOBILE (App-Specific Features) ══════════════════════
+  { category: "Mobile", feature: "Native Mobile App (iOS & Android)", desc: "Full-featured native mobile app with 55+ screens", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Mobile", feature: "Mobile Admin Panel", desc: "Full admin panel on mobile — users, groups, departments, billing, OTP logs", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Swipe to Reply", desc: "Swipe right on any message to instantly reply with haptic feedback", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Chat Wallpaper", desc: "Set custom background image per chat from photo library", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Biometric Login", desc: "Fingerprint / Face ID login with OTP skip for trusted devices", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "QR Code Login (Linked Devices)", desc: "Scan QR from web browser to login — WhatsApp-style linked devices", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Screen Share Receive", desc: "View web user's shared screen on mobile during calls", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Mobile", feature: "Offline Queue with Auto-Retry", desc: "Messages queued in AsyncStorage when offline, auto-sent on reconnect", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  { category: "Mobile", feature: "Dark Mode (Full Theme)", desc: "Complete dark mode with WhatsApp-style colors across all screens", support: { teamchatx: true, slack: true, teams: true, troop: "partial" } },
+  { category: "Mobile", feature: "Push Notifications", desc: "Real-time push notifications for messages, calls, and mentions", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Mobile", feature: "Haptic Feedback", desc: "Tactile feedback on message actions, reactions, and navigation", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Photo Viewer / Gallery", desc: "Full-screen image viewer with zoom, swipe, and share actions", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Mobile", feature: "Profile Photo Upload", desc: "Take or choose profile photo from camera/gallery with crop", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Mobile", feature: "Contact Photo Viewer", desc: "Tap any avatar to view full-size profile photo", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Mobile", feature: "Draft Auto-Save", desc: "Unsent messages saved as drafts, restored on chat reopen", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Mobile", feature: "Cache with TTL", desc: "Intelligent caching for contacts, threads, messages with 24hr TTL", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+
+  // ═══ WEB & DESKTOP (Web-Specific Features) ═══════════════
+  { category: "Web & Desktop", feature: "Web App (Browser)", desc: "Full-featured app accessible from any modern browser", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Web & Desktop", feature: "Windows Desktop App", desc: "Native Windows desktop application", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Web & Desktop", feature: "QR Code Generator (Login)", desc: "Generate QR code on web for mobile scan login", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Web & Desktop", feature: "Screen Sharing (Presenter)", desc: "Share your entire screen or specific window from web", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Web & Desktop", feature: "Multi-Organization Support", desc: "Switch between multiple organizations / workspaces", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Web & Desktop", feature: "S3 Cloud Storage Integration", desc: "AWS S3 integration for scalable file storage", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Web & Desktop", feature: "Stripe Built-In Billing", desc: "Built-in subscription management, invoices, and payment processing", support: { teamchatx: true, slack: false, teams: false, troop: false } },
+  { category: "Web & Desktop", feature: "Web Admin Dashboard", desc: "Full admin panel with users, groups, departments, billing, logs", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Web & Desktop", feature: "Owner Dashboard", desc: "Dedicated owner view with org-wide analytics and controls", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
+  { category: "Web & Desktop", feature: "Desktop Notifications", desc: "Native browser/OS notifications for new messages and calls", support: { teamchatx: true, slack: true, teams: true, troop: true } },
+  { category: "Web & Desktop", feature: "Keyboard Shortcuts", desc: "Keyboard shortcuts for common actions and navigation", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Web & Desktop", feature: "Link Preview Cards", desc: "Auto-generated rich link previews with title, image, and description", support: { teamchatx: true, slack: true, teams: true, troop: "partial" } },
+  { category: "Web & Desktop", feature: "Code Block Formatting", desc: "Syntax-highlighted code blocks in messages", support: { teamchatx: true, slack: true, teams: true, troop: false } },
+  { category: "Web & Desktop", feature: "Polls (Single/Multi Choice)", desc: "Create and vote on polls within any chat", support: { teamchatx: true, slack: "partial", teams: "partial", troop: false } },
 ];
 
 // Pricing comparison
@@ -284,7 +295,8 @@ const categoryIcons = {
   "AI & Smart Features": "\u2728",
   "Privacy & Security": "\uD83D\uDD12",
   "Admin & Management": "\u2699\uFE0F",
-  "Platform": "\uD83D\uDE80",
+  "Mobile": "\uD83D\uDCF1",
+  "Web & Desktop": "\uD83D\uDCBB",
 };
 
 // Score (true = 1, partial = 0.5, false = 0)
