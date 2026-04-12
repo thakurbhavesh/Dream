@@ -360,8 +360,29 @@ const initSocket = (httpServer) => {
 
   console.log('[socket] Socket.IO initialized');
 
+  // ─── Cache cleanup (every 5 min) — prevent unbounded memory growth ────
+  const _cacheCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    // Clean _orgControlsCache (5 min TTL)
+    for (const [k, v] of _orgControlsCache) {
+      if (now - v.ts > CONTROL_CACHE_TTL) _orgControlsCache.delete(k);
+    }
+    // Clean _muteCache (2 min TTL)
+    for (const [k, v] of _muteCache) {
+      if (now - v.ts > MUTE_CACHE_TTL) _muteCache.delete(k);
+    }
+    // Clean _dndCache (1 min TTL)
+    for (const [k, v] of _dndCache) {
+      if (now - v.ts > DND_CACHE_TTL) _dndCache.delete(k);
+    }
+    // Clean _groupMembersCache (30s TTL)
+    for (const [k, v] of _groupMembersCache) {
+      if (now - v.ts > 30_000) _groupMembersCache.delete(k);
+    }
+  }, 5 * 60_000);
+
   // ─── Scheduled Messages Scheduler (every 30s) ──────────────────────────
-  setInterval(async () => {
+  const _schedulerInterval = setInterval(async () => {
     try {
       const dueMessages = await scheduledMessageModel.getDueMessages();
       for (const sm of dueMessages) {
@@ -425,7 +446,7 @@ const initSocket = (httpServer) => {
   }, 30_000);
 
   // ─── Disappearing Messages Cleanup (every 60s) ─────────────────────────
-  setInterval(async () => {
+  const _disappearingInterval = setInterval(async () => {
     try {
       const result = await disappearingModel.cleanupExpiredMessages();
       if (result.dmDeleted || result.groupDeleted) {
@@ -437,9 +458,19 @@ const initSocket = (httpServer) => {
   }, 60_000);
 
   // ─── Mute Expiry Cleanup (every 5 min) ─────────────────────────────────
-  setInterval(async () => {
+  const _muteCleanupInterval = setInterval(async () => {
     try { await threadMuteModel.cleanupExpired(); } catch {}
   }, 5 * 60_000);
+
+  // Graceful shutdown — clear all intervals
+  const cleanupIntervals = () => {
+    clearInterval(_cacheCleanupInterval);
+    clearInterval(_schedulerInterval);
+    clearInterval(_disappearingInterval);
+    clearInterval(_muteCleanupInterval);
+  };
+  process.on('SIGTERM', cleanupIntervals);
+  process.on('SIGINT', cleanupIntervals);
 
   return io;
 };

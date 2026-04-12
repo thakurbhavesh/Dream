@@ -32,7 +32,7 @@ const chatUpload = multer({
       cb(null, `chat-upload-${unique}${path.extname(file.originalname)}`);
     },
   }),
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB max for chat files
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB max for chat files
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
     if (BLOCKED_EXTENSIONS.has(ext)) {

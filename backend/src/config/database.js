@@ -40,8 +40,8 @@ const pool = new Pool(
 );
 
 pool.on('error', (err) => {
-  console.error('Unexpected database error', err);
-  process.exit(1);
+  console.error('Unexpected database pool error:', err.message);
+  // Don't crash on transient errors — pool will reconnect automatically
 });
 
 const connectDatabase = async () => {

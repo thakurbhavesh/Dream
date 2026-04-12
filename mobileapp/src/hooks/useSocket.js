@@ -119,13 +119,17 @@ const connectSocket = async (forceNew = false) => {
       reattachHandlers(socket);
     });
 
+    let reconnectTimer = null;
     socket.on('disconnect', (reason) => {
       console.log('[socket] disconnected:', reason);
       globalConnected = false;
       notifyState();
+      // Clear any pending reconnect to prevent stacking
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (reason === 'io server disconnect') {
         // Server kicked — refresh token and reconnect
-        setTimeout(async () => {
+        reconnectTimer = setTimeout(async () => {
+          reconnectTimer = null;
           const newToken = await doRefresh();
           if (newToken && socket) {
             socket.auth = { token: newToken };
