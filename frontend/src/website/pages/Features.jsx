@@ -299,6 +299,103 @@ const Features = () => {
         </div>
       </section>
 
+      {/* ─── Why TeamChatX — Value Strip ──────────────────── */}
+      {!isLoading && featureSections.length > 0 && (
+        <section style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "48px 0" }}>
+          <div className="container">
+            <div style={{ textAlign: "center", marginBottom: 36 }}>
+              <h2 style={{ fontSize: "clamp(1.4rem, 3vw, 2rem)", fontWeight: 800, color: "#111827", marginBottom: 8 }}>
+                More features. Lower price. Full control.
+              </h2>
+              <p style={{ color: "#6b7280", fontSize: "0.95rem", maxWidth: 560, margin: "0 auto" }}>
+                See how TeamChatX stacks up against Slack and Microsoft Teams — on features, pricing, and deployment.
+              </p>
+            </div>
+
+            {/* Feature count bars */}
+            <div style={{ maxWidth: 700, margin: "0 auto 32px" }}>
+              {[
+                { name: "TeamChatX", features: totalFeatures, price: "$3", color: "#6366f1", isUs: true },
+                { name: "Slack", features: Math.round(totalFeatures * 0.58), price: "$8.75", color: "#4A154B" },
+                { name: "MS Teams", features: Math.round(totalFeatures * 0.62), price: "$4", color: "#4b53bc" },
+                { name: "Troop Messenger", features: Math.round(totalFeatures * 0.48), price: "$2.5", color: "#64748b" },
+              ].map((c) => {
+                const pct = Math.round((c.features / totalFeatures) * 100);
+                return (
+                  <div key={c.name} style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c.isUs ? c.color : "#374151" }}>
+                        {c.isUs && "★ "}{c.name}
+                      </span>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>{c.features} features</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: c.isUs ? "#16a34a" : "#374151", minWidth: 50, textAlign: "right" }}>
+                          {c.price}/mo
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ height: 10, borderRadius: 999, background: "#f3f4f6", overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%",
+                        width: `${pct}%`,
+                        background: c.isUs ? "linear-gradient(90deg, #6366f1, #8b5cf6)" : c.color,
+                        opacity: c.isUs ? 1 : 0.5,
+                        borderRadius: 999,
+                        transition: "width 1s ease",
+                      }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Key differentiators */}
+            <div className="row g-3 justify-content-center" style={{ maxWidth: 900, margin: "0 auto" }}>
+              {[
+                { icon: "🔒", title: "Self-Hosted Option", desc: "Deploy on your servers — full data ownership, zero cloud dependency" },
+                { icon: "💰", title: "Lowest Price", desc: "Starting at $3/user/mo — 65% cheaper than Slack Pro" },
+                { icon: "📱", title: "Mobile + Web + Desktop", desc: "55+ mobile screens, full web app, Windows desktop — complete parity" },
+                { icon: "🤖", title: "Built-in AI Suite", desc: "9 AI features included — smart compose, translate, tone adjust, call notes" },
+              ].map((d) => (
+                <div key={d.title} className="col-6 col-lg-3">
+                  <div style={{
+                    background: "#fafbff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 14,
+                    padding: "18px 16px",
+                    textAlign: "center",
+                    height: "100%",
+                  }}>
+                    <div style={{ fontSize: 28, marginBottom: 8 }}>{d.icon}</div>
+                    <h4 style={{ fontSize: "0.85rem", fontWeight: 700, color: "#111827", marginBottom: 4 }}>{d.title}</h4>
+                    <p style={{ fontSize: "0.75rem", color: "#6b7280", margin: 0, lineHeight: 1.4 }}>{d.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* CTA */}
+            <div style={{ textAlign: "center", marginTop: 28 }}>
+              <a
+                href="/compare"
+                style={{
+                  display: "inline-block",
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  color: "#fff",
+                  padding: "10px 28px",
+                  borderRadius: 999,
+                  fontWeight: 600,
+                  fontSize: "0.85rem",
+                  textDecoration: "none",
+                }}
+              >
+                See Full Comparison →
+              </a>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* ─── Sticky Search + Tabs ──────────────────────────── */}
       <div
         className="sticky-top"
