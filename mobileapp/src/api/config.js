@@ -76,8 +76,13 @@ api.interceptors.response.use(
       throw new Error('No token in refresh response');
     } catch (refreshError) {
       processQueue(refreshError);
-      await SecureStore.deleteItemAsync('accessToken');
-      await SecureStore.deleteItemAsync('refreshToken');
+      // Only delete tokens if server explicitly rejected (401/403)
+      // Don't delete on network errors — user should stay logged in
+      const refreshStatus = refreshError?.response?.status;
+      if (refreshStatus === 401 || refreshStatus === 403) {
+        await SecureStore.deleteItemAsync('accessToken');
+        await SecureStore.deleteItemAsync('refreshToken');
+      }
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;

@@ -11,7 +11,8 @@ Notifications.setNotificationHandler({
     const isSameThread = activeThread && data?.threadId === activeThread;
 
     return {
-      shouldShowAlert: !isSameThread, // Don't show banner if viewing same thread
+      shouldShowBanner: !isSameThread, // Don't show banner if viewing same thread
+      shouldShowList: true,
       shouldPlaySound: !isSameThread,
       shouldSetBadge: true,
       priority: Notifications.AndroidNotificationPriority.MAX,

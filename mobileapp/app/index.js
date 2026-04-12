@@ -71,7 +71,14 @@ export default function Splash() {
   }, []);
 
   if (done) {
-    if (loading) return null;
+    if (loading) {
+      // Show a minimal loading screen instead of white blank
+      return (
+        <View style={{ flex: 1, backgroundColor: PD, justifyContent: 'center', alignItems: 'center' }}>
+          <Ionicons name="chatbubbles" size={40} color="#fff" />
+        </View>
+      );
+    }
     if (user) return <Redirect href="/(tabs)/chats" />;
     return <Redirect href="/(auth)/onboarding" />;
   }
