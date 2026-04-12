@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Dimensions, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 let RTCView;
 try {
   RTCView = require('react-native-webrtc').RTCView;
@@ -35,6 +36,56 @@ export default function CallScreen() {
   } = useCall();
 
   const isVideo = (callType || type) === 'video';
+  const ringbackRef = useRef(null);
+
+  // Outgoing ringback sound — plays while waiting for answer
+  useEffect(() => {
+    let mounted = true;
+
+    const playRingback = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        const { sound } = await Audio.Sound.createAsync(
+          require('../assets/ringback.wav'),
+          { isLooping: true, volume: 0.7, shouldPlay: true }
+        );
+        if (mounted) {
+          ringbackRef.current = sound;
+        } else {
+          await sound.unloadAsync();
+        }
+      } catch (e) {
+        console.log('[CallScreen] ringback error:', e.message);
+      }
+    };
+
+    const stopRingback = async () => {
+      if (ringbackRef.current) {
+        try {
+          await ringbackRef.current.stopAsync();
+          await ringbackRef.current.unloadAsync();
+        } catch {}
+        ringbackRef.current = null;
+      }
+    };
+
+    if (callState === 'outgoing') {
+      playRingback();
+    } else {
+      stopRingback();
+    }
+
+    return () => {
+      mounted = false;
+      stopRingback();
+    };
+  }, [callState]);
 
   // If call ended, go back
   useEffect(() => {

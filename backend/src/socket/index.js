@@ -1561,14 +1561,16 @@ const onConnection = (socket) => {
   socket.on('call:request', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
-      const { targetUserId, callType } = data || {};
+      const { targetUserId, callType, signalData } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       if (String(targetUserId) === userId) return ack?.({ error: 'Cannot call yourself' });
       if (!isUserOnline(String(targetUserId))) return ack?.({ error: 'User is offline' });
       emitToUser(String(targetUserId), 'call:incoming_request', {
         fromUserId: userId,
         fromUserName: socket.user.name || 'Unknown',
+        fromUserAvatar: socket.user.avatar || null,
         callType: callType || 'audio',
+        signalData: signalData || null,
         timestamp: new Date().toISOString(),
       });
       ack?.({ ok: true });
@@ -1581,11 +1583,12 @@ const onConnection = (socket) => {
   socket.on('call:accept', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
-      const { targetUserId } = data || {};
+      const { targetUserId, signalData } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       emitToUser(String(targetUserId), 'call:accepted', {
         fromUserId: userId,
         fromUserName: socket.user.name || 'Unknown',
+        signalData: signalData || null,
       });
       ack?.({ ok: true });
     } catch (err) {

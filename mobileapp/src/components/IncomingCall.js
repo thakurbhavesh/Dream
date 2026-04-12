@@ -3,14 +3,65 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Animated, Vibration, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import Avatar from './Avatar';
 
 export default function IncomingCall({ callState, callType, remoteUser, onAccept, onReject }) {
   const slideAnim = useRef(new Animated.Value(-300)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const soundRef = useRef(null);
 
   const visible = callState === 'incoming';
+
+  // Play/stop ringtone
+  useEffect(() => {
+    let mounted = true;
+
+    const playRingtone = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+        });
+        const { sound } = await Audio.Sound.createAsync(
+          require('../../assets/ringtone.wav'),
+          { isLooping: true, volume: 1.0, shouldPlay: true }
+        );
+        if (mounted) {
+          soundRef.current = sound;
+        } else {
+          await sound.unloadAsync();
+        }
+      } catch (e) {
+        console.log('[IncomingCall] ringtone error:', e.message);
+      }
+    };
+
+    const stopRingtone = async () => {
+      if (soundRef.current) {
+        try {
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+        } catch {}
+        soundRef.current = null;
+      }
+    };
+
+    if (visible) {
+      playRingtone();
+    } else {
+      stopRingtone();
+    }
+
+    return () => {
+      mounted = false;
+      stopRingtone();
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (visible) {
