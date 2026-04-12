@@ -1,128 +1,402 @@
-import React from "react";
+import React, { useState, useMemo } from "react";
+import { Link } from "react-router-dom";
 
+// ─── Platform icons ──────────────────────────────────────
+const PlatformIcon = ({ type, active }) => {
+  const color = active ? "#0162c4" : "#cbd5e1";
+  const icons = {
+    web: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>,
+    android: <svg width="18" height="18" viewBox="0 0 24 24" fill={color}><path d="M6 18c0 .55.45 1 1 1h1v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h2v3.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5V19h1c.55 0 1-.45 1-1V8H6v10zM3.5 8C2.67 8 2 8.67 2 9.5v7c0 .83.67 1.5 1.5 1.5S5 17.33 5 16.5v-7C5 8.67 4.33 8 3.5 8zm17 0c-.83 0-1.5.67-1.5 1.5v7c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-7c0-.83-.67-1.5-1.5-1.5zm-4.97-5.84l1.3-1.3c.2-.2.2-.51 0-.71-.2-.2-.51-.2-.71 0l-1.48 1.48C13.85 1.23 12.95 1 12 1c-.96 0-1.86.23-2.66.63L7.85.15c-.2-.2-.51-.2-.71 0-.2.2-.2.51 0 .71l1.31 1.31C6.97 3.26 6 5.01 6 7h12c0-1.99-.97-3.75-2.47-4.84zM10 5H9V4h1v1zm5 0h-1V4h1v1z" /></svg>,
+    ios: <svg width="18" height="18" viewBox="0 0 24 24" fill={color}><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" /></svg>,
+    desktop: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><path d="M20 3H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V5a2 2 0 00-2-2z" /><path d="M8 21h8M12 17v4" /></svg>,
+  };
+  return icons[type] || null;
+};
+
+// ─── Category badge colors ───────────────────────────────
+const CAT_COLORS = {
+  feature: { bg: "#dcfce7", color: "#15803d", border: "#86efac" },
+  improvement: { bg: "#dbeafe", color: "#1d4ed8", border: "#93c5fd" },
+  fix: { bg: "#fee2e2", color: "#b91c1c", border: "#fca5a5" },
+  security: { bg: "#fef3c7", color: "#92400e", border: "#fcd34d" },
+  performance: { bg: "#e0e7ff", color: "#4338ca", border: "#a5b4fc" },
+  breaking: { bg: "#fce7f3", color: "#9d174d", border: "#f9a8d4" },
+};
+
+// ─── Release data ────────────────────────────────────────
 const releases = [
   {
-    version: "1.5.0",
-    date: "April 2026",
+    version: "1.5.2",
+    date: "April 12, 2026",
     tag: "Latest",
-    highlights: [
-      "Mobile app with 55+ screens — full feature parity with web",
-      "1-on-1 audio & video calling with WebRTC",
-      "Screen share receive on mobile",
-      "AI Live Assistant on mobile",
-      "QR Code login (WhatsApp-style linked devices)",
-      "Biometric login — fingerprint & Face ID with OTP skip",
-      "Offline message queue with auto-retry on reconnect",
-      "Admin panel on mobile — users, groups, departments, billing, OTP logs",
+    platforms: ["web", "android", "ios", "desktop"],
+    changes: [
+      { type: "fix", text: "Calls not connecting — backend was not forwarding SDP offer/answer in WebRTC signaling" },
+      { type: "feature", text: "Incoming call ringtone with vibration pattern on mobile" },
+      { type: "feature", text: "Outgoing ringback tone while waiting for answer" },
+      { type: "fix", text: "Auto-logout on app restart — tokens were deleted on network errors instead of only on 401" },
+      { type: "fix", text: "White screen after splash — loading state now shows branded screen instead of blank" },
+      { type: "improvement", text: "Offline resilience — JWT payload used as fallback user data when API unreachable" },
+      { type: "fix", text: "Deprecated shouldShowAlert warning in expo-notifications" },
+    ],
+  },
+  {
+    version: "1.5.1",
+    date: "April 10, 2026",
+    platforms: ["web"],
+    changes: [
+      { type: "feature", text: "11 new website pages — Downloads, Blogs, Versions, Channel Partner, Privacy policies, GDPR, Refund" },
+      { type: "feature", text: "Self-Hosted vs Cloud deployment comparison section on Compare page" },
+      { type: "feature", text: "Mobile & Web/Desktop feature categories added (30 new features in comparison)" },
+      { type: "improvement", text: "Complete rebrand — removed all legacy Troop Messenger / Aabhyasa references" },
+      { type: "improvement", text: "Footer rewritten with TeamChatX branding, updated emails and copyright" },
+      { type: "feature", text: "Features page value section — bar chart comparing feature counts and pricing vs competitors" },
+    ],
+  },
+  {
+    version: "1.5.0",
+    date: "April 5, 2026",
+    platforms: ["web", "android", "ios"],
+    changes: [
+      { type: "feature", text: "Mobile app with 55+ screens — full feature parity with web" },
+      { type: "feature", text: "1-on-1 audio & video calling with WebRTC (STUN/TURN)" },
+      { type: "feature", text: "Screen share receive on mobile — view web user's shared screen with PIP layout" },
+      { type: "feature", text: "AI Live Assistant on mobile — English/Hindi/Hinglish support" },
+      { type: "feature", text: "QR Code login — WhatsApp-style scan from web, linked devices management" },
+      { type: "feature", text: "Biometric login — fingerprint & Face ID with OTP skip for trusted devices" },
+      { type: "feature", text: "Offline message queue with auto-retry — AsyncStorage + NetInfo based" },
+      { type: "feature", text: "Admin panel on mobile — 9 screens: users, groups, departments, billing, OTP logs" },
+      { type: "feature", text: "Swipe to reply with haptic feedback (PanResponder)" },
+      { type: "feature", text: "Dark mode across all 55+ screens with WhatsApp-style colors" },
+      { type: "feature", text: "Chat wallpaper — custom per-chat backgrounds from photo library" },
+      { type: "feature", text: "Voice message playback at 1x / 1.5x / 2x speed" },
+      { type: "feature", text: "Draft auto-save — unsent messages restored on chat reopen" },
+      { type: "feature", text: "Pin / archive chats with long-press actions" },
+      { type: "feature", text: "Profile photo upload with camera/gallery picker" },
+      { type: "security", text: "Device limit enforcement — max 3 simultaneous logins" },
     ],
   },
   {
     version: "1.4.0",
-    date: "March 2026",
-    highlights: [
-      "Compare page — 4-way feature comparison with radar chart & cost calculator",
-      "162 product features synced to database",
-      "Screen annotation and remote desktop control in meetings",
-      "Broadcast with file attachments",
-      "Chat export as shareable text file",
-      "Password strength meter on registration",
+    date: "March 15, 2026",
+    platforms: ["web"],
+    changes: [
+      { type: "feature", text: "Compare page — 4-way feature comparison with interactive radar chart" },
+      { type: "feature", text: "Cost calculator with sliders — team size & contract length" },
+      { type: "feature", text: "162 product features synced to database across 11 categories" },
+      { type: "feature", text: "Screen annotation — draw and highlight on shared screens" },
+      { type: "feature", text: "Remote desktop control during screen share" },
+      { type: "feature", text: "Broadcast with file attachments" },
+      { type: "feature", text: "Chat export as shareable text file" },
+      { type: "security", text: "Password strength meter — 4-level visual indicator (Weak/Fair/Good/Strong)" },
+      { type: "security", text: "Terms & Privacy acceptance on registration with linked legal documents" },
     ],
   },
   {
     version: "1.3.0",
-    date: "February 2026",
-    highlights: [
-      "AI Smart Compose with auto-complete",
-      "AI Tone Adjuster — formal, friendly, diplomatic",
-      "Smart Reply suggestions matching sender language",
-      "Auto Translate supporting 14 languages",
-      "Grammar check before send",
-      "AI Semantic Search",
+    date: "February 20, 2026",
+    platforms: ["web"],
+    changes: [
+      { type: "feature", text: "AI Smart Compose — auto-complete suggestions as you type" },
+      { type: "feature", text: "AI Tone Adjuster — rewrite in Formal, Friendly, or Diplomatic tone" },
+      { type: "feature", text: "Smart Reply Suggestions — 3 AI-generated replies matching sender language" },
+      { type: "feature", text: "Auto Translate — instant translation across 14 languages" },
+      { type: "feature", text: "Grammar Check — automatic correction before sending" },
+      { type: "feature", text: "AI Semantic Search — search by meaning, not just keywords" },
+      { type: "feature", text: "AI App Guide — in-app chatbot for help and troubleshooting" },
+      { type: "feature", text: "AI Call Notes — auto-generated meeting summaries with action items" },
     ],
   },
   {
     version: "1.2.0",
-    date: "January 2026",
-    highlights: [
-      "Group video meetings with gallery & speaker view",
-      "Meeting scheduling with RSVP (accept/decline)",
-      "Meeting reactions & hand raise",
-      "Pin / spotlight participant",
-      "In-meeting chat",
-      "Meeting duration tracker",
-      "Email invitations with HTML templates",
+    date: "January 10, 2026",
+    platforms: ["web"],
+    changes: [
+      { type: "feature", text: "Group video meetings with gallery & speaker view toggle" },
+      { type: "feature", text: "Meeting scheduling with RSVP system (accept / decline / tentative)" },
+      { type: "feature", text: "Meeting reactions & hand raise" },
+      { type: "feature", text: "Pin / spotlight participant video" },
+      { type: "feature", text: "In-meeting text chat" },
+      { type: "feature", text: "Meeting duration tracker" },
+      { type: "feature", text: "Email invitations with professional HTML templates" },
+      { type: "feature", text: "Instant meeting — 1-click start with shareable meeting ID" },
+      { type: "improvement", text: "Join by Meeting ID — enter code to join any meeting" },
     ],
   },
   {
     version: "1.1.0",
-    date: "December 2025",
-    highlights: [
-      "End-to-end encryption (AES-256-GCM)",
-      "Disappearing messages with configurable timer",
-      "Chat lock with PIN",
-      "IP & platform restrictions for enterprise security",
-      "XSS & input sanitization on all messages",
-      "Dangerous file blocking (.exe, .bat, .sh)",
-      "Device limit — max 3 simultaneous logins",
+    date: "December 5, 2025",
+    platforms: ["web"],
+    changes: [
+      { type: "security", text: "End-to-end encryption — AES-256-GCM for all messages at rest" },
+      { type: "feature", text: "Disappearing messages with configurable timer (24h / 7d)" },
+      { type: "feature", text: "Chat lock with PIN — protect individual conversations" },
+      { type: "security", text: "IP & platform restrictions — control access by network and device type" },
+      { type: "security", text: "XSS & input sanitization on all user-generated content" },
+      { type: "security", text: "Dangerous file blocking — .exe, .bat, .sh, macros blocked server-side" },
+      { type: "security", text: "Device limit — maximum 3 simultaneous logins with management" },
+      { type: "security", text: "Account deletion (GDPR) — self-service with complete data removal" },
+      { type: "fix", text: "Web logout privacy leak — localStorage not cleared on logout" },
+      { type: "security", text: "JWT_SECRET validation — 500 error if misconfigured" },
     ],
   },
   {
     version: "1.0.0",
-    date: "November 2025",
-    highlights: [
-      "Initial release of TeamChatX",
-      "Direct messaging & group chat",
-      "File & image sharing (up to 2 GB)",
-      "Voice messages with playback speed",
-      "GIF picker (Tenor integration)",
-      "Emoji reactions",
-      "Reply, forward, pin, edit, delete messages",
-      "Admin dashboard with RBAC",
-      "Stripe billing integration",
-      "Self-hosted & cloud deployment options",
+    date: "November 1, 2025",
+    tag: "Initial Release",
+    platforms: ["web", "desktop"],
+    changes: [
+      { type: "feature", text: "Direct messaging & group chat with real-time delivery" },
+      { type: "feature", text: "File & image sharing — up to 2 GB per upload via S3" },
+      { type: "feature", text: "Voice messages with recording and playback" },
+      { type: "feature", text: "GIF picker — Tenor integration with search" },
+      { type: "feature", text: "Emoji reactions on messages" },
+      { type: "feature", text: "Reply, forward, pin, edit & delete messages" },
+      { type: "feature", text: "Read receipts and typing indicators" },
+      { type: "feature", text: "Broadcast messages to multiple contacts" },
+      { type: "feature", text: "Admin dashboard with role-based access control (RBAC)" },
+      { type: "feature", text: "Department & designation management" },
+      { type: "feature", text: "Stripe billing integration — subscriptions, invoices, payments" },
+      { type: "feature", text: "Self-hosted & cloud deployment options" },
+      { type: "feature", text: "Windows desktop app" },
+      { type: "feature", text: "Presence indicators — online, offline, idle" },
     ],
   },
 ];
 
+const PLATFORM_LABELS = {
+  all: "All Platforms",
+  web: "Web",
+  android: "Android",
+  ios: "iOS",
+  desktop: "Desktop",
+};
+
+const TYPE_LABELS = {
+  all: "All Updates",
+  feature: "Features",
+  improvement: "Improvements",
+  fix: "Bug Fixes",
+  security: "Security",
+};
+
 export default function Versions() {
+  const [platformFilter, setPlatformFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  const filtered = useMemo(() => {
+    return releases
+      .filter((r) => platformFilter === "all" || r.platforms.includes(platformFilter))
+      .map((r) => {
+        if (typeFilter === "all") return r;
+        const changes = r.changes.filter((c) => c.type === typeFilter);
+        return changes.length > 0 ? { ...r, changes } : null;
+      })
+      .filter(Boolean);
+  }, [platformFilter, typeFilter]);
+
+  // Stats
+  const totalFeatures = releases.reduce((s, r) => s + r.changes.filter((c) => c.type === "feature").length, 0);
+  const totalFixes = releases.reduce((s, r) => s + r.changes.filter((c) => c.type === "fix").length, 0);
+  const totalSecurity = releases.reduce((s, r) => s + r.changes.filter((c) => c.type === "security").length, 0);
+
   return (
     <div style={{ background: "#f8fafc", minHeight: "100vh" }}>
+      <style>{`
+        .ver-pill { transition: all 0.2s; cursor: pointer; border: none; }
+        .ver-pill:hover { transform: translateY(-1px); }
+        .ver-pill.active { box-shadow: 0 4px 12px -4px rgba(1,98,196,0.4); }
+        .ver-entry { transition: transform 0.2s, box-shadow 0.2s; }
+        .ver-entry:hover { transform: translateX(4px); box-shadow: 0 8px 24px -12px rgba(15,23,42,0.12); }
+      `}</style>
+
       {/* Hero */}
-      <section style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", color: "#fff", padding: "80px 0 60px", textAlign: "center" }}>
-        <div className="container">
-          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, marginBottom: 12 }}>Version History</h1>
-          <p style={{ fontSize: "1.1rem", color: "#94a3b8", maxWidth: 560, margin: "0 auto" }}>
-            Track every improvement. Every release brings TeamChatX closer to the most complete team communication platform.
+      <section style={{
+        background: "linear-gradient(135deg, #0a1628 0%, #0d2137 50%, #0f3460 100%)",
+        color: "#fff", padding: "80px 0 48px", textAlign: "center", position: "relative", overflow: "hidden",
+      }}>
+        <div style={{ position: "absolute", top: -100, right: -60, width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(1,98,196,0.12) 0%, transparent 70%)" }} />
+        <div className="container" style={{ position: "relative", zIndex: 1 }}>
+          <p style={{ display: "inline-block", background: "rgba(1,98,196,0.2)", border: "1px solid rgba(1,98,196,0.4)", borderRadius: 20, padding: "6px 18px", fontSize: 12, fontWeight: 700, letterSpacing: 1.5, marginBottom: 20, color: "#64b5f6", textTransform: "uppercase" }}>
+            Changelog
           </p>
+          <h1 style={{ fontSize: "clamp(28px, 5vw, 48px)", fontWeight: 800, marginBottom: 12, lineHeight: 1.15 }}>
+            We Keep Updating
+          </h1>
+          <p style={{ fontSize: "1.05rem", color: "#94a3b8", maxWidth: 560, margin: "0 auto 32px" }}>
+            Every update makes TeamChatX faster, more secure, and more powerful. Here's every change we've shipped.
+          </p>
+
+          {/* Stats */}
+          <div style={{ display: "flex", justifyContent: "center", gap: 20, flexWrap: "wrap" }}>
+            {[
+              { value: releases.length, label: "Releases", color: "#3b82f6" },
+              { value: totalFeatures, label: "Features Added", color: "#22c55e" },
+              { value: totalFixes, label: "Bugs Fixed", color: "#f59e0b" },
+              { value: totalSecurity, label: "Security Updates", color: "#ef4444" },
+            ].map((s) => (
+              <div key={s.label} style={{ minWidth: 120, padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Filters */}
+      <section style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "18px 0", position: "sticky", top: 55, zIndex: 100, backdropFilter: "blur(10px)", backgroundColor: "rgba(255,255,255,0.95)" }}>
+        <div className="container">
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center", alignItems: "center" }}>
+            {/* Platform pills */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Object.entries(PLATFORM_LABELS).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`ver-pill ${platformFilter === key ? "active" : ""}`}
+                  onClick={() => setPlatformFilter(key)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                    background: platformFilter === key ? "#0162c4" : "#f1f5f9",
+                    color: platformFilter === key ? "#fff" : "#475569",
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  {key !== "all" && <PlatformIcon type={key} active={platformFilter === key} />}
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ width: 1, height: 24, background: "#e2e8f0" }} />
+
+            {/* Type pills */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Object.entries(TYPE_LABELS).map(([key, label]) => {
+                const c = CAT_COLORS[key];
+                return (
+                  <button
+                    key={key}
+                    className={`ver-pill ${typeFilter === key ? "active" : ""}`}
+                    onClick={() => setTypeFilter(key)}
+                    style={{
+                      padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                      background: typeFilter === key ? (c?.bg || "#0162c4") : "#f1f5f9",
+                      color: typeFilter === key ? (c?.color || "#fff") : "#475569",
+                      border: typeFilter === key && c ? `1px solid ${c.border}` : "1px solid transparent",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </section>
 
       {/* Timeline */}
-      <section className="container" style={{ padding: "60px 15px", maxWidth: 800 }}>
-        {releases.map((r, i) => (
-          <div key={r.version} style={{ position: "relative", paddingLeft: 36, paddingBottom: i < releases.length - 1 ? 40 : 0, borderLeft: i < releases.length - 1 ? "2px solid #e2e8f0" : "2px solid transparent", marginLeft: 12 }}>
-            {/* Dot */}
-            <div style={{ position: "absolute", left: -8, top: 0, width: 16, height: 16, borderRadius: "50%", background: i === 0 ? "#0162c4" : "#cbd5e1", border: "3px solid #f8fafc" }} />
-
-            <div style={{ background: "#fff", borderRadius: 12, padding: 24, border: "1px solid #e2e8f0" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-                <h3 style={{ fontSize: "1.2rem", fontWeight: 700, color: "#0f172a", margin: 0 }}>v{r.version}</h3>
-                <span style={{ color: "#64748b", fontSize: 13 }}>{r.date}</span>
-                {r.tag && (
-                  <span style={{ background: "#dcfce7", color: "#16a34a", padding: "2px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
-                    {r.tag}
-                  </span>
-                )}
-              </div>
-              <ul style={{ margin: 0, paddingLeft: 20, color: "#475569", fontSize: 14, lineHeight: 1.9 }}>
-                {r.highlights.map((h, j) => (
-                  <li key={j}>{h}</li>
-                ))}
-              </ul>
-            </div>
+      <section className="container" style={{ padding: "48px 15px", maxWidth: 860 }}>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "60px 20px", color: "#64748b" }}>
+            <div style={{ fontSize: "3rem", marginBottom: 12 }}>📋</div>
+            <h4 style={{ fontWeight: 700, color: "#0f172a" }}>No releases match your filters</h4>
+            <button onClick={() => { setPlatformFilter("all"); setTypeFilter("all"); }} style={{ marginTop: 12, padding: "8px 20px", borderRadius: 20, border: "none", background: "#0162c4", color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+              Clear filters
+            </button>
           </div>
-        ))}
+        ) : (
+          filtered.map((r, i) => {
+            const featureCount = r.changes.filter((c) => c.type === "feature").length;
+            const fixCount = r.changes.filter((c) => c.type === "fix").length;
+            const secCount = r.changes.filter((c) => c.type === "security").length;
+            const impCount = r.changes.filter((c) => c.type === "improvement").length;
+
+            return (
+              <div key={r.version} style={{ position: "relative", paddingLeft: 40, paddingBottom: i < filtered.length - 1 ? 36 : 0, borderLeft: i < filtered.length - 1 ? "2px solid #e2e8f0" : "2px solid transparent", marginLeft: 14 }}>
+                {/* Timeline dot */}
+                <div style={{
+                  position: "absolute", left: -9, top: 0, width: 18, height: 18, borderRadius: "50%",
+                  background: i === 0 ? "#0162c4" : "#cbd5e1", border: "3px solid #f8fafc",
+                  boxShadow: i === 0 ? "0 0 0 4px rgba(1,98,196,0.15)" : "none",
+                }} />
+
+                <div className="ver-entry" style={{ background: "#fff", borderRadius: 14, padding: "24px 28px", border: i === 0 ? "2px solid #0162c4" : "1px solid #e2e8f0" }}>
+                  {/* Header */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+                    <h3 style={{ fontSize: "1.3rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>v{r.version}</h3>
+                    <span style={{ color: "#64748b", fontSize: 13, fontWeight: 500 }}>{r.date}</span>
+                    {r.tag && (
+                      <span style={{
+                        background: r.tag === "Latest" ? "linear-gradient(135deg, #0162c4, #0288d1)" : "#f1f5f9",
+                        color: r.tag === "Latest" ? "#fff" : "#64748b",
+                        padding: "3px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                      }}>
+                        {r.tag}
+                      </span>
+                    )}
+                    {/* Platform icons */}
+                    <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                      {r.platforms.map((p) => (
+                        <div key={p} title={PLATFORM_LABELS[p]} style={{ width: 28, height: 28, borderRadius: 8, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <PlatformIcon type={p} active />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Category summary */}
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    {featureCount > 0 && <span style={{ ...badgeStyle(CAT_COLORS.feature) }}>{featureCount} Feature{featureCount > 1 ? "s" : ""}</span>}
+                    {impCount > 0 && <span style={{ ...badgeStyle(CAT_COLORS.improvement) }}>{impCount} Improvement{impCount > 1 ? "s" : ""}</span>}
+                    {fixCount > 0 && <span style={{ ...badgeStyle(CAT_COLORS.fix) }}>{fixCount} Fix{fixCount > 1 ? "es" : ""}</span>}
+                    {secCount > 0 && <span style={{ ...badgeStyle(CAT_COLORS.security) }}>{secCount} Security</span>}
+                  </div>
+
+                  {/* Changes list */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {r.changes.map((c, j) => {
+                      const cat = CAT_COLORS[c.type] || CAT_COLORS.feature;
+                      return (
+                        <div key={j} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "6px 0" }}>
+                          <span style={{
+                            flexShrink: 0, marginTop: 2, width: 8, height: 8, borderRadius: "50%",
+                            background: cat.color,
+                          }} />
+                          <span style={{ fontSize: 14, color: "#334155", lineHeight: 1.5 }}>{c.text}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </section>
+
+      {/* CTA */}
+      <section style={{ background: "#0f172a", color: "#fff", padding: "48px 0", textAlign: "center" }}>
+        <div className="container">
+          <h3 style={{ fontWeight: 700, marginBottom: 8 }}>Want to see what's next?</h3>
+          <p style={{ color: "#94a3b8", marginBottom: 24 }}>We ship updates every week. Start using TeamChatX today.</p>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <Link to="/auth/register" style={{ display: "inline-block", background: "#0162c4", color: "#fff", padding: "12px 28px", borderRadius: 8, fontWeight: 600, textDecoration: "none" }}>
+              Start Free Trial
+            </Link>
+            <Link to="/features" style={{ display: "inline-block", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", color: "#fff", padding: "12px 28px", borderRadius: 8, fontWeight: 600, textDecoration: "none" }}>
+              View All Features
+            </Link>
+          </div>
+        </div>
       </section>
     </div>
   );
+}
+
+function badgeStyle(cat) {
+  return {
+    display: "inline-block", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+    background: cat.bg, color: cat.color, border: `1px solid ${cat.border}`,
+  };
 }

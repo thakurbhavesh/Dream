@@ -735,6 +735,61 @@ const Compare = () => {
         </div>
       </section>
 
+      {/* ─── What You're Missing (Loss Aversion) ───────────── */}
+      <section style={{ padding: "56px 0", background: "linear-gradient(180deg, #fff5f5 0%, #fff 100%)", borderBottom: "1px solid #fecaca" }}>
+        <div className="container">
+          <div style={{ textAlign: "center", marginBottom: 36 }}>
+            <p style={{ display: "inline-block", background: "#fee2e2", color: "#dc2626", borderRadius: 999, padding: "5px 14px", fontSize: 11, fontWeight: 700, letterSpacing: 1.2, marginBottom: 14, textTransform: "uppercase" }}>
+              Don't settle for less
+            </p>
+            <h2 style={{ fontSize: "clamp(22px, 3.5vw, 34px)", fontWeight: 800, color: "#0f172a", marginBottom: 10 }}>
+              Features your current tool <span style={{ color: "#dc2626" }}>doesn't have</span>
+            </h2>
+            <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
+              These {exclusiveCount} features are exclusive to TeamChatX. No other platform offers them.
+            </p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, maxWidth: 900, margin: "0 auto" }}>
+            {features.filter(f => f.support.teamchatx === true && competitors.filter(c => !c.isUs).every(c => f.support[c.key] !== true)).slice(0, 8).map((f) => (
+              <div key={f.feature} style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 12, padding: "14px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg, #ff6d00, #ff9100)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>{f.feature}</div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", lineHeight: 1.3 }}>{f.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {exclusiveCount > 8 && (
+            <p style={{ textAlign: "center", marginTop: 18, fontSize: 13, color: "#dc2626", fontWeight: 600 }}>
+              + {exclusiveCount - 8} more exclusive features. <span style={{ textDecoration: "underline", cursor: "pointer" }} onClick={() => setExclusiveOnly(true)}>See all →</span>
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* ─── Social Proof & Trust ──────────────────────────── */}
+      <section style={{ padding: "48px 0", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+        <div className="container">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20, maxWidth: 900, margin: "0 auto", textAlign: "center" }}>
+            {[
+              { value: "192+", label: "Total Features", sub: "Most in the industry" },
+              { value: "AES-256", label: "Encryption Standard", sub: "Military-grade security" },
+              { value: "$3/mo", label: "Starting Price", sub: "65% less than Slack" },
+              { value: "99.9%", label: "Uptime SLA", sub: "Enterprise reliability" },
+            ].map((s) => (
+              <div key={s.label} style={{ padding: "20px 16px" }}>
+                <div style={{ fontSize: 32, fontWeight: 800, color: "#0162c4", lineHeight: 1 }}>{s.value}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginTop: 6 }}>{s.label}</div>
+                <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{s.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ─── Visual Radar + Category Verdicts ────────────────── */}
       <section style={{ padding: "70px 0", background: "#fafbff" }}>
         <div className="container">
@@ -1443,6 +1498,36 @@ const Compare = () => {
         </div>
       </section>
 
+      {/* ─── The Cost of NOT Switching (Loss Aversion) ─────── */}
+      <section style={{ padding: "56px 0", background: "#fffbeb", borderTop: "1px solid #fde68a", borderBottom: "1px solid #fde68a" }}>
+        <div className="container" style={{ maxWidth: 800 }}>
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <h2 style={{ fontSize: "clamp(22px, 3vw, 32px)", fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
+              Every month you wait, you're overpaying
+            </h2>
+            <p style={{ color: "#64748b", fontSize: 14 }}>Here's what staying with your current tool costs you:</p>
+          </div>
+          <div className="row g-3">
+            {[
+              { icon: "💸", title: `$${((8.75 - 3) * teamSize).toLocaleString()}/month wasted`, desc: `That's $${((8.75 - 3) * teamSize * 12).toLocaleString()}/year for ${teamSize} users vs Slack Pro` },
+              { icon: "🚫", title: `${exclusiveCount} features you can't use`, desc: "Biometric login, AI compose, chat wallpaper, screen annotation, and more" },
+              { icon: "🔓", title: "No self-hosted option", desc: "Your messages live on someone else's servers. With TeamChatX, you own your data." },
+              { icon: "📱", title: "No mobile admin panel", desc: "Manage users, billing, and departments from your phone — only on TeamChatX" },
+            ].map((item) => (
+              <div key={item.title} className="col-md-6">
+                <div style={{ background: "#fff", borderRadius: 12, padding: "18px 20px", border: "1px solid #fde68a", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 24 }}>{item.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>{item.title}</div>
+                    <div style={{ fontSize: 12, color: "#78716c", lineHeight: 1.4 }}>{item.desc}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ─── Final CTA ────────────────────────────────────────── */}
       <section style={{ background: "linear-gradient(135deg, #0a1628, #0f3460)", padding: "80px 0", textAlign: "center", color: "#fff", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 600, height: 600, borderRadius: "50%", background: "radial-gradient(circle, rgba(1,98,196,0.1) 0%, transparent 60%)" }} />
@@ -1453,9 +1538,15 @@ const Compare = () => {
           <h2 style={{ fontSize: "clamp(24px, 4vw, 42px)", fontWeight: 800, marginBottom: 16, lineHeight: 1.2 }}>
             {exclusiveCount} features they don't have.<br />Zero reasons to wait.
           </h2>
-          <p style={{ fontSize: 17, color: "#94a3b8", maxWidth: 540, margin: "0 auto 36px", lineHeight: 1.6 }}>
-            Join thousands of teams who already made the switch. Start free — no credit card required.
+          <p style={{ fontSize: 17, color: "#94a3b8", maxWidth: 540, margin: "0 auto 24px", lineHeight: 1.6 }}>
+            Start free — no credit card required. Deploy in 5 minutes.
           </p>
+          {/* Trust badges */}
+          <div style={{ display: "flex", justifyContent: "center", gap: 20, flexWrap: "wrap", marginBottom: 28 }}>
+            {["🔒 AES-256 Encrypted", "☁️ Self-Host or Cloud", "📱 Mobile + Web + Desktop", "🤖 9 AI Features Built-in"].map((t) => (
+              <span key={t} style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>{t}</span>
+            ))}
+          </div>
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
             <Link
               to="/auth/register"
@@ -1471,6 +1562,7 @@ const Compare = () => {
               View Pricing
             </Link>
           </div>
+          <p style={{ fontSize: 12, color: "#475569", marginTop: 16 }}>30-day money-back guarantee • No long-term contracts</p>
         </div>
       </section>
     </div>
