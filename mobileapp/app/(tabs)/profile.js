@@ -13,12 +13,51 @@ import * as Notifications from 'expo-notifications';
 import { AudioModule } from 'expo-audio';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as FileSystem from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
 import Avatar from '../../src/components/Avatar';
 import { useToast } from '../../src/components/Toast';
 import { useAuth } from '../../src/store/AuthContext';
 import { useTheme } from '../../src/store/ThemeContext';
 import { getMe, changePassword, getTrustedDevices, revokeDevice, logout, logoutAll } from '../../src/api/auth';
 import api from '../../src/api/config';
+
+const NOTIFICATION_TONES = [
+  { key: 'default', label: 'Default' },
+  { key: 'chime', label: 'Chime' },
+  { key: 'ping', label: 'Ping' },
+  { key: 'bubble', label: 'Bubble' },
+  { key: 'bell', label: 'Bell' },
+  { key: 'drop', label: 'Drop' },
+  { key: 'pop', label: 'Pop' },
+  { key: 'ding', label: 'Ding' },
+  { key: 'chirp', label: 'Chirp' },
+  { key: 'soft', label: 'Soft' },
+  { key: 'bright', label: 'Bright' },
+  { key: 'knock', label: 'Knock' },
+  { key: 'swoosh', label: 'Swoosh' },
+  { key: 'crystal', label: 'Crystal' },
+  { key: 'ripple', label: 'Ripple' },
+  { key: 'alert', label: 'Alert' },
+];
+
+const TONE_FILES = {
+  chime: require('../../assets/tones/chime.wav'),
+  ping: require('../../assets/tones/ping.wav'),
+  bubble: require('../../assets/tones/bubble.wav'),
+  bell: require('../../assets/tones/bell.wav'),
+  drop: require('../../assets/tones/drop.wav'),
+  pop: require('../../assets/tones/pop.wav'),
+  ding: require('../../assets/tones/ding.wav'),
+  chirp: require('../../assets/tones/chirp.wav'),
+  soft: require('../../assets/tones/soft.wav'),
+  bright: require('../../assets/tones/bright.wav'),
+  knock: require('../../assets/tones/knock.wav'),
+  swoosh: require('../../assets/tones/swoosh.wav'),
+  crystal: require('../../assets/tones/crystal.wav'),
+  ripple: require('../../assets/tones/ripple.wav'),
+  alert: require('../../assets/tones/alert.wav'),
+};
 
 const getTimeAgo = (d) => {
   if (!d) return '';
@@ -57,6 +96,35 @@ export default function ProfileScreen() {
   // Customize
   const [hexInput, setHexInput] = useState(currentBrand || '#ea4c89');
   useEffect(() => { setHexInput(currentBrand); }, [currentBrand]);
+
+  // Notification tone
+  const [selectedTone, setSelectedTone] = useState('default');
+  const [showTonePicker, setShowTonePicker] = useState(false);
+  const [playingTone, setPlayingTone] = useState(null);
+
+  // Load saved tone on mount
+  useEffect(() => {
+    AsyncStorage.getItem('notificationTone').then(v => { if (v) setSelectedTone(v); });
+  }, []);
+
+  const previewTone = async (key) => {
+    // Stop previous
+    if (playingTone) { try { await playingTone.unloadAsync(); } catch {} }
+    if (key === 'default') { setPlayingTone(null); return; }
+    try {
+      const { sound } = await Audio.Sound.createAsync(TONE_FILES[key], { shouldPlay: true, volume: 1.0 });
+      setPlayingTone(sound);
+      sound.setOnPlaybackStatusUpdate((s) => { if (s.didJustFinish) { sound.unloadAsync(); setPlayingTone(null); } });
+    } catch {}
+  };
+
+  const selectTone = async (key) => {
+    setSelectedTone(key);
+    await AsyncStorage.setItem('notificationTone', key);
+    previewTone(key);
+    setShowTonePicker(false);
+    toast(`Tone set to ${NOTIFICATION_TONES.find(t => t.key === key)?.label}`, 'success');
+  };
 
   // App Lock state
   const [appLockEnabled, setAppLockState] = useState(false);
@@ -503,8 +571,10 @@ export default function ProfileScreen() {
           </View>
           <View style={[z.appearRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.divider }]}>
             <Text style={[z.appearLabel, { color: t.text }]}>Notification Tone</Text>
-            <TouchableOpacity onPress={() => toast('Tone selection coming soon', 'info')}>
-              <Text style={{ color: t.accent, fontWeight: '700', fontSize: 14 }}>Default</Text>
+            <TouchableOpacity onPress={() => setShowTonePicker(true)}>
+              <Text style={{ color: t.accent, fontWeight: '700', fontSize: 14 }}>
+                {NOTIFICATION_TONES.find(tn => tn.key === selectedTone)?.label || 'Default'}
+              </Text>
             </TouchableOpacity>
           </View>
         </Section>
@@ -688,6 +758,56 @@ export default function ProfileScreen() {
                 onPress={() => { setShowStatusPicker(false); toast(`Status: ${myStatus}`, 'success'); }} activeOpacity={0.8}>
                 <Text style={z.statusSaveText}>Save</Text>
               </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Tone Picker Modal */}
+      {showTonePicker && (
+        <Modal visible transparent animationType="slide" onRequestClose={() => setShowTonePicker(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setShowTonePicker(false)}>
+            <View style={{ backgroundColor: t.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '70%', paddingTop: 16 }} onStartShouldSetResponder={() => true}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: t.divider }}>
+                <Ionicons name="musical-notes" size={20} color={t.accent} />
+                <Text style={{ flex: 1, fontSize: 17, fontWeight: '800', color: t.text, marginLeft: 10 }}>Notification Tone</Text>
+                <TouchableOpacity onPress={() => setShowTonePicker(false)}>
+                  <Ionicons name="close" size={22} color={t.textSec} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+                {NOTIFICATION_TONES.map((tn) => (
+                  <TouchableOpacity
+                    key={tn.key}
+                    onPress={() => selectTone(tn.key)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12,
+                      borderRadius: 12, marginBottom: 4,
+                      backgroundColor: selectedTone === tn.key ? `${t.accent}15` : 'transparent',
+                    }}
+                  >
+                    <View style={{
+                      width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                      backgroundColor: selectedTone === tn.key ? `${t.accent}20` : `${t.textTer}10`,
+                    }}>
+                      <Ionicons name={selectedTone === tn.key ? 'volume-high' : 'musical-note'} size={18} color={selectedTone === tn.key ? t.accent : t.textSec} />
+                    </View>
+                    <Text style={{ flex: 1, fontSize: 15, fontWeight: selectedTone === tn.key ? '700' : '500', color: selectedTone === tn.key ? t.accent : t.text, marginLeft: 12 }}>
+                      {tn.label}
+                    </Text>
+                    {/* Preview button */}
+                    {tn.key !== 'default' && (
+                      <TouchableOpacity onPress={() => previewTone(tn.key)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <Ionicons name="play-circle" size={24} color={t.textSec} />
+                      </TouchableOpacity>
+                    )}
+                    {selectedTone === tn.key && (
+                      <Ionicons name="checkmark-circle" size={22} color={t.accent} style={{ marginLeft: 8 }} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+                <View style={{ height: 30 }} />
+              </ScrollView>
             </View>
           </Pressable>
         </Modal>

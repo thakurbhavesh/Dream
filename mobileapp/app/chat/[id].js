@@ -1762,7 +1762,7 @@ export default function ChatScreen() {
         {/* ─── Footer ─── */}
         <View style={[z.footer, {
           backgroundColor: footerBg,
-          paddingBottom: kbOpen ? 0 : Math.max(insets.bottom, 6),
+          paddingBottom: kbOpen ? 2 : Math.max(insets.bottom, 6),
           display: (hasLeftGroup || (isAirtime && !isGroupAdmin)) ? 'none' : 'flex',
         }]}>
           {!isRecording && (
