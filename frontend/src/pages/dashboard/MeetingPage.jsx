@@ -90,18 +90,29 @@ const MeetingPage = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const { response, payload } = await fetchWithAuth(`${API_BASE_URL}/users`);
+        const { response, payload } = await fetchWithAuth(`${API_BASE_URL}/users?all=1`);
         if (!response.ok) return;
-        const users = payload?.data?.users || payload?.users || payload?.data || [];
+        // Controller returns { data: { count, rows } } via success() wrapper
+        const rows =
+          payload?.data?.rows ||
+          payload?.data?.users ||
+          payload?.rows ||
+          payload?.users ||
+          (Array.isArray(payload?.data) ? payload.data : []);
         if (cancelled) return;
-        const list = (Array.isArray(users) ? users : []).map((u) => ({
-          id: u.user_id || u.id,
-          user_id: u.user_id || u.id,
-          name: u.name || `${u.first_name || ""} ${u.last_name || ""}`.trim(),
-          label: u.name || `${u.first_name || ""} ${u.last_name || ""}`.trim(),
-          email: u.email,
-          avatar: u.profile_url || u.avatar || "",
-        })).filter((u) => u.id && u.id !== currentUser?.id);
+        const selfId = Number(currentUser?.id || currentUser?.user_id);
+        const list = (Array.isArray(rows) ? rows : []).map((u) => {
+          const fullName = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+          const name = u.name || fullName || u.email || `User #${u.user_id || u.id}`;
+          return {
+            id: Number(u.user_id || u.id),
+            user_id: Number(u.user_id || u.id),
+            name,
+            label: name,
+            email: u.email,
+            avatar: u.profile_url || u.avatar || "",
+          };
+        }).filter((u) => u.id && u.id !== selfId);
         setMembers(list);
       } catch (err) {
         console.warn("[MeetingPage] load users failed", err);

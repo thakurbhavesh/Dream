@@ -188,16 +188,29 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                     <Typography variant="subtitle2" noWrap fontWeight={600}>
                       {m.title}
                     </Typography>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <Stack direction="row" alignItems="center" spacing={0.5} flexWrap="wrap">
                       <Chip
                         label={m.status}
                         size="small"
                         color={statusColors[m.status] || "default"}
                         sx={{ height: 20, fontSize: 11 }}
                       />
-                      {m.meeting_type === "scheduled" && (
+                      <Stack direction="row" alignItems="center" spacing={0.3}>
+                        <PiClockBold size={11} color={theme.palette.text.secondary} />
                         <Typography variant="caption" color="text.secondary">
-                          {formatDate(m.scheduled_at)}
+                          {formatDate(
+                            m.meeting_type === "scheduled"
+                              ? m.scheduled_at
+                              : (m.started_at || m.created_at)
+                          )}
+                        </Typography>
+                      </Stack>
+                      {m.meeting_type === "scheduled" && (
+                        <Chip label="Scheduled" size="small" variant="outlined" sx={{ height: 18, fontSize: 10 }} />
+                      )}
+                      {tab === "past" && typeof m.duration_minutes === "number" && m.duration_minutes > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          • {m.duration_minutes} min
                         </Typography>
                       )}
                     </Stack>

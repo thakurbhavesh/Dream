@@ -35,6 +35,8 @@ export default function useCall() {
   const [remoteUser, setRemoteUser] = useState(null);       // { id, name, avatar }
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [peerMuted, setPeerMuted] = useState(false);
+  const [peerVideoOff, setPeerVideoOff] = useState(false);
   const [isSpeaker, setIsSpeaker] = useState(false);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -45,6 +47,12 @@ export default function useCall() {
   const iceCandidatesQueue = useRef([]);
   const durationTimer = useRef(null);
   const callStateRef = useRef('idle');
+  const callTypeRef = useRef(null);
+  const remoteUserRef = useRef(null);
+  const ringTimeoutRef = useRef(null);
+
+  useEffect(() => { callTypeRef.current = callType; }, [callType]);
+  useEffect(() => { remoteUserRef.current = remoteUser; }, [remoteUser]);
 
   // Keep ref in sync
   useEffect(() => { callStateRef.current = callState; }, [callState]);
@@ -63,10 +71,14 @@ export default function useCall() {
 
   const cleanup = useCallback(() => {
     if (pcRef.current) {
-      pcRef.current.close();
+      try { pcRef.current.close(); } catch {}
       pcRef.current = null;
     }
     iceCandidatesQueue.current = [];
+    if (ringTimeoutRef.current) {
+      clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = null;
+    }
     if (localStream) {
       localStream.getTracks().forEach(t => t.stop());
     }
@@ -78,6 +90,8 @@ export default function useCall() {
     setRemoteUser(null);
     setIsMuted(false);
     setIsVideoOff(false);
+    setPeerMuted(false);
+    setPeerVideoOff(false);
     setCallDuration(0);
   }, [localStream]);
 
@@ -132,6 +146,7 @@ export default function useCall() {
   }, [emit]);
 
   // ─── Start a call (caller side) ───────────────────────
+  // Flow matches web: send call:request without offer, wait for accept, THEN send offer.
   const startCall = useCallback(async (targetUser, type = 'audio') => {
     if (!webrtcAvailable) { console.warn('[call] WebRTC not available — cannot start call'); return; }
     if (callStateRef.current !== 'idle') return;
@@ -141,90 +156,90 @@ export default function useCall() {
       setRemoteUser(targetUser);
       setIsSpeaker(type === 'video');
 
+      emit('call:request', {
+        targetUserId: targetUser.id,
+        callType: type,
+      });
+
+      // Auto-cancel if not answered in 45s (matches web)
+      if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = setTimeout(() => {
+        if (callStateRef.current === 'outgoing') {
+          if (remoteUserRef.current) {
+            emit('call:stop', {
+              targetUserId: remoteUserRef.current.id,
+              reason: 'no_answer',
+              callType: callTypeRef.current || 'audio',
+            });
+          }
+          cleanup();
+        }
+      }, 45000);
+    } catch (err) {
+      console.log('[call] startCall error:', err.message);
+      cleanup();
+    }
+  }, [emit, cleanup]);
+
+  // Caller-side: after callee accepts, create offer + send via call:signal
+  const startCallerFlow = useCallback(async () => {
+    try {
+      if (!remoteUserRef.current) return;
+      const type = callTypeRef.current || 'audio';
       const stream = await getMedia(type === 'video');
       setLocalStream(stream);
 
-      const pc = createPeerConnection(targetUser.id);
+      const pc = createPeerConnection(remoteUserRef.current.id);
       stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Auto-end if not answered in 30s
-      setTimeout(() => {
-        if (callStateRef.current === 'outgoing') {
-          endCall();
-        }
-      }, 30000);
-
-      emit('call:request', {
-        targetUserId: targetUser.id,
-        callType: type,
+      emit('call:signal', {
+        targetUserId: remoteUserRef.current.id,
         signalData: { type: 'offer', sdp: offer.sdp },
       });
     } catch (err) {
-      console.log('[call] startCall error:', err.message);
+      console.log('[call] startCallerFlow error:', err.message);
       cleanup();
     }
   }, [getMedia, createPeerConnection, emit, cleanup]);
 
   // ─── Accept incoming call ─────────────────────────────
-  const acceptCall = useCallback(async () => {
+  // Callee just sends call:accept. The caller will then send the offer via call:signal,
+  // which we handle in the signal listener below (match web flow).
+  const acceptCall = useCallback(() => {
     if (!webrtcAvailable) { console.warn('[call] WebRTC not available — cannot accept call'); return; }
     if (callStateRef.current !== 'incoming' || !remoteUser) return;
     try {
-      const type = callType;
-      setIsSpeaker(type === 'video');
-
-      const stream = await getMedia(type === 'video');
-      setLocalStream(stream);
-
-      const pc = createPeerConnection(remoteUser.id);
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-      // Set remote offer FIRST (saved from incoming_request)
-      const savedOffer = iceCandidatesQueue.current._offer;
-      if (savedOffer && pc.remoteDescription === null) {
-        await pc.setRemoteDescription(new RTCSessionDescription({
-          type: 'offer',
-          sdp: savedOffer.sdp || savedOffer,
-        }));
-      }
-
-      // Process queued ICE candidates AFTER setting remote description
-      const queuedCandidates = [...iceCandidatesQueue.current].filter(c => c && typeof c === 'object' && !c._offer);
-      for (const candidate of queuedCandidates) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch {}
-      }
-      iceCandidatesQueue.current = [];
-
-      // Create and send answer
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      emit('call:accept', {
-        targetUserId: remoteUser.id,
-        signalData: { type: 'answer', sdp: answer.sdp },
-      });
-
-      setCallState('active');
+      setIsSpeaker(callType === 'video');
+      setCallState('accepted');
+      emit('call:accept', { targetUserId: remoteUser.id });
     } catch (err) {
       console.log('[call] acceptCall error:', err.message);
       cleanup();
     }
-  }, [callType, remoteUser, getMedia, createPeerConnection, emit, cleanup]);
+  }, [callType, remoteUser, emit, cleanup]);
 
   // ─── Reject / end call ────────────────────────────────
   const rejectCall = useCallback(() => {
     if (remoteUser) {
-      emit('call:reject', { targetUserId: remoteUser.id, reason: 'declined' });
+      emit('call:reject', {
+        targetUserId: remoteUser.id,
+        reason: 'declined',
+        callType: callTypeRef.current || 'audio',
+      });
     }
     cleanup();
   }, [remoteUser, emit, cleanup]);
 
   const endCall = useCallback(() => {
     if (remoteUser) {
-      emit('call:stop', { targetUserId: remoteUser.id });
+      emit('call:stop', {
+        targetUserId: remoteUser.id,
+        reason: 'ended',
+        callType: callTypeRef.current || 'audio',
+      });
     }
     cleanup();
   }, [remoteUser, emit, cleanup]);
@@ -235,19 +250,33 @@ export default function useCall() {
       const audioTrack = localStream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
+        const muted = !audioTrack.enabled;
+        setIsMuted(muted);
+        if (remoteUserRef.current) {
+          emit('call:signal', {
+            targetUserId: remoteUserRef.current.id,
+            signalData: { type: 'media-state', muted },
+          });
+        }
       }
     }
-  }, [localStream]);
+  }, [localStream, emit]);
 
   const toggleVideo = useCallback(async () => {
     if (!localStream) return;
     const videoTrack = localStream.getVideoTracks()[0];
     if (videoTrack) {
       videoTrack.enabled = !videoTrack.enabled;
-      setIsVideoOff(!videoTrack.enabled);
+      const videoOff = !videoTrack.enabled;
+      setIsVideoOff(videoOff);
+      if (remoteUserRef.current) {
+        emit('call:signal', {
+          targetUserId: remoteUserRef.current.id,
+          signalData: { type: 'media-state', videoOff },
+        });
+      }
     }
-  }, [localStream]);
+  }, [localStream, emit]);
 
   const toggleSpeaker = useCallback(() => {
     setIsSpeaker(s => !s);
@@ -260,6 +289,14 @@ export default function useCall() {
       if (videoTrack) videoTrack._switchCamera();
     }
   }, [localStream]);
+
+  // Keep refs to latest callbacks so socket listeners don't re-attach on every render
+  const startCallerFlowRef = useRef(startCallerFlow);
+  const getMediaRef = useRef(getMedia);
+  const createPcRef = useRef(createPeerConnection);
+  useEffect(() => { startCallerFlowRef.current = startCallerFlow; }, [startCallerFlow]);
+  useEffect(() => { getMediaRef.current = getMedia; }, [getMedia]);
+  useEffect(() => { createPcRef.current = createPeerConnection; }, [createPeerConnection]);
 
   // ─── Socket event listeners ────────────────────────────
   useEffect(() => {
@@ -275,27 +312,25 @@ export default function useCall() {
       setCallState('incoming');
       setCallType(data.callType || 'audio');
       setRemoteUser({ id: data.fromUserId, name: data.fromUserName || 'Unknown', avatar: data.fromUserAvatar });
-      iceCandidatesQueue.current._offer = data.signalData;
-      // Auto-reject after 30s if not answered
-      setTimeout(() => {
+      // Auto-reject after 45s if not answered
+      if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = setTimeout(() => {
         if (callStateRef.current === 'incoming') {
-          emit('call:reject', { targetUserId: data.fromUserId, reason: 'no_answer' });
+          emit('call:reject', { targetUserId: data.fromUserId, reason: 'no_answer', callType: data.callType || 'audio' });
           cleanup();
         }
-      }, 30000);
+      }, 45000);
     });
 
-    // Call accepted by remote
-    const offAccepted = on('call:accepted', async (data) => {
+    // Call accepted by remote → caller builds the offer and sends it
+    const offAccepted = on('call:accepted', async () => {
+      if (callStateRef.current !== 'outgoing') return;
+      if (ringTimeoutRef.current) { clearTimeout(ringTimeoutRef.current); ringTimeoutRef.current = null; }
       try {
-        const pc = pcRef.current;
-        if (!pc) return;
-        if (data.signalData?.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.signalData.sdp }));
-        }
-        setCallState('active');
+        await startCallerFlowRef.current();
       } catch (err) {
         console.log('[call] accepted error:', err.message);
+        cleanup();
       }
     });
 
@@ -312,23 +347,60 @@ export default function useCall() {
     // WebRTC signal relay
     const offSignal = on('call:signal', async (data) => {
       try {
-        const pc = pcRef.current;
-        if (!pc) {
-          // Queue candidate if PC not ready
-          if (data.signalData?.type === 'candidate') {
-            iceCandidatesQueue.current.push(data.signalData.candidate);
+        const sd = data.signalData;
+        if (!sd) return;
+
+        // Callee receives the first offer — build PC + getUserMedia now
+        if (sd.type === 'offer' && !pcRef.current) {
+          const type = callTypeRef.current || 'audio';
+          const stream = await getMediaRef.current(type === 'video');
+          setLocalStream(stream);
+          const pc = createPcRef.current(data.fromUserId);
+          stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: sd.sdp }));
+
+          // Flush any queued candidates that arrived before PC existed
+          const queued = iceCandidatesQueue.current.filter(Boolean);
+          for (const c of queued) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
           }
-          return;
-        }
-        if (data.signalData?.type === 'candidate') {
-          await pc.addIceCandidate(new RTCIceCandidate(data.signalData.candidate));
-        } else if (data.signalData?.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.signalData.sdp }));
+          iceCandidatesQueue.current = [];
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           emit('call:signal', { targetUserId: data.fromUserId, signalData: { type: 'answer', sdp: answer.sdp } });
-        } else if (data.signalData?.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.signalData.sdp }));
+          setCallState('active');
+          return;
+        }
+
+        const pc = pcRef.current;
+        if (!pc) {
+          // Queue candidate if PC not ready yet
+          if (sd.type === 'candidate') {
+            iceCandidatesQueue.current.push(sd.candidate);
+          }
+          return;
+        }
+
+        if (sd.type === 'candidate') {
+          if (pc.remoteDescription) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(sd.candidate)); } catch {}
+          } else {
+            iceCandidatesQueue.current.push(sd.candidate);
+          }
+        } else if (sd.type === 'answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: sd.sdp }));
+          if (callStateRef.current !== 'active') setCallState('active');
+          // Flush queued candidates
+          const queued = iceCandidatesQueue.current.filter(Boolean);
+          for (const c of queued) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+          }
+          iceCandidatesQueue.current = [];
+        } else if (sd.type === 'media-state') {
+          if (typeof sd.muted === 'boolean') setPeerMuted(sd.muted);
+          if (typeof sd.videoOff === 'boolean') setPeerVideoOff(sd.videoOff);
         }
       } catch (err) {
         console.log('[call] signal error:', err.message);
@@ -353,6 +425,8 @@ export default function useCall() {
     screenStream,
     isMuted,
     isVideoOff,
+    peerMuted,
+    peerVideoOff,
     isSpeaker,
     callDuration,
     startCall,

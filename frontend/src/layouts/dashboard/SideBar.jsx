@@ -95,7 +95,10 @@ const SideBar = () => {
     const resolveIndexFromPath = () => {
       if (pathname.startsWith("/app/settings")) return 3;
       if (pathname.startsWith("/app/admin")) return 4;
-      if (pathname.startsWith("/app")) return 0;
+      // Non-chat dashboard pages — don't highlight the Chats icon
+      if (pathname.startsWith("/app/meeting")) return -1;
+      if (pathname.startsWith("/app/calls")) return -1;
+      if (pathname === "/app" || pathname.startsWith("/app/")) return 0;
       return null;
     };
     const pathIndex = resolveIndexFromPath();
