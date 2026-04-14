@@ -77,9 +77,9 @@ const invalidateTransporterCache = () => {
   cacheExpiresAt = 0;
 };
 
-const sendMail = async ({ to, subject, text, html, replyTo, cc, bcc }) => {
+const sendMail = async ({ to, subject, text, html, replyTo, cc, bcc, attachments }) => {
   const { transporter, from } = await getTransporter();
-  return transporter.sendMail({ from, to, subject, text, html, replyTo, cc, bcc });
+  return transporter.sendMail({ from, to, subject, text, html, replyTo, cc, bcc, attachments });
 };
 
 const sendMailAsync = (payload, options = {}) => {

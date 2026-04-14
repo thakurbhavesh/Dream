@@ -8,6 +8,7 @@ const { connectDatabase } = require('./config/database');
 const { connectRedis } = require('./config/redis');
 const smtpSettingsModel = require('./models/smtpSettingsModel');
 const { initSocket } = require('./socket');
+const { startMeetingScheduler } = require('./schedulers/meetingScheduler');
 
 const BASE_PORT = Number(process.env.PORT) || 5000;
 const MAX_PORT_ATTEMPTS = 5;
@@ -49,6 +50,9 @@ const startServer = async (port = BASE_PORT, attempt = 1) => {
 
     // Attach Socket.IO to the same HTTP server
     initSocket(server);
+
+    // Meeting reminder + recurrence scheduler
+    startMeetingScheduler();
 
     console.log(`Server running on port ${port}`);
     console.log(

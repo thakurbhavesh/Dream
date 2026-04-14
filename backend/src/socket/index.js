@@ -2046,6 +2046,19 @@ const onConnection = (socket) => {
       const room = _meetingRooms.get(meetingRoomId);
       room.set(socket.id, { socketId: socket.id, userId, userName: userName || 'User' });
 
+      // Attendance session open
+      try {
+        const meeting = await meetingModel.findByMeetingId(meetingRoomId);
+        if (meeting) {
+          await meetingModel.openAttendanceSession({
+            meeting_id: meeting.id,
+            user_id: userId ? Number(userId) : null,
+            display_name: userName || null,
+            socket_id: socket.id,
+          });
+        }
+      } catch (e) { console.warn('[socket] attendance open failed:', e.message); }
+
       // Tell existing participants about new joiner
       socket.to(roomKey).emit('meeting:user-joined', {
         socketId: socket.id, userId, userName: userName || 'User',
@@ -2078,6 +2091,12 @@ const onConnection = (socket) => {
         }
       }
 
+      // Attendance session close
+      try {
+        const meeting = await meetingModel.findByMeetingId(meetingRoomId);
+        if (meeting) await meetingModel.closeAttendanceSession({ meeting_id: meeting.id, socket_id: socket.id });
+      } catch (e) { console.warn('[socket] attendance close failed:', e.message); }
+
       socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
       if (becameEmpty) await _autoEndMeetingIfEmpty(meetingRoomId);
       ack?.({ ok: true });
@@ -2087,12 +2106,18 @@ const onConnection = (socket) => {
   });
 
   // ─── Host controls ────────────────────────────────────────────────────────
-  // Verify the current socket is the meeting host
+  // Verify the current socket is the meeting host or a co-host
   const _assertHost = async (meetingRoomId) => {
     const meeting = await meetingModel.findByMeetingId(meetingRoomId);
     if (!meeting) return { ok: false, error: 'Meeting not found' };
-    if (Number(meeting.host_id) !== Number(userId)) return { ok: false, error: 'Only the host can perform this action' };
-    return { ok: true, meeting };
+    if (Number(meeting.host_id) === Number(userId)) return { ok: true, meeting };
+    // Check co-host
+    try {
+      const parts = await meetingModel.getParticipants(meeting.id);
+      const me = parts.find((p) => Number(p.user_id) === Number(userId));
+      if (me && me.role === 'co-host') return { ok: true, meeting };
+    } catch (_) {}
+    return { ok: false, error: 'Only host or co-host can perform this action' };
   };
 
   socket.on('meeting:host:mute-all', async (data, ack) => {
@@ -2355,6 +2380,10 @@ const onConnection = (socket) => {
         room.delete(socket.id);
         const roomKey = `meeting:${meetingRoomId}`;
         socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
+        // Best-effort attendance close
+        meetingModel.findByMeetingId(meetingRoomId).then((m) => {
+          if (m) return meetingModel.closeAttendanceSession({ meeting_id: m.id, socket_id: socket.id });
+        }).catch(() => {});
         if (room.size === 0) {
           _meetingRooms.delete(meetingRoomId);
           _autoEndMeetingIfEmpty(meetingRoomId);

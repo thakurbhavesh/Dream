@@ -8,18 +8,76 @@ const generateMeetingId = () => {
   return code;
 };
 
-const create = async ({ organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode }) => {
+const create = async ({ organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode, recurrence_rule, recurrence_until, parent_meeting_id }) => {
   const meeting_id = generateMeetingId();
   const cleanPasscode = typeof passcode === 'string' && passcode.trim().length >= 4 && passcode.trim().length <= 12
     ? passcode.trim()
     : null;
+  const validRules = ['none', 'daily', 'weekly', 'monthly'];
+  const rule = validRules.includes(recurrence_rule) ? recurrence_rule : 'none';
   const query = `
-    INSERT INTO meetings (meeting_id, organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb), $9)
+    INSERT INTO meetings (meeting_id, organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode, recurrence_rule, recurrence_until, parent_meeting_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb), $9, $10, $11, $12)
     RETURNING *
   `;
-  const { rows } = await db.query(query, [meeting_id, organization_id, host_id, title, description, meeting_type || 'instant', scheduled_at, settings ? JSON.stringify(settings) : null, cleanPasscode]);
+  const { rows } = await db.query(query, [
+    meeting_id, organization_id, host_id, title, description,
+    meeting_type || 'instant', scheduled_at,
+    settings ? JSON.stringify(settings) : null,
+    cleanPasscode, rule, recurrence_until || null, parent_meeting_id || null,
+  ]);
   return rows[0];
+};
+
+// Fetch meetings that need reminder emails (scheduled within next `minutesAhead`, not yet reminded)
+const findDueReminders = async (minutesAhead = 10) => {
+  const { rows } = await db.query(
+    `SELECT * FROM meetings
+     WHERE meeting_type = 'scheduled'
+       AND status = 'waiting'
+       AND reminder_sent_at IS NULL
+       AND scheduled_at IS NOT NULL
+       AND scheduled_at <= NOW() + ($1 || ' minutes')::INTERVAL
+       AND scheduled_at >= NOW() - INTERVAL '2 minutes'
+     LIMIT 50`,
+    [String(minutesAhead)]
+  );
+  return rows;
+};
+
+const markReminderSent = async (meetingId) => {
+  await db.query('UPDATE meetings SET reminder_sent_at = NOW() WHERE id = $1', [meetingId]);
+};
+
+// Attendance sessions
+const openAttendanceSession = async ({ meeting_id, user_id, display_name, socket_id }) => {
+  const { rows } = await db.query(
+    `INSERT INTO meeting_attendance_sessions (meeting_id, user_id, display_name, socket_id)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [meeting_id, user_id || null, display_name || null, socket_id]
+  );
+  return rows[0];
+};
+
+const closeAttendanceSession = async ({ meeting_id, socket_id }) => {
+  await db.query(
+    `UPDATE meeting_attendance_sessions
+     SET left_at = NOW()
+     WHERE meeting_id = $1 AND socket_id = $2 AND left_at IS NULL`,
+    [meeting_id, socket_id]
+  );
+};
+
+const getAttendanceReport = async (meeting_id) => {
+  const { rows } = await db.query(
+    `SELECT mas.*, u.name AS user_name, u.email AS user_email, u.profile_url AS user_avatar
+     FROM meeting_attendance_sessions mas
+     LEFT JOIN users u ON u.user_id = mas.user_id
+     WHERE mas.meeting_id = $1
+     ORDER BY mas.joined_at ASC`,
+    [meeting_id]
+  );
+  return rows;
 };
 
 const findById = async (id) => {
@@ -280,4 +338,9 @@ module.exports = {
   getGuestsByMeeting,
   countGuestsByMeeting,
   markGuestJoined,
+  findDueReminders,
+  markReminderSent,
+  openAttendanceSession,
+  closeAttendanceSession,
+  getAttendanceReport,
 };

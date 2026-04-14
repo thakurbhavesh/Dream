@@ -166,6 +166,34 @@ ALTER TABLE meetings
 CREATE INDEX IF NOT EXISTS idx_meetings_passcode
   ON meetings (meeting_id) WHERE passcode IS NOT NULL;
 
+-- ── 075: Meeting Phase 2 — co-host, recurring, reminders, attendance ───────
+ALTER TABLE meetings
+  ADD COLUMN IF NOT EXISTS recurrence_rule VARCHAR(16) DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS recurrence_until TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS parent_meeting_id BIGINT REFERENCES meetings(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS idx_meetings_reminder_due
+  ON meetings (scheduled_at)
+  WHERE meeting_type = 'scheduled'
+    AND status = 'waiting'
+    AND reminder_sent_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS meeting_attendance_sessions (
+  session_id      BIGSERIAL PRIMARY KEY,
+  meeting_id      BIGINT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  user_id         BIGINT REFERENCES users(user_id) ON DELETE SET NULL,
+  display_name    VARCHAR(255),
+  socket_id       VARCHAR(64),
+  joined_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  left_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_mas_meeting
+  ON meeting_attendance_sessions (meeting_id, joined_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mas_open
+  ON meeting_attendance_sessions (meeting_id, socket_id)
+  WHERE left_at IS NULL;
+
 -- ============================================================================
 -- Done. Verify:
 --   SELECT COUNT(*) FROM push_subscriptions;

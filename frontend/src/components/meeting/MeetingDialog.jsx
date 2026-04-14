@@ -54,6 +54,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
   const [enableAudio, setEnableAudio] = useState(true);
   const [enableWaitingRoom, setEnableWaitingRoom] = useState(false);
   const [passcode, setPasscode] = useState("");
+  const [recurrenceRule, setRecurrenceRule] = useState("none");
   const [createdMeeting, setCreatedMeeting] = useState(null);
 
   // Use organizationId prop (from GeneralApp's activeOrganizationId), fallback to JWT (backend handles it)
@@ -167,6 +168,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
           maxParticipants: 50,
         },
         passcode: passcode.trim() || undefined,
+        recurrence_rule: recurrenceRule,
         participants: selectedMembers
           .map((m) => {
             // Extract real numeric user_id from thread objects
@@ -213,6 +215,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
     setScheduledTime("");
     setJoinCode("");
     setPasscode("");
+    setRecurrenceRule("none");
     setSelectedMembers([]);
     setSearchQuery("");
     setCreatedMeeting(null);
@@ -343,24 +346,40 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
 
             {/* Schedule fields */}
             {tab === 1 && (
-              <Stack direction="row" spacing={2}>
+              <>
+                <Stack direction="row" spacing={2}>
+                  <TextField
+                    fullWidth
+                    type="date"
+                    label="Date"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField
+                    fullWidth
+                    type="time"
+                    label="Time"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Stack>
                 <TextField
-                  fullWidth
-                  type="date"
-                  label="Date"
-                  value={scheduledDate}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
-                <TextField
-                  fullWidth
-                  type="time"
-                  label="Time"
-                  value={scheduledTime}
-                  onChange={(e) => setScheduledTime(e.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Stack>
+                  select
+                  label="Repeat"
+                  size="small"
+                  value={recurrenceRule}
+                  onChange={(e) => setRecurrenceRule(e.target.value)}
+                  SelectProps={{ native: true }}
+                  sx={{ maxWidth: 200 }}
+                >
+                  <option value="none">Does not repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </TextField>
+              </>
             )}
 
             {/* Settings */}

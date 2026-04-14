@@ -13,9 +13,43 @@ const resolveFrontendOrigin = () => {
   return raw.replace(/\/$/, '');
 };
 
-const sendMemberInviteEmail = async ({ email, meetingTitle, meetingCode, hostName, scheduledAt }) => {
+// Build an iCalendar (.ics) attachment so recipients can add the meeting to Google/Outlook/Apple Calendar
+const buildIcsAttachment = ({ meetingCode, title, description, scheduledAt, durationMinutes = 60, joinLink, recurrenceRule }) => {
+  if (!scheduledAt) return null;
+  const start = new Date(scheduledAt);
+  const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+  const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const escape = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
+  const rruleMap = { daily: 'FREQ=DAILY', weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY' };
+  const rrule = rruleMap[recurrenceRule];
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//TeamChat//Meeting//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    `UID:${meetingCode}@teamchat`,
+    `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(start)}`,
+    `DTEND:${fmt(end)}`,
+    `SUMMARY:${escape(title || 'Meeting')}`,
+    `DESCRIPTION:${escape((description || '') + (joinLink ? `\n\nJoin: ${joinLink}` : ''))}`,
+    joinLink ? `URL:${joinLink}` : null,
+    rrule ? `RRULE:${rrule}` : null,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].filter(Boolean);
+  return {
+    filename: `${meetingCode}.ics`,
+    content: lines.join('\r\n'),
+    contentType: 'text/calendar; charset=utf-8; method=REQUEST',
+  };
+};
+
+const sendMemberInviteEmail = async ({ email, meetingTitle, meetingCode, hostName, scheduledAt, description, recurrenceRule }) => {
   const origin = resolveFrontendOrigin();
-  const link = `${origin}/app/meeting`;
+  const link = `${origin}/app/meeting?join=${encodeURIComponent(meetingCode)}`;
   const when = scheduledAt ? new Date(scheduledAt).toLocaleString() : 'Now';
   const subject = `Meeting invite: ${meetingTitle || 'Meeting'}`;
   const html = `
@@ -24,15 +58,18 @@ const sendMemberInviteEmail = async ({ email, meetingTitle, meetingCode, hostNam
       <p style="margin: 0 0 16px; color: #555;">${hostName ? `${hostName} has` : 'You have been'} invited you to a meeting.</p>
       <div style="background:#f5f7fb; border-radius: 10px; padding: 16px 20px; margin: 20px 0;">
         <div style="font-weight:600; font-size:18px; margin-bottom:4px;">${meetingTitle || 'Meeting'}</div>
-        <div style="color:#555; font-size:13px;">${when}</div>
+        <div style="color:#555; font-size:13px;">${when}${recurrenceRule && recurrenceRule !== 'none' ? ` • Repeats ${recurrenceRule}` : ''}</div>
         <div style="color:#555; font-size:13px; margin-top:4px;">Meeting ID: <b>${meetingCode}</b></div>
       </div>
       <a href="${link}" style="display:inline-block; background:#1976d2; color:#fff; text-decoration:none; padding:12px 20px; border-radius:8px; font-weight:600;">Open Meetings</a>
-      <p style="margin: 20px 0 6px; color:#555; font-size:13px;">Or log in and paste meeting ID: <b>${meetingCode}</b></p>
+      <p style="margin: 20px 0 6px; color:#555; font-size:13px;">Calendar file (.ics) is attached — click to add to Google / Outlook / Apple Calendar.</p>
     </div>
   `;
+  const ics = buildIcsAttachment({
+    meetingCode, title: meetingTitle, description, scheduledAt, joinLink: link, recurrenceRule,
+  });
   try {
-    await sendMailAsync({ to: email, subject, html });
+    await sendMailAsync({ to: email, subject, html, attachments: ics ? [ics] : undefined });
   } catch (err) {
     console.warn('[meeting] member invite mail failed:', err.message);
   }
@@ -59,8 +96,11 @@ const sendGuestInviteEmail = async ({ email, meetingTitle, meetingCode, accessTo
       <p style="margin-top:28px; color:#999; font-size:12px;">You are joining as an external guest — no account required.</p>
     </div>
   `;
+  const ics = buildIcsAttachment({
+    meetingCode, title: meetingTitle, scheduledAt, joinLink: link,
+  });
   try {
-    await sendMailAsync({ to: email, subject, html });
+    await sendMailAsync({ to: email, subject, html, attachments: ics ? [ics] : undefined });
   } catch (err) {
     console.warn('[meeting] guest invite mail failed:', err.message);
   }
@@ -92,7 +132,7 @@ const resolveUser = (req) => {
 const createMeeting = async (req, res, next) => {
   try {
     const { userId, orgId } = resolveUser(req);
-    const { title, description, meeting_type, scheduled_at, settings, participants, passcode } = req.body;
+    const { title, description, meeting_type, scheduled_at, settings, participants, passcode, recurrence_rule, recurrence_until } = req.body;
 
     const meeting = await meetingModel.create({
       organization_id: orgId,
@@ -103,6 +143,8 @@ const createMeeting = async (req, res, next) => {
       scheduled_at,
       settings,
       passcode,
+      recurrence_rule,
+      recurrence_until,
     });
 
     // Add host as participant
@@ -144,6 +186,8 @@ const createMeeting = async (req, res, next) => {
               meetingCode: meeting.meeting_id,
               hostName: req.user?.name,
               scheduledAt: meeting.scheduled_at,
+              description: meeting.description,
+              recurrenceRule: meeting.recurrence_rule,
             }).catch(() => {});
           }
         } catch (err) {
@@ -403,6 +447,75 @@ const deleteMeeting = async (req, res, next) => {
   }
 };
 
+// PATCH /meetings/:id/co-host — promote/demote participant to co-host (host only)
+const setCoHost = async (req, res, next) => {
+  try {
+    const { userId } = resolveUser(req);
+    const meeting = await meetingModel.findById(Number(req.params.id));
+    if (!meeting) return failure(res, 'Meeting not found', 404);
+    if (Number(meeting.host_id) !== userId) return failure(res, 'Only the host can assign co-hosts', 403);
+    const targetUserId = Number(req.body.user_id);
+    const makeCoHost = req.body.co_host !== false;
+    if (!Number.isFinite(targetUserId) || targetUserId <= 0) return failure(res, 'user_id required', 400);
+    if (targetUserId === userId) return failure(res, 'Host is already the primary host', 400);
+    const participants = await meetingModel.getParticipants(meeting.id);
+    const target = participants.find((p) => Number(p.user_id) === targetUserId);
+    if (!target) return failure(res, 'User is not a participant', 404);
+    const updated = await meetingModel.updateParticipant(target.id, {
+      role: makeCoHost ? 'co-host' : 'participant',
+    });
+    return success(res, { participant: updated }, makeCoHost ? 'Promoted to co-host' : 'Demoted to participant');
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// GET /meetings/:id/attendance — attendance report (host only)
+const getAttendance = async (req, res, next) => {
+  try {
+    const { userId } = resolveUser(req);
+    const meeting = await meetingModel.findById(Number(req.params.id));
+    if (!meeting) return failure(res, 'Meeting not found', 404);
+    if (Number(meeting.host_id) !== userId) {
+      // Allow co-hosts too
+      const parts = await meetingModel.getParticipants(meeting.id);
+      const me = parts.find((p) => Number(p.user_id) === userId);
+      if (!me || me.role !== 'co-host') return failure(res, 'Only host or co-host can view attendance', 403);
+    }
+    const sessions = await meetingModel.getAttendanceReport(meeting.id);
+    // Aggregate per user: total time, first join, last leave
+    const byUser = new Map();
+    for (const s of sessions) {
+      const key = s.user_id || `guest-${s.display_name || 'anon'}`;
+      const left = s.left_at ? new Date(s.left_at).getTime() : Date.now();
+      const joined = new Date(s.joined_at).getTime();
+      const dur = Math.max(0, Math.round((left - joined) / 1000));
+      if (!byUser.has(key)) {
+        byUser.set(key, {
+          user_id: s.user_id, name: s.user_name || s.display_name || 'Guest',
+          email: s.user_email, avatar: s.user_avatar,
+          first_join: s.joined_at, last_leave: s.left_at, total_seconds: dur, sessions: 1,
+        });
+      } else {
+        const agg = byUser.get(key);
+        agg.total_seconds += dur;
+        agg.sessions += 1;
+        if (new Date(s.joined_at) < new Date(agg.first_join)) agg.first_join = s.joined_at;
+        if (s.left_at && (!agg.last_leave || new Date(s.left_at) > new Date(agg.last_leave))) {
+          agg.last_leave = s.left_at;
+        }
+      }
+    }
+    return success(res, {
+      meeting: { id: meeting.id, title: meeting.title, scheduled_at: meeting.scheduled_at, duration_minutes: meeting.duration_minutes },
+      attendees: Array.from(byUser.values()).sort((a, b) => new Date(a.first_join) - new Date(b.first_join)),
+      raw_sessions: sessions,
+    }, 'Attendance report');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 // POST /meetings/:id/rsvp
 const rsvp = async (req, res, next) => {
   try {
@@ -465,4 +578,6 @@ module.exports = {
   getMessages,
   getGuestMeeting,
   verifyGuest,
+  setCoHost,
+  getAttendance,
 };

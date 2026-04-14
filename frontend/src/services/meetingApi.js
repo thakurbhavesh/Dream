@@ -105,3 +105,19 @@ export const getMeetingMessages = async (id) => {
   if (!response.ok) throw new Error(payload?.message || "Failed to get messages");
   return payload?.data;
 };
+
+export const setCoHost = async (id, user_id, co_host = true) => {
+  const { response, payload } = await fetchWithAuth(`${BASE}/${id}/co-host`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id, co_host }),
+  });
+  if (!response.ok) throw new Error(payload?.message || "Failed to update co-host");
+  return payload?.data;
+};
+
+export const getMeetingAttendance = async (id) => {
+  const { response, payload } = await fetchWithAuth(`${BASE}/${id}/attendance`);
+  if (!response.ok) throw new Error(payload?.message || "Failed to load attendance");
+  return payload?.data;
+};

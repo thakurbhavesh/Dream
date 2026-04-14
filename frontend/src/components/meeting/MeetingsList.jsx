@@ -25,8 +25,10 @@ import {
   PiQuestionBold,
   PiArrowClockwiseBold,
   PiLinkBold,
+  PiUsersThreeBold,
 } from "react-icons/pi";
-import { getUpcomingMeetings, getPastMeetings, rsvpMeeting, deleteMeeting } from "../../services/meetingApi.js";
+import { getUpcomingMeetings, getPastMeetings, rsvpMeeting, deleteMeeting, getMeetingAttendance } from "../../services/meetingApi.js";
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
 
 const statusColors = {
@@ -61,6 +63,23 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("upcoming"); // "upcoming" | "past"
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
+  const [attendanceData, setAttendanceData] = useState(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
+  const openAttendance = async (meeting) => {
+    setAttendanceOpen(true);
+    setAttendanceLoading(true);
+    setAttendanceData(null);
+    try {
+      const data = await getMeetingAttendance(meeting.id);
+      setAttendanceData(data);
+    } catch (err) {
+      console.error("Attendance load failed:", err);
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
 
   const loadMeetings = useCallback(async () => {
     if (!orgId) return;
@@ -267,11 +286,18 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                       </Tooltip>
                     )}
                     {tab === "past" && isHost && (
-                      <Tooltip title="Remove from history">
-                        <IconButton size="small" onClick={() => handleDelete(m.id)}>
-                          <PiTrashBold size={14} />
-                        </IconButton>
-                      </Tooltip>
+                      <>
+                        <Tooltip title="Attendance report">
+                          <IconButton size="small" onClick={() => openAttendance(m)}>
+                            <PiUsersThreeBold size={14} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Remove from history">
+                          <IconButton size="small" onClick={() => handleDelete(m.id)}>
+                            <PiTrashBold size={14} />
+                          </IconButton>
+                        </Tooltip>
+                      </>
                     )}
                   </Stack>
                 </Stack>
@@ -312,6 +338,40 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
           })
         )}
       </Stack>
+
+      <Dialog open={attendanceOpen} onClose={() => setAttendanceOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>
+          Attendance report
+          {attendanceData?.meeting?.title ? ` — ${attendanceData.meeting.title}` : ""}
+        </DialogTitle>
+        <DialogContent dividers>
+          {attendanceLoading && (
+            <Stack alignItems="center" sx={{ py: 3 }}>
+              <CircularProgress size={24} />
+            </Stack>
+          )}
+          {!attendanceLoading && attendanceData?.attendees?.length === 0 && (
+            <Typography variant="body2" color="text.secondary">No attendance recorded.</Typography>
+          )}
+          {!attendanceLoading && attendanceData?.attendees?.map((a) => (
+            <Stack key={`${a.user_id || a.name}-${a.first_join}`} direction="row" alignItems="center" spacing={1.5} sx={{ py: 1 }}>
+              <Avatar sx={{ width: 32, height: 32, fontSize: 13 }}>{(a.name || "?").charAt(0)}</Avatar>
+              <Stack sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="body2" fontWeight={600} noWrap>{a.name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {new Date(a.first_join).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {a.last_leave ? ` → ${new Date(a.last_leave).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : " → still connected"}
+                  {" • "}{Math.floor(a.total_seconds / 60)}m {a.total_seconds % 60}s
+                  {a.sessions > 1 ? ` • ${a.sessions} sessions` : ""}
+                </Typography>
+              </Stack>
+            </Stack>
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAttendanceOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

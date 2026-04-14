@@ -20,5 +20,7 @@ router.delete('/:id', auth, controller.deleteMeeting);
 router.post('/:id/rsvp', auth, controller.rsvp);
 router.post('/:id/participants', auth, controller.addParticipant);
 router.get('/:id/messages', auth, controller.getMessages);
+router.patch('/:id/co-host', auth, controller.setCoHost);
+router.get('/:id/attendance', auth, controller.getAttendance);
 
 module.exports = router;
