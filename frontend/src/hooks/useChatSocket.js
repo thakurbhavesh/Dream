@@ -124,6 +124,8 @@ const useChatSocket = ({
   onThreadUpdate,
   onNotification,
   onUploadS3Progress,
+  onPinSync,
+  onPinUpdate,
 } = {}) => {
   const socket = useSocket();
   const callbacksRef = useRef({});
@@ -148,6 +150,8 @@ const useChatSocket = ({
     onThreadUpdate,
     onNotification,
     onUploadS3Progress,
+    onPinSync,
+    onPinUpdate,
   };
 
   useEffect(() => {
@@ -166,6 +170,8 @@ const useChatSocket = ({
       "message:read_ack": (data) => callbacksRef.current.onReadAck?.(data),
       "message:delivered_ack": (data) => callbacksRef.current.onDeliveredAck?.(data),
       "thread:update": (data) => callbacksRef.current.onThreadUpdate?.(data),
+      "thread:pin_sync": (data) => callbacksRef.current.onPinSync?.(data),
+      "thread:pin_update": (data) => callbacksRef.current.onPinUpdate?.(data),
       "typing:update": (data) => callbacksRef.current.onTypingUpdate?.(data),
       "user:online": (data) => callbacksRef.current.onUserOnline?.(data),
       "user:offline": (data) => callbacksRef.current.onUserOffline?.(data),
@@ -321,6 +327,15 @@ const useChatSocket = ({
     [socket]
   );
 
+  const pinThread = useCallback(
+    (threadId, pinned) =>
+      new Promise((resolve) => {
+        if (!socket) return resolve({ error: "Not connected" });
+        socket.emit("thread:pin", { threadId, pinned: !!pinned }, resolve);
+      }),
+    [socket]
+  );
+
   const scheduleMessage = useCallback(
     (threadId, message, messageType, metadata, sendAt) =>
       new Promise((resolve) => {
@@ -405,6 +420,7 @@ const useChatSocket = ({
     editPoll,
     joinGroup,
     focusThread,
+    pinThread,
     scheduleMessage,
     cancelScheduledMessage,
     listScheduledMessages,
@@ -412,7 +428,7 @@ const useChatSocket = ({
     setThreadSound,
     setDisappearTimer,
     getDisappearTimer,
-  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, editPoll, joinGroup, focusThread, scheduleMessage, cancelScheduledMessage, listScheduledMessages, broadcastMessage, setThreadSound, setDisappearTimer, getDisappearTimer]);
+  }), [socket, sendMessage, editMessage, deleteMessage, recallMessage, reactToMessage, forwardMessage, startTyping, stopTyping, markRead, pinMessage, votePoll, endPoll, editPoll, joinGroup, focusThread, pinThread, scheduleMessage, cancelScheduledMessage, listScheduledMessages, broadcastMessage, setThreadSound, setDisappearTimer, getDisappearTimer]);
 };
 
 export default useChatSocket;

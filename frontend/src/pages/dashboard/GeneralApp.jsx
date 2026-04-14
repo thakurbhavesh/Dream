@@ -812,6 +812,8 @@ const GeneralApp = () => {
   );
   // ─── Socket.IO real-time chat ───────────────────────────────────────────────
   const { startTyping: typingStart, stopTyping: typingStop } = useTypingActions();
+  // Pinned threads: threadId → pinned_at ISO (used to pin chats to top)
+  const [pinnedThreads, setPinnedThreads] = useState({});
   const chatSocket = useChatSocket({
     onNewMessage: useCallback((data) => {
       if (!data?.threadId || !data?.message) return;
@@ -985,6 +987,22 @@ const GeneralApp = () => {
         metadata: { ...(message.metadata || {}), uploadState: "uploading", uploadProgress: scaled, uploadPhase: "s3" },
       });
     }, [upsertMessage]),
+
+    onPinSync: useCallback((rows) => {
+      const map = {};
+      (rows || []).forEach((r) => { if (r?.thread_id) map[r.thread_id] = r.pinned_at || new Date().toISOString(); });
+      setPinnedThreads(map);
+    }, []),
+
+    onPinUpdate: useCallback((data) => {
+      if (!data?.threadId) return;
+      setPinnedThreads((prev) => {
+        const next = { ...prev };
+        if (data.pinned) next[data.threadId] = data.pinned_at || new Date().toISOString();
+        else delete next[data.threadId];
+        return next;
+      });
+    }, []),
   });
 
   // ─── Mute hook ────────────────────────────────────────────────────────────────
@@ -2934,6 +2952,8 @@ const GeneralApp = () => {
                 isThreadMuted={isThreadMuted}
                 onMuteThread={muteThread}
                 onUnmuteThread={unmuteThread}
+                pinnedThreads={pinnedThreads}
+                onPinThread={(tid, pinned) => chatSocket?.pinThread?.(tid, pinned)}
               />
             </Box>
             <ChatListActionsMenu

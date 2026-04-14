@@ -35,6 +35,13 @@ export const getUpcomingMeetings = async (orgId) => {
   return payload?.data;
 };
 
+export const getPastMeetings = async (orgId, { limit = 50, offset = 0 } = {}) => {
+  const params = new URLSearchParams({ organization_id: orgId, limit, offset });
+  const { response, payload } = await fetchWithAuth(`${BASE}/past?${params}`);
+  if (!response.ok) throw new Error(payload?.message || "Failed to fetch past meetings");
+  return payload?.data;
+};
+
 export const getMeetingById = async (id) => {
   const { response, payload } = await fetchWithAuth(`${BASE}/${id}`);
   if (!response.ok) throw new Error(payload?.message || "Meeting not found");

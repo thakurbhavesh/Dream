@@ -10,6 +10,8 @@ import {
   Tooltip,
   Divider,
   CircularProgress,
+  Tabs,
+  Tab,
   useTheme,
 } from "@mui/material";
 import {
@@ -23,7 +25,7 @@ import {
   PiQuestionBold,
   PiArrowClockwiseBold,
 } from "react-icons/pi";
-import { getUpcomingMeetings, rsvpMeeting, deleteMeeting } from "../../services/meetingApi.js";
+import { getUpcomingMeetings, getPastMeetings, rsvpMeeting, deleteMeeting } from "../../services/meetingApi.js";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
 
 const statusColors = {
@@ -57,19 +59,22 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
   })();
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("upcoming"); // "upcoming" | "past"
 
   const loadMeetings = useCallback(async () => {
     if (!orgId) return;
     setLoading(true);
     try {
-      const data = await getUpcomingMeetings(orgId);
+      const data = tab === "past"
+        ? await getPastMeetings(orgId)
+        : await getUpcomingMeetings(orgId);
       setMeetings(data?.meetings || []);
     } catch (err) {
       console.error("Failed to load meetings:", err);
     } finally {
       setLoading(false);
     }
-  }, [orgId]);
+  }, [orgId, tab]);
 
   useEffect(() => {
     loadMeetings();
@@ -141,7 +146,15 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
         </Stack>
       </Stack>
 
-      <Divider />
+      <Tabs
+        value={tab}
+        onChange={(_, v) => setTab(v)}
+        variant="fullWidth"
+        sx={{ minHeight: 36, borderBottom: `1px solid ${theme.palette.divider}` }}
+      >
+        <Tab value="upcoming" label="Upcoming" sx={{ minHeight: 36, textTransform: "none", fontSize: 13 }} />
+        <Tab value="past" label="Past" sx={{ minHeight: 36, textTransform: "none", fontSize: 13 }} />
+      </Tabs>
 
       <Stack sx={{ flex: 1, overflow: "auto", p: 1 }}>
         {loading ? (
@@ -152,7 +165,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
           <Stack alignItems="center" justifyContent="center" sx={{ py: 4 }}>
             <PiCalendarBold size={40} color={theme.palette.text.disabled} />
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              No upcoming meetings
+              {tab === "past" ? "No past meetings yet" : "No upcoming meetings"}
             </Typography>
           </Stack>
         ) : (

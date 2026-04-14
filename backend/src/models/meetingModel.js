@@ -56,6 +56,29 @@ const findUpcoming = async (organization_id, user_id) => {
   return rows;
 };
 
+const findPast = async (organization_id, user_id, { limit = 50, offset = 0 } = {}) => {
+  const query = `
+    SELECT DISTINCT ON (m.id) m.*,
+           u.name AS host_name, u.profile_url AS host_avatar
+    FROM meetings m
+    LEFT JOIN meeting_participants mp ON mp.meeting_id = m.id
+    LEFT JOIN users u ON u.user_id = m.host_id
+    WHERE m.organization_id = $1
+      AND (m.host_id = $2 OR mp.user_id = $2)
+      AND (m.status IN ('ended', 'cancelled')
+           OR (m.scheduled_at IS NOT NULL AND m.scheduled_at < NOW() - INTERVAL '4 hours'))
+    ORDER BY m.id, COALESCE(m.ended_at, m.scheduled_at, m.created_at) DESC
+    LIMIT $3 OFFSET $4
+  `;
+  const { rows } = await db.query(query, [organization_id, user_id, limit, offset]);
+  // DISTINCT ON forces ORDER BY id first; re-sort for display
+  return rows.sort((a, b) => {
+    const ta = new Date(a.ended_at || a.scheduled_at || a.created_at).getTime();
+    const tb = new Date(b.ended_at || b.scheduled_at || b.created_at).getTime();
+    return tb - ta;
+  });
+};
+
 const updateStatus = async (id, status, extra = {}) => {
   const sets = ['status = $2', 'updated_at = NOW()'];
   const params = [id, status];
@@ -233,6 +256,7 @@ module.exports = {
   findByMeetingId,
   findByOrg,
   findUpcoming,
+  findPast,
   updateStatus,
   update,
   remove,

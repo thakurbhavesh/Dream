@@ -24,6 +24,8 @@ const scheduledMessageModel = require('../models/scheduledMessageModel');
 const disappearingModel = require('../models/disappearingModel');
 const { sendMailAsync } = require('../utils/mail');
 const webPush = require('../utils/webPush');
+const callLogModel = require('../models/callLogModel');
+const threadPinModel = require('../models/threadPinModel');
 
 // Fire-and-forget web push so subscribers receive background notifications
 const pushToUser = (userId, payload) => {
@@ -765,6 +767,11 @@ const onConnection = (socket) => {
       threadMuteModel.getMutedThreads(Number(userId), orgId)
         .then((mutes) => { if (mutes.length) emitToUser(userId, 'thread:mute_sync', mutes); })
         .catch(err => console.error('[socket] mute sync error:', err.message));
+
+      // Sync pinned threads on connect
+      threadPinModel.getPinsForUser(Number(userId), orgId)
+        .then((pins) => { emitToUser(userId, 'thread:pin_sync', pins); })
+        .catch(err => console.error('[socket] pin sync error:', err.message));
     }
 
     // Sync DND state to client on connect
@@ -1613,6 +1620,15 @@ const onConnection = (socket) => {
   // Persist a call-log DM message so missed/declined calls appear in chat for both sides
   const logCall = async ({ fromUserId, toUserId, callType, outcome }) => {
     try {
+      // Dedicated call_logs table — fast indexed history
+      callLogModel.insert({
+        organization_id: orgId,
+        caller_id: Number(fromUserId),
+        callee_id: Number(toUserId),
+        call_type: callType || 'audio',
+        outcome,
+      }).catch((e) => console.warn('[socket] call_logs insert failed:', e.message));
+
       const label = {
         missed: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call`,
         declined: `📞 ${callType === 'video' ? 'Video' : 'Audio'} call declined`,
@@ -2620,6 +2636,29 @@ const onConnection = (socket) => {
     } catch (err) {
       console.error('[socket] thread:mute error', err.message);
       ack?.({ error: err.message });
+    }
+  });
+
+  // ─── Thread pin / unpin ────────────────────────────────────────────────
+  socket.on('thread:pin', async (data, ack) => {
+    if (!rl.pin()) return ack?.({ error: 'Rate limited' });
+    try {
+      const { threadId, pinned } = data || {};
+      if (!threadId) return ack?.({ error: 'Missing threadId' });
+      if (!orgId) return ack?.({ error: 'No org context' });
+      if (pinned === false) {
+        await threadPinModel.unpin(Number(userId), orgId, threadId);
+        emitToUser(userId, 'thread:pin_update', { threadId, pinned: false });
+      } else {
+        const row = await threadPinModel.pin(Number(userId), orgId, threadId);
+        emitToUser(userId, 'thread:pin_update', {
+          threadId, pinned: true, pinned_at: row?.pinned_at,
+        });
+      }
+      ack?.({ ok: true });
+    } catch (err) {
+      console.error('[socket] thread:pin error', err.message);
+      ack?.({ error: err.message || 'Pin failed' });
     }
   });
 

@@ -11,6 +11,7 @@ router.post('/guest/:token/verify', controller.verifyGuest);
 router.post('/', auth, controller.createMeeting);
 router.get('/', auth, controller.getMeetings);
 router.get('/upcoming', auth, controller.getUpcoming);
+router.get('/past', auth, controller.getPast);
 router.get('/join/:meetingId', auth, controller.joinByCode);
 router.get('/:id', auth, controller.getMeeting);
 router.patch('/:id', auth, controller.updateMeeting);

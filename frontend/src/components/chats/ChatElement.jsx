@@ -1,6 +1,6 @@
 import { alpha, Avatar, Box, Menu, MenuItem, ListItemIcon, ListItemText, Stack, Typography, useTheme } from "@mui/material";
 import React, { useCallback, useMemo, useState } from "react";
-import { PiBellSlashBold, PiBellBold } from "react-icons/pi";
+import { PiBellSlashBold, PiBellBold, PiPushPinBold, PiPushPinSlashBold, PiPushPinFill } from "react-icons/pi";
 import { FiPaperclip } from "react-icons/fi";
 import { IoCheckmark, IoCheckmarkDone } from "react-icons/io5";
 import {
@@ -338,6 +338,8 @@ const ChatElement = ({
   isMuted = false,
   onMute,
   onUnmute,
+  isPinned = false,
+  onPin,
 }) => {
   const theme = useTheme();
   const { status: presenceStatus } = usePresence();
@@ -736,6 +738,9 @@ const ChatElement = ({
               {isMuted && (
                 <PiBellSlashBold size={14} style={{ opacity: 0.5, marginTop: 2 }} />
               )}
+              {isPinned && (
+                <PiPushPinFill size={12} style={{ opacity: 0.7, marginTop: 2, color: theme.palette.primary.main }} />
+              )}
             </Stack>
           </>
         )}
@@ -750,6 +755,14 @@ const ChatElement = ({
         transitionDuration={0}
         slotProps={{ paper: { sx: { borderRadius: 1, minWidth: 180 } } }}
       >
+        <MenuItem
+          onClick={() => { onPin?.(thread?.id, !isPinned); setCtxMenu(null); }}
+        >
+          <ListItemIcon>
+            {isPinned ? <PiPushPinSlashBold size={16} /> : <PiPushPinBold size={16} />}
+          </ListItemIcon>
+          <ListItemText>{isPinned ? "Unpin chat" : "Pin chat"}</ListItemText>
+        </MenuItem>
         {isMuted ? (
           <MenuItem onClick={() => { onUnmute?.(thread?.id); setCtxMenu(null); }}>
             <ListItemIcon><PiBellBold size={16} /></ListItemIcon>

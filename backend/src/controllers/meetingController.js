@@ -231,6 +231,19 @@ const getUpcoming = async (req, res, next) => {
   }
 };
 
+// GET /meetings/past — ended/past meetings for current user
+const getPast = async (req, res, next) => {
+  try {
+    const { userId, orgId } = resolveUser(req);
+    const limit = Math.min(100, Number(req.query.limit) || 50);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const meetings = await meetingModel.findPast(orgId, userId, { limit, offset });
+    return success(res, { meetings }, 'Past meetings');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 // GET /meetings/:id
 const getMeeting = async (req, res, next) => {
   try {
@@ -358,6 +371,7 @@ module.exports = {
   createMeeting,
   getMeetings,
   getUpcoming,
+  getPast,
   getMeeting,
   joinByCode,
   updateMeeting,

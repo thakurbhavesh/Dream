@@ -106,6 +106,8 @@ const ChatList = ({
   isThreadMuted,
   onMuteThread,
   onUnmuteThread,
+  pinnedThreads = {},
+  onPinThread,
 }) => {
   const theme = useTheme();
   const [searchTerm, setSearchTerm] = useState("");
@@ -155,23 +157,31 @@ const ChatList = ({
 
   const sortedThreads = useMemo(() => {
     if (!Array.isArray(threads) || threads.length === 0) return [];
-    const enriched = threads.map((thread, index) => ({
-      thread,
-      index,
-      isPinned: Boolean(thread?.isPinned),
-      activity: resolveThreadActivityTimestamp(thread),
-    }));
+    const enriched = threads.map((thread, index) => {
+      const pinnedAtIso = pinnedThreads?.[thread?.id];
+      const pinnedAt = pinnedAtIso ? new Date(pinnedAtIso).getTime() : 0;
+      return {
+        thread,
+        index,
+        isPinned: Boolean(pinnedAt) || Boolean(thread?.isPinned),
+        pinnedAt,
+        activity: resolveThreadActivityTimestamp(thread),
+      };
+    });
     enriched.sort((a, b) => {
       if (a.isPinned !== b.isPinned) {
         return a.isPinned ? -1 : 1;
+      }
+      if (a.isPinned && b.isPinned && a.pinnedAt !== b.pinnedAt) {
+        return b.pinnedAt - a.pinnedAt;
       }
       if (a.activity !== b.activity) {
         return b.activity - a.activity;
       }
       return a.index - b.index;
     });
-    return enriched.map((entry) => entry.thread);
-  }, [threads]);
+    return enriched.map((entry) => ({ ...entry.thread, isPinned: entry.isPinned }));
+  }, [threads, pinnedThreads]);
 
   const filteredThreads = useMemo(() => {
     const trimmedQuery = deferredSearch.trim().toLowerCase();
@@ -435,6 +445,8 @@ const ChatList = ({
                           isMuted={isThreadMuted?.(thread?.id)}
                           onMute={onMuteThread}
                           onUnmute={onUnmuteThread}
+                          isPinned={!!pinnedThreads?.[thread?.id]}
+                          onPin={onPinThread}
                         />
                       </Box>
                     );
