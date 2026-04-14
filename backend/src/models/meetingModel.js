@@ -50,6 +50,11 @@ const findUpcoming = async (organization_id, user_id) => {
     WHERE m.organization_id = $1
       AND m.status IN ('waiting', 'active')
       AND (m.host_id = $2 OR mp.user_id = $2)
+      AND (
+        m.status = 'active'
+        OR (m.scheduled_at IS NOT NULL AND m.scheduled_at >= NOW() - INTERVAL '4 hours')
+        OR (m.scheduled_at IS NULL AND m.created_at >= NOW() - INTERVAL '4 hours')
+      )
     ORDER BY m.id, COALESCE(m.scheduled_at, m.created_at) ASC
   `;
   const { rows } = await db.query(query, [organization_id, user_id]);
@@ -66,7 +71,8 @@ const findPast = async (organization_id, user_id, { limit = 50, offset = 0 } = {
     WHERE m.organization_id = $1
       AND (m.host_id = $2 OR mp.user_id = $2)
       AND (m.status IN ('ended', 'cancelled')
-           OR (m.scheduled_at IS NOT NULL AND m.scheduled_at < NOW() - INTERVAL '4 hours'))
+           OR (m.scheduled_at IS NOT NULL AND m.scheduled_at < NOW() - INTERVAL '4 hours')
+           OR (m.status = 'waiting' AND m.scheduled_at IS NULL AND m.created_at < NOW() - INTERVAL '4 hours'))
     ORDER BY m.id, COALESCE(m.ended_at, m.scheduled_at, m.created_at) DESC
     LIMIT $3 OFFSET $4
   `;

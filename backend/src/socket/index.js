@@ -18,6 +18,7 @@ const { signProfileFields } = require('../utils/signProfileUrls');
 const { signMessageFileUrls } = require('../utils/signFileUrls');
 const { encryptMessage, decryptMessage: _rawDecryptMessage, encryptMetadata, decryptMetadata: _rawDecryptMetadata } = require('../utils/messageCipher');
 const controlModel = require('../models/organizationControlModel');
+const meetingModel = require('../models/meetingModel');
 const threadMuteModel = require('../models/threadMuteModel');
 const userSettingsModel = require('../models/userSettingsModel');
 const scheduledMessageModel = require('../models/scheduledMessageModel');
@@ -1617,8 +1618,13 @@ const onConnection = (socket) => {
 
   // ─── Audio/Video Call (WebRTC signaling relay) ──────────────────────────────
 
+  // Track in-progress (answered) calls so we can log them with duration on end
+  // key: sorted pair "a-b" → { callerId, calleeId, callType, startedAt }
+  const _activeCalls = (io._activeCalls = io._activeCalls || new Map());
+  const _callKey = (a, b) => [Number(a), Number(b)].sort((x, y) => x - y).join('-');
+
   // Persist a call-log DM message so missed/declined calls appear in chat for both sides
-  const logCall = async ({ fromUserId, toUserId, callType, outcome }) => {
+  const logCall = async ({ fromUserId, toUserId, callType, outcome, duration_seconds = null, ended_at = null }) => {
     try {
       // Dedicated call_logs table — fast indexed history
       callLogModel.insert({
@@ -1627,13 +1633,19 @@ const onConnection = (socket) => {
         callee_id: Number(toUserId),
         call_type: callType || 'audio',
         outcome,
+        duration_seconds,
+        ended_at,
       }).catch((e) => console.warn('[socket] call_logs insert failed:', e.message));
 
+      const durText = duration_seconds
+        ? ` (${Math.floor(duration_seconds / 60)}:${String(duration_seconds % 60).padStart(2, '0')})`
+        : '';
       const label = {
         missed: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call`,
         declined: `📞 ${callType === 'video' ? 'Video' : 'Audio'} call declined`,
         offline: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call (user was offline)`,
         no_answer: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call`,
+        answered: `📞 ${callType === 'video' ? 'Video' : 'Audio'} call${durText}`,
       }[outcome] || `📞 ${callType === 'video' ? 'Video' : 'Audio'} call`;
 
       const saved = await chatModel.sendDMMessage({
@@ -1726,12 +1738,19 @@ const onConnection = (socket) => {
   socket.on('call:accept', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
-      const { targetUserId, signalData } = data || {};
+      const { targetUserId, signalData, callType } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       emitToUser(String(targetUserId), 'call:accepted', {
         fromUserId: userId,
         fromUserName: socket.user.name || 'Unknown',
         signalData: signalData || null,
+      });
+      // targetUserId is the original caller; userId is the callee accepting
+      _activeCalls.set(_callKey(targetUserId, userId), {
+        callerId: Number(targetUserId),
+        calleeId: Number(userId),
+        callType: callType || 'audio',
+        startedAt: Date.now(),
       });
       ack?.({ ok: true });
     } catch (err) {
@@ -1793,6 +1812,22 @@ const onConnection = (socket) => {
           callType: callType || 'audio',
           outcome: 'no_answer',
         });
+      } else {
+        // Answered call ended — log once with duration
+        const key = _callKey(userId, targetUserId);
+        const active = _activeCalls.get(key);
+        if (active) {
+          _activeCalls.delete(key);
+          const duration = Math.max(1, Math.round((Date.now() - active.startedAt) / 1000));
+          logCall({
+            fromUserId: active.callerId,
+            toUserId: active.calleeId,
+            callType: active.callType,
+            outcome: 'answered',
+            duration_seconds: duration,
+            ended_at: new Date(),
+          });
+        }
       }
       ack?.({ ok: true });
     } catch (err) {
@@ -1957,6 +1992,25 @@ const onConnection = (socket) => {
   // In-memory meeting rooms: meetingRoomId → Set of { socketId, userId, userName }
   const _meetingRooms = (io._meetingRooms = io._meetingRooms || new Map());
 
+  // Auto-end a meeting in DB when the last participant leaves (Google Meet style)
+  const _autoEndMeetingIfEmpty = async (meetingRoomId) => {
+    try {
+      const meeting = await meetingModel.findByMeetingId(meetingRoomId);
+      if (!meeting) return;
+      if (meeting.status === 'ended' || meeting.status === 'cancelled') return;
+      const extra = { ended_at: new Date() };
+      if (meeting.started_at) {
+        extra.duration_minutes = Math.round(
+          (Date.now() - new Date(meeting.started_at).getTime()) / 60000
+        );
+      }
+      await meetingModel.updateStatus(meeting.id, 'ended', extra);
+      io.to(`meeting:${meetingRoomId}`).emit('meeting:ended', { meetingRoomId });
+    } catch (err) {
+      console.error('[socket] auto-end meeting error', err.message);
+    }
+  };
+
   socket.on('meeting:join', async (data, ack) => {
     try {
       const { meetingRoomId, userName } = data || {};
@@ -1992,12 +2046,17 @@ const onConnection = (socket) => {
       socket.leave(roomKey);
 
       const room = _meetingRooms.get(meetingRoomId);
+      let becameEmpty = false;
       if (room) {
         room.delete(socket.id);
-        if (room.size === 0) _meetingRooms.delete(meetingRoomId);
+        if (room.size === 0) {
+          _meetingRooms.delete(meetingRoomId);
+          becameEmpty = true;
+        }
       }
 
       socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
+      if (becameEmpty) await _autoEndMeetingIfEmpty(meetingRoomId);
       ack?.({ ok: true });
     } catch (err) {
       ack?.({ error: err.message });
@@ -2227,7 +2286,10 @@ const onConnection = (socket) => {
         room.delete(socket.id);
         const roomKey = `meeting:${meetingRoomId}`;
         socket.to(roomKey).emit('meeting:user-left', { socketId: socket.id, userId });
-        if (room.size === 0) _meetingRooms.delete(meetingRoomId);
+        if (room.size === 0) {
+          _meetingRooms.delete(meetingRoomId);
+          _autoEndMeetingIfEmpty(meetingRoomId);
+        }
       }
     }
   };
