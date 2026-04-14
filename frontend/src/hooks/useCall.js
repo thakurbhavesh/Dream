@@ -325,7 +325,13 @@ const useCall = () => {
       ringTimeoutRef.current = setTimeout(() => {
         if (statusRef.current === "calling") {
           const tid = peerUserIdRef.current;
-          if (tid) socket.emit("call:stop", { targetUserId: tid, reason: "no_answer" });
+          if (tid) {
+            socket.emit("call:stop", {
+              targetUserId: tid,
+              reason: "no_answer",
+              callType: callTypeRef.current || "audio",
+            });
+          }
           setError("No answer");
           cleanup();
         }
@@ -356,7 +362,11 @@ const useCall = () => {
     if (!socket) return;
     const targetId = peerUserIdRef.current;
     if (targetId) {
-      socket.emit("call:reject", { targetUserId: targetId, reason: "declined" });
+      socket.emit("call:reject", {
+        targetUserId: targetId,
+        reason: "declined",
+        callType: callTypeRef.current || "audio",
+      });
     }
     cleanup();
   }, [socket, cleanup]);

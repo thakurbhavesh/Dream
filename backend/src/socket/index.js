@@ -1589,13 +1589,77 @@ const onConnection = (socket) => {
 
   // ─── Audio/Video Call (WebRTC signaling relay) ──────────────────────────────
 
+  // Persist a call-log DM message so missed/declined calls appear in chat for both sides
+  const logCall = async ({ fromUserId, toUserId, callType, outcome }) => {
+    try {
+      const label = {
+        missed: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call`,
+        declined: `📞 ${callType === 'video' ? 'Video' : 'Audio'} call declined`,
+        offline: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call (user was offline)`,
+        no_answer: `📞 Missed ${callType === 'video' ? 'video' : 'audio'} call`,
+      }[outcome] || `📞 ${callType === 'video' ? 'Video' : 'Audio'} call`;
+
+      const saved = await chatModel.sendDMMessage({
+        orgId,
+        senderId: Number(fromUserId),
+        receiverId: Number(toUserId),
+        message: label,
+        messageType: 'text',
+        metadata: { callLog: true, callType, outcome },
+      });
+      if (!saved) return;
+      await signProfileFields(saved);
+      const normalizedForReceiver = normalizeDMMessage(saved, Number(toUserId));
+      const normalizedForSender = normalizeDMMessage(saved, Number(fromUserId));
+      await signMessageFileUrls(normalizedForReceiver);
+      await signMessageFileUrls(normalizedForSender);
+
+      // Emit to both parties so chat lists update live
+      emitToUser(String(toUserId), 'message:new', {
+        threadId: `dm-${fromUserId}`,
+        message: { ...normalizedForReceiver, direction: 'incoming' },
+      });
+      emitToUser(String(fromUserId), 'message:new', {
+        threadId: `dm-${toUserId}`,
+        message: { ...normalizedForSender, direction: 'outgoing' },
+      });
+
+      // Thread bump + notification for receiver (missed calls show system notification)
+      emitToUser(String(toUserId), 'thread:update', {
+        threadId: `dm-${fromUserId}`,
+        unreadCount: 1,
+        readStatus: 'unread',
+      });
+      if (outcome !== 'declined') {
+        try {
+          const isDND = await isUserDND(toUserId);
+          const isMuted = isDND ? true : await isThreadMuted(toUserId, orgId, `dm-${fromUserId}`);
+          if (!isMuted) {
+            emitToUser(String(toUserId), 'notification', {
+              type: 'call-missed',
+              title: 'Missed call',
+              body: `${socket.user.name || 'Someone'} tried to call you`,
+              threadId: `dm-${fromUserId}`,
+            });
+          }
+        } catch {}
+      }
+    } catch (err) {
+      console.error('[socket] logCall error:', err.message);
+    }
+  };
+
   socket.on('call:request', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
       const { targetUserId, callType, signalData } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       if (String(targetUserId) === userId) return ack?.({ error: 'Cannot call yourself' });
-      if (!isUserOnline(String(targetUserId))) return ack?.({ error: 'User is offline' });
+      if (!isUserOnline(String(targetUserId))) {
+        // Record missed call for both sides so caller sees it in history
+        logCall({ fromUserId: userId, toUserId: targetUserId, callType: callType || 'audio', outcome: 'offline' });
+        return ack?.({ error: 'User is offline' });
+      }
       emitToUser(String(targetUserId), 'call:incoming_request', {
         fromUserId: userId,
         fromUserName: socket.user.name || 'Unknown',
@@ -1630,11 +1694,18 @@ const onConnection = (socket) => {
   socket.on('call:reject', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
-      const { targetUserId, reason } = data || {};
+      const { targetUserId, reason, callType } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       emitToUser(String(targetUserId), 'call:rejected', {
         fromUserId: userId,
         reason: reason || 'declined',
+      });
+      // targetUserId here is the original caller; userId is the one who declined
+      logCall({
+        fromUserId: targetUserId,
+        toUserId: userId,
+        callType: callType || 'audio',
+        outcome: 'declined',
       });
       ack?.({ ok: true });
     } catch (err) {
@@ -1660,12 +1731,21 @@ const onConnection = (socket) => {
   socket.on('call:stop', async (data, ack) => {
     if (!rl.call()) return ack?.({ error: 'Rate limited' });
     try {
-      const { targetUserId, reason } = data || {};
+      const { targetUserId, reason, callType } = data || {};
       if (!targetUserId) return ack?.({ error: 'targetUserId required' });
       emitToUser(String(targetUserId), 'call:stopped', {
         fromUserId: userId,
         reason: reason || 'ended',
       });
+      // If caller cancels before callee picks up (no_answer), log it as missed on callee's side
+      if (reason === 'no_answer') {
+        logCall({
+          fromUserId: userId,
+          toUserId: targetUserId,
+          callType: callType || 'audio',
+          outcome: 'no_answer',
+        });
+      }
       ack?.({ ok: true });
     } catch (err) {
       ack?.({ error: err.message });

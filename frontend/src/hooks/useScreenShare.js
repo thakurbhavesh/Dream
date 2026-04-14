@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSocket } from "../contexts/SocketContext.jsx";
+import { showSystemNotification, ensureNotificationPermission } from "../utils/notificationBridge";
 
 /**
  * Screen share lifecycle state machine:
@@ -49,6 +50,7 @@ const useScreenShare = () => {
 
   // Keep refs in sync
   useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { ensureNotificationPermission().catch(() => {}); }, []);
   useEffect(() => { peerUserIdRef.current = peerUserId; }, [peerUserId]);
   useEffect(() => { roleRef.current = role; }, [role]);
 
@@ -379,6 +381,14 @@ const useScreenShare = () => {
       setRole("viewer");
       setPeerUserId(String(data.fromUserId));
       setPeerUserName(data.fromUserName || "Unknown");
+      try {
+        showSystemNotification({
+          title: "Screen share request",
+          body: `${data.fromUserName || "Someone"} wants to share their screen`,
+          tag: "screenshare-request",
+          requireInteraction: true,
+        });
+      } catch {}
     };
 
     const onAccepted = (data) => {

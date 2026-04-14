@@ -1042,11 +1042,27 @@ const GeneralApp = () => {
   }, [disappearDialogState.threadId, chatSocket, showMessageToast]);
 
   // Emit thread:focus when active thread changes — tells backend which chat user is viewing
+  // Also clear on tab hidden so notifications still fire when app is minimized
   useEffect(() => {
-    if (chatSocket?.focusThread) {
+    if (!chatSocket?.focusThread) return;
+    const pushFocus = () => {
+      const tabVisible = typeof document === "undefined" || document.visibilityState === "visible";
+      if (!tabVisible) {
+        chatSocket.focusThread(null);
+        return;
+      }
       const resolved = activeThreadId && isRealThread(activeThreadId) ? resolveThreadId(activeThreadId) : null;
       chatSocket.focusThread(resolved);
-    }
+    };
+    pushFocus();
+    document.addEventListener("visibilitychange", pushFocus);
+    window.addEventListener("focus", pushFocus);
+    window.addEventListener("blur", pushFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", pushFocus);
+      window.removeEventListener("focus", pushFocus);
+      window.removeEventListener("blur", pushFocus);
+    };
   }, [activeThreadId, chatSocket, isRealThread, resolveThreadId]);
 
   const handleTypingStart = useCallback((tid) => {
