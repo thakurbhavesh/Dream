@@ -12,7 +12,8 @@ router.get('/', auth, async (req, res, next) => {
     if (!userId) return failure(res, 'Unauthorized', 401);
     const limit = Math.min(200, Number(req.query.limit) || 50);
     const offset = Math.max(0, Number(req.query.offset) || 0);
-    const calls = await callLogModel.getForUser(userId, { limit, offset });
+    const peerId = Number(req.query.peer_id) || null;
+    const calls = await callLogModel.getForUser(userId, { limit, offset, peerId });
     return success(res, { calls }, 'Call history');
   } catch (err) {
     return next(err);

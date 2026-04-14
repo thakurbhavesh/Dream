@@ -40,6 +40,7 @@ import {
   PiBellBold,
   PiSpeakerHighBold,
   PiClockCountdownBold,
+  PiPhoneBold,
 } from "react-icons/pi";
 import { BsSearch } from "react-icons/bs";
 import {
@@ -50,6 +51,7 @@ import {
 } from "react-icons/fa";
 import { resolveLatestDeviceIndicator } from "../../utils/deviceDetect.js";
 import ExportChatDialog from "./ExportChatDialog.jsx";
+import CallHistoryDialog from "../call/CallHistoryDialog.jsx";
 
 const SELF_THREAD_ID = "thread-self";
 const SELF_INITIALS = "MY";
@@ -84,6 +86,7 @@ const ConversationHeader = ({
   const { startCall, status: callStatus } = useCallContext();
 
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [callHistoryOpen, setCallHistoryOpen] = useState(false);
   const { isActive: isTyping, summary: typingSummary } = useTypingIndicator(
     thread?.id
   );
@@ -210,6 +213,8 @@ const ConversationHeader = ({
       requestScreenShare(targetUserId);
     } else if (label === "Export Chat") {
       setExportDialogOpen(true);
+    } else if (label === "Call History") {
+      setCallHistoryOpen(true);
     } else if (label === "Reload Chat") {
       onReloadChat?.();
     } else if (label === "Mute" || label === "Unmute" || label === "NotificationSound" || label === "DisappearingMessages") {
@@ -507,6 +512,17 @@ const ConversationHeader = ({
             </Box>
             Reload Chat
           </MenuItem>
+          {isDmThread && (
+            <MenuItem onClick={() => handleMenuAction("Call History")}>
+              <Box
+                component="span"
+                sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}
+              >
+                <PiPhoneBold size={16} />
+              </Box>
+              Call History
+            </MenuItem>
+          )}
           <MenuItem onClick={() => { handleMenuAction(isMuted ? "Unmute" : "Mute"); closeMenu(); }}>
             <Box component="span" sx={{ display: "inline-flex", alignItems: "center", mr: 1 }}>
               {isMuted ? <PiBellBold size={16} /> : <PiBellSlashBold size={16} />}
@@ -573,6 +589,18 @@ const ConversationHeader = ({
         threadId={thread?.id}
         threadLabel={displayLabel}
       />
+
+      {isDmThread && (
+        <CallHistoryDialog
+          open={callHistoryOpen}
+          onClose={() => setCallHistoryOpen(false)}
+          peer={{
+            id: Number((thread?.id || "").replace("dm-", "")) || null,
+            name: displayLabel,
+            avatar: thread?.avatar || thread?.profilePicture || null,
+          }}
+        />
+      )}
     </Stack>
   );
 };

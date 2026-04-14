@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { PiChatsCircle, PiSparkle, PiUserGear, PiVideoConferenceFill, PiPhoneFill } from "react-icons/pi";
+import { PiChatsCircle, PiSparkle, PiUserGear, PiVideoConferenceFill } from "react-icons/pi";
 import {
   Box,
   Divider,
@@ -97,7 +97,6 @@ const SideBar = () => {
       if (pathname.startsWith("/app/admin")) return 4;
       // Non-chat dashboard pages — don't highlight the Chats icon
       if (pathname.startsWith("/app/meeting")) return -1;
-      if (pathname.startsWith("/app/calls")) return -1;
       if (pathname === "/app" || pathname.startsWith("/app/")) return 0;
       return null;
     };
@@ -233,31 +232,6 @@ const SideBar = () => {
                 </Tooltip>
               )
             )}
-            {/* Call history quick action */}
-            {location.pathname.startsWith("/app/calls") ? (
-              <Box sx={{
-                backgroundColor: theme.palette.primary.main,
-                borderRadius: 1, height: 45, width: 45,
-                display: "flex", justifyContent: "center", alignItems: "center",
-              }}>
-                <IconButton onClick={() => navigate("/app/calls")} sx={{ width: "max-content", color: "#fff" }}>
-                  <PiPhoneFill size={20} />
-                </IconButton>
-              </Box>
-            ) : (
-              <Tooltip title="Calls" placement="right">
-                <IconButton
-                  onClick={() => navigate("/app/calls")}
-                  sx={{
-                    width: "max-content",
-                    color: theme.palette.mode === "light" ? "#000" : theme.palette.text.primary,
-                  }}
-                >
-                  <PiPhoneFill size={20} />
-                </IconButton>
-              </Tooltip>
-            )}
-
             {/* Meeting quick action — navigates to full-page meeting hub */}
             {location.pathname.startsWith("/app/meeting") ? (
               <Box

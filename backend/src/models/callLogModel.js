@@ -11,7 +11,15 @@ const insert = async ({ organization_id, caller_id, callee_id, call_type = 'audi
 };
 
 // Recent call history for a user — both incoming (callee) and outgoing (caller)
-const getForUser = async (user_id, { limit = 50, offset = 0 } = {}) => {
+// Optionally filter to calls involving a specific peer_id
+const getForUser = async (user_id, { limit = 50, offset = 0, peerId = null } = {}) => {
+  const params = [user_id];
+  let peerClause = '';
+  if (peerId) {
+    params.push(Number(peerId));
+    peerClause = ` AND (cl.caller_id = $${params.length} OR cl.callee_id = $${params.length})`;
+  }
+  params.push(limit, offset);
   const { rows } = await db.query(
     `SELECT cl.*,
             CASE WHEN cl.caller_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction,
@@ -21,10 +29,10 @@ const getForUser = async (user_id, { limit = 50, offset = 0 } = {}) => {
      FROM call_logs cl
      LEFT JOIN users cau ON cau.user_id = cl.caller_id
      LEFT JOIN users cu ON cu.user_id = cl.callee_id
-     WHERE cl.caller_id = $1 OR cl.callee_id = $1
+     WHERE (cl.caller_id = $1 OR cl.callee_id = $1)${peerClause}
      ORDER BY cl.created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [user_id, limit, offset]
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
   );
   return rows;
 };
