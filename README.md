@@ -164,3 +164,44 @@ Recent docs update:
   - Tick icon removed from threads with no messages
   - Email shown as preview for threads with no messages
   - "No Group found" shown when group search returns empty results
+
+---
+
+## Update Log (2026-04-14)
+
+Shipped in a single day across web, mobile and backend:
+
+- **Web Push (VAPID)**: service-worker background notifications for messages,
+  incoming calls, missed calls, meeting invites and screen-share requests.
+  Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` in backend env
+  and run migration `069_push_subscriptions.sql`.
+- **External guest meetings**: email up to 2 external guests per meeting — they
+  join via a secure `/guest/:token` link + 6-digit code with zero-signup guest
+  JWT. Migration `070_meeting_guests.sql`.
+- **Full-page meeting hub** at `/app/meeting` replacing the modal, with
+  Instant / Schedule / Join tabs and a participant picker.
+- **Meeting history**: past tab alongside upcoming, with duration and host.
+- **Call history**: per-contact dialog from the chat header three-dot menu,
+  All / Missed / Audio / Video filters. Migration `071_call_logs.sql` backs it.
+- **Missed calls in chat**: declined / unanswered / offline calls post a
+  `📞` entry into the DM for both sides.
+- **Pinned chats**: up to 20 per user, sorted on top, real-time sync.
+  Migration `072_user_thread_pins.sql`.
+- **Call reliability**: 45s caller ring timeout, peer mute/camera badges,
+  persistent remote audio across minimize, mobile↔web WebRTC interop fix,
+  socket auto-reconnect on visibility/focus/online with fresh auth token.
+- **DB**: migrations 069 → 073 added. `073_seed_today_features.sql` seeds 14
+  user-facing items into `feature_items`. A paste-ready combined file for
+  Neon lives at `backend/migrations/run_on_neon_today.sql`.
+
+New routes:
+- `GET /push/vapid-public-key`, `POST /push/subscribe`, `POST /push/unsubscribe`
+- `GET /calls?peer_id=`
+- `GET /meetings/past`, `GET /meetings/guest/:token`, `POST /meetings/guest/:token/verify`
+- `POST /meetings/` now accepts `guest_emails: string[]` (max 2)
+
+New socket events:
+- `thread:pin` (client) · `thread:pin_sync`, `thread:pin_update` (server)
+- Signal subtype `call:signal { type: 'media-state', muted?, videoOff? }`
+- Guest JWTs carry `guest: true` and are recognised by `authenticateSocket`;
+  guest sockets skip presence/sync and only run meeting handlers.

@@ -416,3 +416,39 @@ If needed, use reset queries from `docs/query.md` and rerun migrations from `001
   - `032_payment_history_failure_reason_jsonb.sql`
   - `033_reset_currencies_to_stripe_supported.sql`
 - Current invoice format is application-generated from `payment_history.payment_id`; no additional migration was needed for that formatting change.
+
+---
+
+# Docs Sync (2026-04-14) — today's migrations
+
+## 069_push_subscriptions.sql
+Web Push (VAPID) subscription store for service-worker background notifications.
+`push_subscriptions(subscription_id, user_id, endpoint UNIQUE, p256dh, auth, user_agent, created_at, last_used_at)`.
+Indexes: `endpoint` unique, `user_id`.
+
+## 070_meeting_guests.sql
+External (email-invited) meeting guests. One row per (meeting, email); the
+`access_token` goes in the invite URL, the `access_code` is the 6-digit code
+the guest types.
+`meeting_guests(guest_id, meeting_id FK, email, display_name, access_token UNIQUE, access_code, invited_by, invited_at, joined_at, revoked_at)`.
+Indexes: `(meeting_id, email)` unique, `access_token`.
+
+## 071_call_logs.sql
+Dedicated audio/video call history, indexed for both caller and callee.
+`call_logs(call_log_id, organization_id, caller_id, callee_id, call_type, outcome, started_at, ended_at, duration_seconds, created_at)`.
+`outcome` ∈ `missed | declined | no_answer | offline | answered`.
+Indexes: `(caller_id, created_at DESC)`, `(callee_id, created_at DESC)`, `(organization_id, created_at DESC)`.
+
+## 072_user_thread_pins.sql
+Per-user pinned chat threads. Soft cap of 20 enforced in the model.
+`user_thread_pins(pin_id, user_id, organization_id, thread_id, pinned_at)`.
+Indexes: `(user_id, organization_id, thread_id)` unique, `(user_id, organization_id)`.
+
+## 073_seed_today_features.sql
+Idempotent `INSERT … ON CONFLICT` seeding 14 new `feature_items` across the
+`audio_video`, `collaboration`, `messaging` and `security` categories — one
+row per user-facing feature shipped on 2026-04-14.
+
+## run_on_neon_today.sql
+Paste-ready combined script covering 069 → 073 for the Neon SQL Editor.
+Every statement is `IF NOT EXISTS` / `ON CONFLICT`, so re-running is safe.

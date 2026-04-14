@@ -1214,3 +1214,75 @@ Unique: `(user_id, organization_id)`. Sliding window: 50 requests/hour per user.
 | created_at | TIMESTAMPTZ | DEFAULT NOW() |
 
 SHA-256 hash of `(fileKey || fileUrl || text) + fileName` as cache key.
+
+---
+
+## Added 2026-04-14
+
+### push_subscriptions
+Web Push (VAPID) subscription store used by the service worker for background
+notifications.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| subscription_id | BIGSERIAL | PRIMARY KEY |
+| user_id | BIGINT | NOT NULL REFERENCES users(user_id) ON DELETE CASCADE |
+| endpoint | TEXT | NOT NULL, UNIQUE |
+| p256dh | TEXT | NOT NULL |
+| auth | TEXT | NOT NULL |
+| user_agent | TEXT | |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+| last_used_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+Indexes: unique `(endpoint)`, `(user_id)`.
+
+### meeting_guests
+External guests invited to a meeting by email. Token goes in the URL, code is
+typed by the guest, guest JWT is issued server-side on successful verify.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| guest_id | BIGSERIAL | PRIMARY KEY |
+| meeting_id | BIGINT | NOT NULL REFERENCES meetings(id) ON DELETE CASCADE |
+| email | VARCHAR(255) | NOT NULL |
+| display_name | VARCHAR(255) | |
+| access_token | VARCHAR(64) | NOT NULL, UNIQUE |
+| access_code | VARCHAR(12) | NOT NULL |
+| invited_by | BIGINT | REFERENCES users(user_id) ON DELETE SET NULL |
+| invited_at | TIMESTAMPTZ | DEFAULT NOW() |
+| joined_at | TIMESTAMPTZ | |
+| revoked_at | TIMESTAMPTZ | |
+
+Indexes: unique `(meeting_id, email)`, `(access_token)`.
+
+### call_logs
+Dedicated audio/video call history, written alongside the DM call-log text
+message from `socket.logCall`.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| call_log_id | BIGSERIAL | PRIMARY KEY |
+| organization_id | BIGINT | NOT NULL |
+| caller_id | BIGINT | NOT NULL REFERENCES users(user_id) ON DELETE CASCADE |
+| callee_id | BIGINT | NOT NULL REFERENCES users(user_id) ON DELETE CASCADE |
+| call_type | VARCHAR(16) | NOT NULL DEFAULT 'audio' |
+| outcome | VARCHAR(24) | NOT NULL (`missed` / `declined` / `no_answer` / `offline` / `answered`) |
+| started_at | TIMESTAMPTZ | DEFAULT NOW() |
+| ended_at | TIMESTAMPTZ | |
+| duration_seconds | INTEGER | |
+| created_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+Indexes: `(caller_id, created_at DESC)`, `(callee_id, created_at DESC)`, `(organization_id, created_at DESC)`.
+
+### user_thread_pins
+Per-user pinned chat threads. Soft cap of 20 enforced at the model layer.
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| pin_id | BIGSERIAL | PRIMARY KEY |
+| user_id | BIGINT | NOT NULL REFERENCES users(user_id) ON DELETE CASCADE |
+| organization_id | BIGINT | NOT NULL |
+| thread_id | VARCHAR(50) | NOT NULL |
+| pinned_at | TIMESTAMPTZ | DEFAULT NOW() |
+
+Indexes: unique `(user_id, organization_id, thread_id)`, `(user_id, organization_id)`.

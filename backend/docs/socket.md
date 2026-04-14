@@ -503,3 +503,71 @@ This ensures correct unread badges even if messages were missed during disconnec
 - Edit/Delete/Recall: check `enabled` + `time_limit_minutes` (no role check, sender enforced by SQL)
 - Controls cached for 5 minutes per org (`preloadOrgControls`)
 - Cache invalidated via `invalidateOrgControlsCache(orgId)` from admin controller
+
+---
+
+## Added 2026-04-14
+
+### Thread pin / unpin
+Client emits:
+- `thread:pin` — `{ threadId, pinned }` — backend upserts / removes a row in
+  `user_thread_pins`. A soft cap of 20 returns `{ error: 'Max 20 pinned chats' }`.
+
+Server emits (to the user):
+- `thread:pin_sync` — on connect, array of `{ thread_id, pinned_at }`.
+- `thread:pin_update` — after a pin/unpin, `{ threadId, pinned, pinned_at? }`.
+
+### Call log persistence
+`socket.logCall({ fromUserId, toUserId, callType, outcome })` now:
+1. Inserts a row in `call_logs` (fast, indexed lookup for the `/calls` API).
+2. Sends a DM text message "📞 Missed audio/video call" (or equivalent) so
+   both sides see it in chat.
+3. Emits a `notification` event (with per-thread mute/DND gating) and fires
+   a web push via `pushToUser` so closed-tab users still get notified.
+
+### Outcomes recorded
+- `offline` — callee was not online at request time
+- `declined` — callee clicked Reject
+- `no_answer` — 45s ring timeout (caller or callee side)
+- `answered` — reserved for successful completion logs (future)
+
+### Web Push alongside in-app notifications
+Every `emitToUser(..., 'notification', payload)` that isn't muted/DND-blocked
+is mirrored with `pushToUser(userId, payload)` — the service worker suppresses
+the native toast when any visible client is focused, so there are no
+duplicates for users actively looking at the app. Incoming-call pushes are
+shown unconditionally.
+
+### Guest socket handshake
+Clients can connect with a guest JWT (`guest: true`) issued by
+`POST /meetings/guest/:token/verify`. `authenticateSocket` accepts it like any
+other JWT, and `onConnection` skips:
+- DB-backed sync (`thread:mute_sync`, `thread:pin_sync`, `dnd:state`, geo load)
+- Online-presence registration and `user:online` broadcasts
+- `user:<id>` / `org:<id>` room joins
+- `disconnect`-time online-map cleanup
+
+Only meeting-scoped events (`meeting:join`, `meeting:signal`, `meeting:leave`,
+`meeting:chat`, `meeting:reaction`, `meeting:media-state`, `meeting:pin`) are
+active for guest sockets.
+
+### Cross-platform call signaling (parity)
+Both web and mobile now follow the same flow:
+1. `call:request` — carries only `{ targetUserId, callType }`.
+2. Callee clicks Accept → `call:accept`.
+3. Caller hears `call:accepted`, runs `startCallerFlow`: getUserMedia → createOffer
+   → send `call:signal { type: 'offer', sdp }`.
+4. Callee's `call:signal` handler spins up PC on the first offer, answers via
+   `call:signal { type: 'answer', sdp }`, flushes any queued ICE candidates.
+
+Additional `call:signal` subtypes used during an active call:
+- `media-state` — `{ muted?, videoOff? }`, updates peer indicators on the
+  other side.
+
+### Auth reliability
+- On `reconnect_attempt` the client fetches a fresh access token via
+  `getAccessToken({ refreshIfNeeded: true })` and updates `socket.auth` before
+  the reconnect. Guest sockets skip this since their token is short-lived.
+- Client forces a reconnect on `visibilitychange → visible`, `window.focus`
+  and `navigator.online`, so an inactive tab can't be left in a half-dead
+  state until the next message.

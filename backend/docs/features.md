@@ -637,3 +637,100 @@ All notifications follow the same pattern: only sent when receiver is **online**
 - **Polling → WebSocket upgrade** for compatibility
 - **Connection status** — "Online" / "Connecting..." in chat header, red offline banner
 - **Event handler persistence** — survives reconnects via global registry
+
+---
+
+## Added 2026-04-14
+
+### Pinned Chats
+- **What:** Pin up to 20 chats to the top of the chat list, per user.
+- **How:** Right-click a thread in the list → Pin chat. Pinned threads sort by
+  `pinned_at DESC` above everything else and show a small blue pin icon next
+  to the mute indicator.
+- **State:** `user_thread_pins` table, soft-capped at 20 in `threadPinModel`.
+- **Socket events:** `thread:pin` (emit), `thread:pin_sync` (on connect),
+  `thread:pin_update` (broadcast to all of the user's tabs).
+
+### Missed Call History in Chat
+- **What:** Declined / unanswered / offline calls post a `📞 Missed audio/video
+  call` text entry into the DM thread for both sides.
+- **How:** `socket.logCall` is invoked from `call:reject`, `call:stop` (reason
+  `no_answer`) and the offline branch of `call:request`. Writes both a DM and
+  a `call_logs` row in one pass.
+
+### Per-Contact Call History Dialog
+- **What:** "Call History" entry in the conversation header three-dot menu
+  (DM threads only). Opens a dialog scoped to that contact with All /
+  Missed / Audio / Video filters, direction icons and duration.
+- **API:** `GET /calls?peer_id=<userId>`.
+
+### Full-Page Meeting Hub
+- **What:** Dedicated `/app/meeting` route replacing the modal. Tabs: Instant,
+  Schedule, Join. Invite org members via the user picker, add up to two
+  external guests by email in the same form.
+- **Sidebar:** `PiVideoConferenceFill` icon under Chats. Only one sidebar icon
+  is highlighted at a time.
+
+### Meeting History (Past)
+- **What:** `MeetingsList` gains Upcoming / Past tabs. Past includes status
+  `ended` / `cancelled` and any meeting whose `scheduled_at` is 4h+ in the
+  past. Shows host, time and `duration_minutes`.
+- **API:** `GET /meetings/past?limit=&offset=`.
+
+### External Guest Meeting Join
+- **What:** Invited external emails receive a branded invite with a link
+  `/guest/<access_token>` and a 6-digit `access_code`. Guests open the link,
+  enter name + code, and join the `MeetingRoom` directly — no signup or
+  login.
+- **API:** `POST /meetings/` accepts `guest_emails[]` (max 2).
+  `GET /meetings/guest/:token` returns meeting preview.
+  `POST /meetings/guest/:token/verify` issues a short-lived guest JWT
+  (`guest: true`, 4h) used for the socket handshake.
+- **Email:** Uses `sendMailAsync` with a branded HTML template.
+
+### Background Web Push (VAPID)
+- **What:** Users receive notifications for messages, incoming calls, missed
+  calls, meeting invites and screen-share requests even when the tab or
+  browser is closed.
+- **Stack:** `web-push` (backend) + service worker `push` handler
+  (`frontend/public/sw.js`) + VAPID key pair in env.
+- **Client registration:** `ensurePushSubscription()` runs 1.5s after
+  `DashboardLayout` mounts; it diffs the existing `PushSubscription` against
+  the current VAPID key and re-subscribes on mismatch.
+- **De-dup:** Service worker suppresses the native toast when any window
+  client is `visible && focused` (in-app UI handles it); incoming-call pushes
+  always show to avoid missing ringing.
+
+### Live Mute / Camera Indicators in calls
+- **What:** Mute and camera toggles broadcast a `call:signal { type: 'media-state' }`
+  frame so the peer UI shows a red "muted" / "camera off" badge in real time.
+- **Applies to:** 1:1 audio/video calls on both web and mobile.
+
+### Minimize-Safe Call Audio
+- **What:** A hidden `<audio autoPlay>` element mounted at the overlay root
+  keeps the remote call audio playing through calling / connecting / active /
+  minimized states and across the call-notes dialog.
+
+### Caller Ring Timeout (45s)
+- **What:** Outgoing calls cancel after 45 seconds if unanswered. Fires a
+  `call:stop { reason: 'no_answer' }` so the backend records a missed entry
+  for both parties.
+
+### Cross-Platform Call Interop
+- **What:** Web and mobile now share the same signaling flow: call:request
+  (no offer) → call:accept → offer-via-call:signal → answer-via-call:signal.
+  Mobile↔Web calls used to die at pick up because of a pre-offer mismatch;
+  they no longer do.
+
+### Reliable Background Connection
+- **What:** Sockets refresh the access token on every reconnect attempt and
+  force-reconnect on `visibilitychange`, `focus` and `online`. Tabs that were
+  suspended for hours now recover without a reload.
+
+### Screen-Share Incoming Notification
+- **What:** `useScreenShare` now shows a system notification (and requests
+  permission on mount) when an incoming share request arrives.
+
+### Sidebar Meeting Shortcut
+- **What:** Added a Meeting quick-action icon under the Chats icon that
+  navigates to `/app/meeting`, with active-state highlight.

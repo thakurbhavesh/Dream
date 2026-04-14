@@ -347,3 +347,36 @@ menu_item_id | menu_key    | label      | default_status | scope | tone   | disp
 - Admin sets `permission_type: 'hide'` for a menu item → that item won't appear in message context menu for that org's users
 - Frontend `fetchMenuItems()` fetches both menu items and org permissions, filters hidden items locally
 - Admin panel sees ALL items regardless of permissions (can toggle back to "show")
+
+---
+
+## Added 2026-04-14
+
+### Web Push (VAPID)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET  | `/push/vapid-public-key` | public | Returns `{ publicKey, configured }` so the browser can build a subscription |
+| POST | `/push/subscribe` | JWT | Body `{ subscription }` — upserts the subscription for the current user |
+| POST | `/push/unsubscribe` | JWT | Body `{ endpoint }` — removes a subscription by endpoint |
+
+Requires `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` in the
+backend env. Expired subscriptions (404/410) are auto-pruned on send.
+
+### Call History
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/calls?limit=&offset=&peer_id=` | JWT | Call history for current user (both directions). `peer_id` filters to calls with one contact. |
+
+Response joins `users` for peer name/avatar and tags each row with
+`direction: 'incoming' | 'outgoing'` relative to the current user.
+
+### Meetings — past + guest
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET  | `/meetings/past?limit=&offset=` | JWT | Ended / cancelled / 4h+ past scheduled meetings for the user. |
+| GET  | `/meetings/guest/:token` | public | Preview meeting info for an invited guest (no code required). |
+| POST | `/meetings/guest/:token/verify` | public | Body `{ code, display_name? }` — if the 6-digit code matches, returns a short-lived guest JWT (`guest: true`, 4h) used for the socket handshake. |
+
+Existing `POST /meetings/` also accepts an optional `guest_emails: string[]`
+(max 2 distinct, validated) — each address gets a `meeting_guests` row plus
+an emailed invite with link + code.
