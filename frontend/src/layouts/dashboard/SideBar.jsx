@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { PiChatsCircle, PiSparkle, PiUserGear, PiVideoCamera } from "react-icons/pi";
+import { PiChatsCircle, PiSparkle, PiUserGear, PiVideoConferenceFill } from "react-icons/pi";
 import {
   Box,
   Divider,
@@ -230,24 +230,42 @@ const SideBar = () => {
                 </Tooltip>
               )
             )}
-            {/* Meeting quick action — opens MeetingDialog via event bus */}
-            <Tooltip title="Meeting" placement="right">
-              <IconButton
-                onClick={() => {
-                  if (!location.pathname.startsWith("/app")) navigate("/app");
-                  window.dispatchEvent(new CustomEvent("teamchatx:openMeeting"));
-                }}
+            {/* Meeting quick action — navigates to full-page meeting hub */}
+            {location.pathname.startsWith("/app/meeting") ? (
+              <Box
                 sx={{
-                  width: "max-content",
-                  color:
-                    theme.palette.mode === "light"
-                      ? "#000"
-                      : theme.palette.text.primary,
+                  backgroundColor: theme.palette.primary.main,
+                  borderRadius: 1,
+                  height: 45,
+                  width: 45,
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
                 }}
               >
-                <PiVideoCamera size={20} />
-              </IconButton>
-            </Tooltip>
+                <IconButton
+                  onClick={() => navigate("/app/meeting")}
+                  sx={{ width: "max-content", color: "#fff" }}
+                >
+                  <PiVideoConferenceFill size={22} />
+                </IconButton>
+              </Box>
+            ) : (
+              <Tooltip title="Meeting" placement="right">
+                <IconButton
+                  onClick={() => navigate("/app/meeting")}
+                  sx={{
+                    width: "max-content",
+                    color:
+                      theme.palette.mode === "light"
+                        ? "#000"
+                        : theme.palette.text.primary,
+                  }}
+                >
+                  <PiVideoConferenceFill size={22} />
+                </IconButton>
+              </Tooltip>
+            )}
             <Divider sx={{ width: "48px" }} />
             {role !== 4 &&
               (selected === 4 ? (
