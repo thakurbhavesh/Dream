@@ -2086,6 +2086,52 @@ const onConnection = (socket) => {
     }
   });
 
+  // ─── Host controls ────────────────────────────────────────────────────────
+  // Verify the current socket is the meeting host
+  const _assertHost = async (meetingRoomId) => {
+    const meeting = await meetingModel.findByMeetingId(meetingRoomId);
+    if (!meeting) return { ok: false, error: 'Meeting not found' };
+    if (Number(meeting.host_id) !== Number(userId)) return { ok: false, error: 'Only the host can perform this action' };
+    return { ok: true, meeting };
+  };
+
+  socket.on('meeting:host:mute-all', async (data, ack) => {
+    try {
+      const { meetingRoomId } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+      const check = await _assertHost(meetingRoomId);
+      if (!check.ok) return ack?.({ error: check.error });
+      const roomKey = `meeting:${meetingRoomId}`;
+      // Tell all participants except host to mute
+      socket.to(roomKey).emit('meeting:force-mute', { byUserId: userId });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('meeting:host:remove', async (data, ack) => {
+    try {
+      const { meetingRoomId, targetSocketId } = data || {};
+      if (!meetingRoomId || !targetSocketId) return ack?.({ error: 'meetingRoomId and targetSocketId required' });
+      const check = await _assertHost(meetingRoomId);
+      if (!check.ok) return ack?.({ error: check.error });
+      // Don't let host remove themselves
+      if (targetSocketId === socket.id) return ack?.({ error: 'Cannot remove yourself' });
+      // Tell the target they've been removed — their client will leave the call
+      io.to(targetSocketId).emit('meeting:removed', { byUserId: userId, meetingRoomId });
+      // Also clean up room membership server-side
+      const room = _meetingRooms.get(meetingRoomId);
+      if (room) room.delete(targetSocketId);
+      io.in(targetSocketId).socketsLeave(`meeting:${meetingRoomId}`);
+      // Notify others
+      socket.to(`meeting:${meetingRoomId}`).emit('meeting:user-left', { socketId: targetSocketId });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
   // WebRTC signaling for meetings (offer/answer/ice)
   socket.on('meeting:signal', async (data, ack) => {
     try {

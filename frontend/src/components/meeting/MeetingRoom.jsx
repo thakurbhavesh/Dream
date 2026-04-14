@@ -15,6 +15,7 @@ import {
   Fade,
   Paper,
   Divider,
+  Button,
 } from "@mui/material";
 import {
   PiMicrophoneBold,
@@ -269,7 +270,7 @@ const ChatPanel = ({ open, onClose, messages, onSend, myUserId }) => {
 };
 
 // ─── Participants Panel ────────────────────────────────────────────
-const ParticipantsPanel = ({ open, onClose, participants, localUserName }) => {
+const ParticipantsPanel = ({ open, onClose, participants, localUserName, isHost, onMuteAll, onRemove }) => {
   const theme = useTheme();
   return (
     <Drawer
@@ -289,22 +290,46 @@ const ParticipantsPanel = ({ open, onClose, participants, localUserName }) => {
           <PiXBold size={16} />
         </IconButton>
       </Stack>
+      {isHost && participants.length > 0 && (
+        <>
+          <Divider />
+          <Stack sx={{ px: 2, py: 1 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              color="warning"
+              startIcon={<PiMicrophoneSlashBold size={14} />}
+              onClick={onMuteAll}
+              sx={{ textTransform: "none" }}
+            >
+              Mute everyone
+            </Button>
+          </Stack>
+        </>
+      )}
       <Divider />
       <Stack sx={{ px: 2, py: 1, gap: 0.5 }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 0.75 }}>
           <Avatar sx={{ width: 28, height: 28, fontSize: 14, bgcolor: "primary.main" }}>
             {(localUserName || "Y").charAt(0)}
           </Avatar>
-          <Typography variant="body2">{localUserName} (You)</Typography>
+          <Typography variant="body2" sx={{ flex: 1 }}>{localUserName} (You){isHost ? " • Host" : ""}</Typography>
         </Stack>
         {participants.map((p) => (
           <Stack key={p.socketId} direction="row" alignItems="center" spacing={1} sx={{ py: 0.75 }}>
             <Avatar sx={{ width: 28, height: 28, fontSize: 14 }}>
               {(p.userName || "U").charAt(0)}
             </Avatar>
-            <Typography variant="body2" sx={{ flex: 1 }}>{p.userName}</Typography>
+            <Typography variant="body2" sx={{ flex: 1 }} noWrap>{p.userName}</Typography>
             {!p.audio && <PiMicrophoneSlashBold size={14} color="#f44336" />}
             {p.handRaised && <Box component="span" sx={{ fontSize: 14 }}>&#9995;</Box>}
+            {isHost && (
+              <Tooltip title="Remove participant">
+                <IconButton size="small" onClick={() => onRemove?.(p.socketId)} sx={{ p: 0.5 }}>
+                  <PiXBold size={12} />
+                </IconButton>
+              </Tooltip>
+            )}
           </Stack>
         ))}
       </Stack>
@@ -794,6 +819,9 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
         onClose={() => setParticipantsOpen(false)}
         participants={meeting.participants}
         localUserName={userName}
+        isHost={Number(meeting.meetingInfo?.host_id) === Number(userId)}
+        onMuteAll={meeting.muteAll}
+        onRemove={meeting.removeParticipant}
       />
     </Box>
   );

@@ -160,6 +160,12 @@ VALUES ((SELECT feature_category_id FROM feature_categories WHERE category_key =
   'Get a system notification the moment someone requests to share their screen with you, even if the tab is in the background.', 32)
 ON CONFLICT (feature_category_id, title) DO UPDATE SET description = EXCLUDED.description, display_order = EXCLUDED.display_order;
 
+-- ── 074: Meeting passcode ───────────────────────────────────────────────────
+ALTER TABLE meetings
+  ADD COLUMN IF NOT EXISTS passcode VARCHAR(32);
+CREATE INDEX IF NOT EXISTS idx_meetings_passcode
+  ON meetings (meeting_id) WHERE passcode IS NOT NULL;
+
 -- ============================================================================
 -- Done. Verify:
 --   SELECT COUNT(*) FROM push_subscriptions;

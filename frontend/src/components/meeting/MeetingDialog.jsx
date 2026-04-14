@@ -53,6 +53,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
   const [enableVideo, setEnableVideo] = useState(true);
   const [enableAudio, setEnableAudio] = useState(true);
   const [enableWaitingRoom, setEnableWaitingRoom] = useState(false);
+  const [passcode, setPasscode] = useState("");
   const [createdMeeting, setCreatedMeeting] = useState(null);
 
   // Use organizationId prop (from GeneralApp's activeOrganizationId), fallback to JWT (backend handles it)
@@ -111,6 +112,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
           waitingRoom: enableWaitingRoom,
           maxParticipants: 50,
         },
+        passcode: passcode.trim() || undefined,
         participants: selectedMembers
           .map((m) => {
             // Extract real numeric user_id from thread objects
@@ -164,6 +166,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
           waitingRoom: enableWaitingRoom,
           maxParticipants: 50,
         },
+        passcode: passcode.trim() || undefined,
         participants: selectedMembers
           .map((m) => {
             // Extract real numeric user_id from thread objects
@@ -209,6 +212,7 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
     setScheduledDate("");
     setScheduledTime("");
     setJoinCode("");
+    setPasscode("");
     setSelectedMembers([]);
     setSearchQuery("");
     setCreatedMeeting(null);
@@ -376,6 +380,16 @@ const MeetingDialog = ({ open, onClose, members = [], organizationId, onMeetingC
                 label="Waiting Room"
               />
             </Stack>
+            <TextField
+              label="Passcode (optional, 4–12 chars)"
+              size="small"
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value.slice(0, 12))}
+              placeholder="Leave empty for no passcode"
+              helperText="Joiners will need to enter this passcode"
+              inputProps={{ maxLength: 12 }}
+              sx={{ maxWidth: 320 }}
+            />
 
             {/* Invite participants */}
             <Divider />

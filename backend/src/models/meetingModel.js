@@ -8,14 +8,17 @@ const generateMeetingId = () => {
   return code;
 };
 
-const create = async ({ organization_id, host_id, title, description, meeting_type, scheduled_at, settings }) => {
+const create = async ({ organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode }) => {
   const meeting_id = generateMeetingId();
+  const cleanPasscode = typeof passcode === 'string' && passcode.trim().length >= 4 && passcode.trim().length <= 12
+    ? passcode.trim()
+    : null;
   const query = `
-    INSERT INTO meetings (meeting_id, organization_id, host_id, title, description, meeting_type, scheduled_at, settings)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb))
+    INSERT INTO meetings (meeting_id, organization_id, host_id, title, description, meeting_type, scheduled_at, settings, passcode)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::jsonb, '{}'::jsonb), $9)
     RETURNING *
   `;
-  const { rows } = await db.query(query, [meeting_id, organization_id, host_id, title, description, meeting_type || 'instant', scheduled_at, settings ? JSON.stringify(settings) : null]);
+  const { rows } = await db.query(query, [meeting_id, organization_id, host_id, title, description, meeting_type || 'instant', scheduled_at, settings ? JSON.stringify(settings) : null, cleanPasscode]);
   return rows[0];
 };
 

@@ -387,6 +387,19 @@ const useMeeting = () => {
     }
   }, [isScreenSharing, socket]);
 
+  // ─── Host controls ────────────────────────────────────────────────
+  const muteAll = useCallback(() => {
+    socket?.emit("meeting:host:mute-all", { meetingRoomId: meetingRoomIdRef.current });
+  }, [socket]);
+
+  const removeParticipant = useCallback((targetSocketId) => {
+    if (!targetSocketId) return;
+    socket?.emit("meeting:host:remove", {
+      meetingRoomId: meetingRoomIdRef.current,
+      targetSocketId,
+    });
+  }, [socket]);
+
   // ─── Chat ─────────────────────────────────────────────────────────
   const sendChatMessage = useCallback((message) => {
     if (!message?.trim()) return;
@@ -515,6 +528,31 @@ const useMeeting = () => {
       else setPinnedSocketId((prev) => prev === targetSocketId ? null : prev);
     };
 
+    const onForceMute = () => {
+      // Host muted everyone — disable local audio tracks immediately
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
+      }
+      setIsMuted(true);
+      socket?.emit("meeting:media-state", { meetingRoomId: meetingRoomIdRef.current, audio: false });
+    };
+
+    const onRemoved = () => {
+      // Host removed this user — force-leave
+      if (screenStreamRef.current) {
+        try { screenStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        screenStreamRef.current = null;
+      }
+      setScreenStream(null);
+      setIsScreenSharing(false);
+      if (statusRef.current !== "idle") {
+        cleanupAll();
+        setMeetingRoomId(null);
+        setMeetingInfo(null);
+        setStatus("idle");
+      }
+    };
+
     const onMeetingEnded = () => {
       // Host ended the meeting — force-stop screen share + leave room on every client
       if (screenStreamRef.current) {
@@ -539,6 +577,8 @@ const useMeeting = () => {
     socket.on("meeting:media-state", onMediaState);
     socket.on("meeting:pin", onPin);
     socket.on("meeting:ended", onMeetingEnded);
+    socket.on("meeting:force-mute", onForceMute);
+    socket.on("meeting:removed", onRemoved);
 
     return () => {
       socket.off("meeting:user-joined", onUserJoined);
@@ -549,6 +589,8 @@ const useMeeting = () => {
       socket.off("meeting:media-state", onMediaState);
       socket.off("meeting:pin", onPin);
       socket.off("meeting:ended", onMeetingEnded);
+      socket.off("meeting:force-mute", onForceMute);
+      socket.off("meeting:removed", onRemoved);
     };
   }, [socket, createPeer]);
 
@@ -558,6 +600,7 @@ const useMeeting = () => {
     pinnedSocketId, duration, viewMode,
     joinMeeting, leaveMeeting, toggleMute, toggleVideo, toggleScreenShare,
     sendChatMessage, sendReaction, toggleHandRaise, pinParticipant, setViewMode,
+    muteAll, removeParticipant,
   };
 };
 

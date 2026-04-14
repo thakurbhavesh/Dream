@@ -92,7 +92,7 @@ const resolveUser = (req) => {
 const createMeeting = async (req, res, next) => {
   try {
     const { userId, orgId } = resolveUser(req);
-    const { title, description, meeting_type, scheduled_at, settings, participants } = req.body;
+    const { title, description, meeting_type, scheduled_at, settings, participants, passcode } = req.body;
 
     const meeting = await meetingModel.create({
       organization_id: orgId,
@@ -102,6 +102,7 @@ const createMeeting = async (req, res, next) => {
       meeting_type: meeting_type || 'instant',
       scheduled_at,
       settings,
+      passcode,
     });
 
     // Add host as participant
@@ -310,11 +311,21 @@ const getMeeting = async (req, res, next) => {
   }
 };
 
-// GET /meetings/join/:meetingId — join by code
+// GET /meetings/join/:meetingId — join by code (passcode via ?passcode= or header)
 const joinByCode = async (req, res, next) => {
   try {
     const meeting = await meetingModel.findByMeetingId(req.params.meetingId);
     if (!meeting) return failure(res, 'Meeting not found', 404);
+    // Passcode enforcement — host bypasses
+    if (meeting.passcode) {
+      const { userId } = resolveUser(req);
+      if (Number(meeting.host_id) !== userId) {
+        const provided = String(req.query.passcode || req.headers['x-meeting-passcode'] || '').trim();
+        if (provided !== meeting.passcode) {
+          return failure(res, 'Passcode required', 401);
+        }
+      }
+    }
     if (meeting.status === 'ended' || meeting.status === 'cancelled') {
       return failure(res, 'Meeting has ended', 410);
     }

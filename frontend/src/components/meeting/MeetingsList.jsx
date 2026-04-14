@@ -24,6 +24,7 @@ import {
   PiXBold,
   PiQuestionBold,
   PiArrowClockwiseBold,
+  PiLinkBold,
 } from "react-icons/pi";
 import { getUpcomingMeetings, getPastMeetings, rsvpMeeting, deleteMeeting } from "../../services/meetingApi.js";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
@@ -100,6 +101,12 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
 
   const copyId = (meetingCode) => {
     navigator.clipboard.writeText(meetingCode);
+  };
+
+  const copyInviteLink = (meetingCode) => {
+    const origin = window.location.origin;
+    const link = `${origin}/app/meeting?join=${encodeURIComponent(meetingCode)}`;
+    navigator.clipboard.writeText(link);
   };
 
   const formatDate = (dateStr) => {
@@ -215,19 +222,33 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                       )}
                     </Stack>
                     <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 0.5 }}>
-                      <Chip
-                        label={m.meeting_id}
-                        size="small"
-                        variant="outlined"
-                        onClick={() => copyId(m.meeting_id)}
-                        icon={<PiCopyBold size={10} />}
-                        sx={{ height: 22, fontSize: 11, cursor: "pointer" }}
-                      />
+                      <Tooltip title="Copy meeting ID">
+                        <Chip
+                          label={m.meeting_id}
+                          size="small"
+                          variant="outlined"
+                          onClick={() => copyId(m.meeting_id)}
+                          icon={<PiCopyBold size={10} />}
+                          sx={{ height: 22, fontSize: 11, cursor: "pointer" }}
+                        />
+                      </Tooltip>
+                      {tab !== "past" && (
+                        <Tooltip title="Copy invite link">
+                          <IconButton size="small" onClick={() => copyInviteLink(m.meeting_id)} sx={{ p: 0.5 }}>
+                            <PiLinkBold size={12} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {tab === "past" && Array.isArray(m.participant_count) ? null : tab === "past" && typeof m.attendee_count === "number" ? (
+                        <Typography variant="caption" color="text.secondary">
+                          • {m.attendee_count} attendee{m.attendee_count === 1 ? "" : "s"}
+                        </Typography>
+                      ) : null}
                     </Stack>
                   </Stack>
 
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    {(m.status === "waiting" || m.status === "active") && (
+                    {tab !== "past" && (m.status === "waiting" || m.status === "active") && (
                       <Button
                         variant="contained"
                         size="small"
@@ -238,8 +259,15 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                         Join
                       </Button>
                     )}
-                    {isHost && m.status === "waiting" && (
+                    {tab !== "past" && isHost && m.status === "waiting" && (
                       <Tooltip title="Delete">
+                        <IconButton size="small" onClick={() => handleDelete(m.id)}>
+                          <PiTrashBold size={14} />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    {tab === "past" && isHost && (
+                      <Tooltip title="Remove from history">
                         <IconButton size="small" onClick={() => handleDelete(m.id)}>
                           <PiTrashBold size={14} />
                         </IconButton>
