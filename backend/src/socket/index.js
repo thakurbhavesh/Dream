@@ -1621,6 +1621,9 @@ const onConnection = (socket) => {
   // Track in-progress (answered) calls so we can log them with duration on end
   // key: sorted pair "a-b" → { callerId, calleeId, callType, startedAt }
   const _activeCalls = (io._activeCalls = io._activeCalls || new Map());
+  // Pending ringing calls waiting for accept/reject — preserves original callType
+  // key: sorted pair "a-b" → { callerId, calleeId, callType }
+  const _pendingCalls = (io._pendingCalls = io._pendingCalls || new Map());
   const _callKey = (a, b) => [Number(a), Number(b)].sort((x, y) => x - y).join('-');
 
   // Persist a call-log DM message so missed/declined calls appear in chat for both sides
@@ -1720,14 +1723,25 @@ const onConnection = (socket) => {
         signalData: signalData || null,
         timestamp: new Date().toISOString(),
       });
-      pushToUser(targetUserId, {
-        type: 'call-incoming',
-        title: `Incoming ${callType === 'video' ? 'Video' : 'Audio'} Call`,
-        body: `${socket.user.name || 'Someone'} is calling you`,
-        tag: 'incoming-call',
-        requireInteraction: true,
-        url: '/app',
+      _pendingCalls.set(_callKey(userId, targetUserId), {
+        callerId: Number(userId),
+        calleeId: Number(targetUserId),
+        callType: callType || 'audio',
       });
+      // Don't push notification if callee is already in an active call with anyone
+      const calleeBusy = Array.from(_activeCalls.values()).some(
+        (c) => c.callerId === Number(targetUserId) || c.calleeId === Number(targetUserId)
+      );
+      if (!calleeBusy) {
+        pushToUser(targetUserId, {
+          type: 'call-incoming',
+          title: `Incoming ${callType === 'video' ? 'Video' : 'Audio'} Call`,
+          body: `${socket.user.name || 'Someone'} is calling you`,
+          tag: 'incoming-call',
+          requireInteraction: true,
+          url: '/app',
+        });
+      }
       ack?.({ ok: true });
     } catch (err) {
       console.error('[socket] call:request error', err.message);
@@ -1746,10 +1760,13 @@ const onConnection = (socket) => {
         signalData: signalData || null,
       });
       // targetUserId is the original caller; userId is the callee accepting
-      _activeCalls.set(_callKey(targetUserId, userId), {
+      const key = _callKey(targetUserId, userId);
+      const pending = _pendingCalls.get(key);
+      _pendingCalls.delete(key);
+      _activeCalls.set(key, {
         callerId: Number(targetUserId),
         calleeId: Number(userId),
-        callType: callType || 'audio',
+        callType: pending?.callType || callType || 'audio',
         startedAt: Date.now(),
       });
       ack?.({ ok: true });
@@ -1768,10 +1785,13 @@ const onConnection = (socket) => {
         reason: reason || 'declined',
       });
       // targetUserId here is the original caller; userId is the one who declined
+      const pendKey = _callKey(targetUserId, userId);
+      const pend = _pendingCalls.get(pendKey);
+      _pendingCalls.delete(pendKey);
       logCall({
         fromUserId: targetUserId,
         toUserId: userId,
-        callType: callType || 'audio',
+        callType: pend?.callType || callType || 'audio',
         outcome: 'declined',
       });
       ack?.({ ok: true });
@@ -1806,10 +1826,13 @@ const onConnection = (socket) => {
       });
       // If caller cancels before callee picks up (no_answer), log it as missed on callee's side
       if (reason === 'no_answer') {
+        const pendKey = _callKey(userId, targetUserId);
+        const pend = _pendingCalls.get(pendKey);
+        _pendingCalls.delete(pendKey);
         logCall({
           fromUserId: userId,
           toUserId: targetUserId,
-          callType: callType || 'audio',
+          callType: pend?.callType || callType || 'audio',
           outcome: 'no_answer',
         });
       } else {
