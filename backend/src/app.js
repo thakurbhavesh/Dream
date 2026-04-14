@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const errorHandler = require('./middlewares/errorHandler');
 const csrfProtection = require('./middlewares/csrf');
 const authRoutes = require('./routes/authRoutes');
+const pushRoutes = require('./routes/pushRoutes');
 const roleRoutes = require('./routes/roleRoutes');
 const planRoutes = require('./routes/planRoutes');
 const languageRoutes = require('./routes/languageRoutes');
@@ -88,6 +89,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/auth', authRoutes);
+app.use('/push', pushRoutes);
 app.use('/roles', roleRoutes);
 app.use('/plans', planRoutes);
 app.use('/languages', languageRoutes);

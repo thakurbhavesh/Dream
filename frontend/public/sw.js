@@ -124,7 +124,8 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const { threadId = null, organizationId = null } = event.notification.data || {};
+    const data = event.notification.data || {};
+    const { threadId = null, organizationId = null, url = '/app' } = data;
     const payload = {
         type: 'OPEN_THREAD_FROM_NOTIFICATION',
         threadId,
@@ -145,7 +146,7 @@ self.addEventListener('notificationclick', (event) => {
                     return;
                 }
                 if (self.clients.openWindow) {
-                    return self.clients.openWindow('/app').then((client) => {
+                    return self.clients.openWindow(url).then((client) => {
                         if (client) {
                             client.postMessage(payload);
                         }
@@ -153,5 +154,58 @@ self.addEventListener('notificationclick', (event) => {
                 }
             })
             .catch((error) => console.error('Notification click failed:', error))
+    );
+});
+
+// ─── Web Push (background notifications) ────────────────────────────────────
+self.addEventListener('push', (event) => {
+    let payload = {};
+    try {
+        payload = event.data ? event.data.json() : {};
+    } catch (_) {
+        try {
+            payload = { title: 'TeamChatX', body: event.data ? event.data.text() : '' };
+        } catch (__) { payload = {}; }
+    }
+
+    const title = payload.title || 'TeamChatX';
+    const options = {
+        body: payload.body || '',
+        icon: APP_BRANDING_ASSETS.notificationIcon,
+        badge: APP_BRANDING_ASSETS.notificationIcon,
+        tag: payload.tag || payload.threadId || 'teamchatx',
+        renotify: !!payload.renotify,
+        requireInteraction: !!payload.requireInteraction,
+        vibrate: [120, 60, 120],
+        data: {
+            threadId: payload.threadId || null,
+            url: payload.url || '/app',
+            type: payload.type || null,
+        },
+    };
+
+    event.waitUntil((async () => {
+        // If a client is already focused/visible, skip native notification — in-app UI handles it
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        const hasVisibleClient = clients.some((c) => c.visibilityState === 'visible' && c.focused);
+        // Always postMessage so visible client can sync state / play sound
+        clients.forEach((c) => {
+            try { c.postMessage({ type: 'PUSH_RECEIVED', payload }); } catch (_) {}
+        });
+        if (hasVisibleClient && payload.type !== 'call-incoming') {
+            return; // in-app already shows it
+        }
+        return self.registration.showNotification(title, options);
+    })());
+});
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+    // Subscription rotated — let the client re-subscribe when it loads
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+            clients.forEach((c) => {
+                try { c.postMessage({ type: 'PUSH_SUBSCRIPTION_CHANGED' }); } catch (_) {}
+            });
+        })
     );
 });

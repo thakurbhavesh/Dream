@@ -23,6 +23,14 @@ const userSettingsModel = require('../models/userSettingsModel');
 const scheduledMessageModel = require('../models/scheduledMessageModel');
 const disappearingModel = require('../models/disappearingModel');
 const { sendMailAsync } = require('../utils/mail');
+const webPush = require('../utils/webPush');
+
+// Fire-and-forget web push so subscribers receive background notifications
+const pushToUser = (userId, payload) => {
+  webPush.sendPushToUser(userId, payload).catch((err) => {
+    console.warn('[webPush] push error:', err.message);
+  });
+};
 const { resolveMailBranding } = require('../utils/mailBranding');
 
 // Safe decrypt wrappers — return fallback instead of crashing the socket handler
@@ -599,19 +607,22 @@ const deliverDMToReceiver = async ({ receiverId, userId, orgId, normalized, send
       readStatus: 'unread',
     });
 
-    if (receiverOnline) {
-      const isDND = await isUserDND(receiverId);
-      const isMuted = isDND ? true : await isThreadMuted(receiverId, orgId, senderThreadId);
-      if (!isMuted) {
-        emitToUser(String(receiverId), 'notification', {
-          type: 'message',
-          title: senderName || 'New message',
-          body: messageType === 'text' ? message : `Sent a ${messageType}`,
-          threadId: senderThreadId,
-          senderId: userId,
-          senderName,
-        });
+    const isDND = await isUserDND(receiverId);
+    const isMuted = isDND ? true : await isThreadMuted(receiverId, orgId, senderThreadId);
+    if (!isMuted) {
+      const payload = {
+        type: 'message',
+        title: senderName || 'New message',
+        body: messageType === 'text' ? message : `Sent a ${messageType}`,
+        threadId: senderThreadId,
+        senderId: userId,
+        senderName,
+        url: `/app?thread=${encodeURIComponent(senderThreadId)}`,
+      };
+      if (receiverOnline) {
+        emitToUser(String(receiverId), 'notification', payload);
       }
+      pushToUser(receiverId, payload);
     }
   } else {
     // Thread is open — ensure unread badge stays at 0
@@ -1635,12 +1646,15 @@ const onConnection = (socket) => {
           const isDND = await isUserDND(toUserId);
           const isMuted = isDND ? true : await isThreadMuted(toUserId, orgId, `dm-${fromUserId}`);
           if (!isMuted) {
-            emitToUser(String(toUserId), 'notification', {
+            const payload = {
               type: 'call-missed',
               title: 'Missed call',
               body: `${socket.user.name || 'Someone'} tried to call you`,
               threadId: `dm-${fromUserId}`,
-            });
+              url: `/app?thread=dm-${fromUserId}`,
+            };
+            emitToUser(String(toUserId), 'notification', payload);
+            pushToUser(toUserId, payload);
           }
         } catch {}
       }
@@ -1667,6 +1681,14 @@ const onConnection = (socket) => {
         callType: callType || 'audio',
         signalData: signalData || null,
         timestamp: new Date().toISOString(),
+      });
+      pushToUser(targetUserId, {
+        type: 'call-incoming',
+        title: `Incoming ${callType === 'video' ? 'Video' : 'Audio'} Call`,
+        body: `${socket.user.name || 'Someone'} is calling you`,
+        tag: 'incoming-call',
+        requireInteraction: true,
+        url: '/app',
       });
       ack?.({ ok: true });
     } catch (err) {
@@ -2062,6 +2084,14 @@ const onConnection = (socket) => {
         // 1. Send real-time popup notification
         emitToUser(String(targetId), 'meeting:invited', {
           meetingId, meetingTitle, hostName: senderName, hostUserId: userId,
+        });
+        pushToUser(targetId, {
+          type: 'meeting-invite',
+          title: 'Meeting Invitation',
+          body: `${senderName || 'Someone'} invited you to "${meetingTitle || 'a meeting'}"`,
+          tag: 'meeting-invite',
+          requireInteraction: true,
+          url: '/app',
         });
 
         const receiverId = Number(targetId);

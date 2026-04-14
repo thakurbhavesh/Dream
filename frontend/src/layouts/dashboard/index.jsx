@@ -17,6 +17,7 @@ import CallOverlay from "../../components/call/CallOverlay.jsx";
 import { MeetingProvider } from "../../contexts/MeetingContext.jsx";
 import MeetingInviteDialog from "../../components/meeting/MeetingInviteDialog.jsx";
 import { appBrandingAssets } from "../../data/CommonData.js";
+import { ensurePushSubscription } from "../../utils/webPushClient.js";
 
 const OutletFallback = () => {
   const theme = useTheme();
@@ -118,6 +119,13 @@ const OutletFallback = () => {
 };
 
 const DashboardLayout = () => {
+  // Register a web-push subscription so notifications arrive even when the tab
+  // is closed or the app is backgrounded. Safe to retry — the helper diffs state.
+  useEffect(() => {
+    const t = setTimeout(() => { ensurePushSubscription().catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
