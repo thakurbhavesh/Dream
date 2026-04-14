@@ -1,5 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSocket } from "../contexts/SocketContext.jsx";
+import { showSystemNotification, ensureNotificationPermission } from "../utils/notificationBridge";
+
+const assertMediaAvailable = () => {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const isInsecure =
+      typeof window !== "undefined" &&
+      !window.isSecureContext &&
+      !["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const msg = isInsecure
+      ? "Camera/Mic blocked — site must be opened over HTTPS"
+      : "Camera/Microphone not available in this browser";
+    const err = new Error(msg);
+    err.name = "MediaUnavailable";
+    throw err;
+  }
+};
 
 /**
  * Audio/Video call hook using WebRTC.
@@ -31,6 +47,8 @@ const useCall = () => {
   const [error, setError] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [peerMuted, setPeerMuted] = useState(false);
+  const [peerVideoOff, setPeerVideoOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
   const pcRef = useRef(null);
@@ -40,8 +58,14 @@ const useCall = () => {
   const peerUserIdRef = useRef(null);
   const callTypeRef = useRef(null);
   const timerRef = useRef(null);
+  const ringTimeoutRef = useRef(null);
+
+  const CALLER_RING_TIMEOUT_MS = 45_000;
 
   useEffect(() => { statusRef.current = status; }, [status]);
+
+  // Request notification permission once on mount so call notifications can fire
+  useEffect(() => { ensureNotificationPermission().catch(() => {}); }, []);
   useEffect(() => { peerUserIdRef.current = peerUserId; }, [peerUserId]);
   useEffect(() => { callTypeRef.current = callType; }, [callType]);
 
@@ -75,6 +99,10 @@ const useCall = () => {
       pcRef.current = null;
     }
     pendingCandidatesRef.current = [];
+    if (ringTimeoutRef.current) {
+      clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = null;
+    }
     setLocalStream(null);
     setRemoteStream(null);
     setStatus("idle");
@@ -84,10 +112,13 @@ const useCall = () => {
     setError(null);
     setIsMuted(false);
     setIsVideoOff(false);
+    setPeerMuted(false);
+    setPeerVideoOff(false);
   }, []);
 
   // ─── Get user media ───────────────────────────────────────────────
   const getMedia = useCallback(async (type) => {
+    assertMediaAvailable();
     let stream;
     if (type === "video") {
       try {
@@ -185,11 +216,15 @@ const useCall = () => {
           signalData: { type: "offer", sdp: offer },
         });
       } catch (err) {
-        if (err.name === "NotAllowedError") {
-          setError("Microphone/camera permission denied");
-        } else {
-          setError(err.message);
-        }
+        const msg =
+          err.name === "NotAllowedError"
+            ? "Microphone/camera permission denied"
+            : err.name === "NotFoundError"
+            ? "No camera/microphone found"
+            : err.name === "NotReadableError"
+            ? "Camera/microphone is in use by another app"
+            : err.message || "Failed to start call";
+        setError(msg);
         socket?.emit("call:stop", { targetUserId: peerUserIdRef.current, reason: "error" });
         cleanup();
       }
@@ -233,10 +268,27 @@ const useCall = () => {
           } else {
             pendingCandidatesRef.current.push(signalData.candidate);
           }
+        } else if (signalData.type === "media-state") {
+          if (typeof signalData.muted === "boolean") setPeerMuted(signalData.muted);
+          if (typeof signalData.videoOff === "boolean") setPeerVideoOff(signalData.videoOff);
         }
       } catch (err) {
         console.error("[call] signal error:", err);
-        setError(err.message);
+        // Swallow benign ICE-candidate errors instead of tearing down the call
+        if (signalData?.type === "candidate") {
+          return;
+        }
+        const msg =
+          err.name === "NotAllowedError"
+            ? "Microphone/camera permission denied"
+            : err.name === "NotFoundError"
+            ? "No camera/microphone found"
+            : err.name === "NotReadableError"
+            ? "Camera/microphone is in use by another app"
+            : err.name === "MediaUnavailable"
+            ? err.message
+            : err.message || "Call connection failed";
+        setError(msg);
         if (peerUserIdRef.current && socket) {
           socket.emit("call:stop", { targetUserId: peerUserIdRef.current, reason: "error" });
         }
@@ -250,6 +302,12 @@ const useCall = () => {
   const startCall = useCallback(
     (targetUserId, type = "audio", peerName = null) => {
       if (!socket || statusRef.current !== "idle") return;
+      try {
+        assertMediaAvailable();
+      } catch (err) {
+        setError(err.message);
+        return;
+      }
       setStatus("calling");
       setCallType(type);
       setPeerUserId(String(targetUserId));
@@ -261,16 +319,38 @@ const useCall = () => {
           cleanup();
         }
       });
+
+      // Caller ring timeout — auto-cancel if callee doesn't pick up
+      if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
+      ringTimeoutRef.current = setTimeout(() => {
+        if (statusRef.current === "calling") {
+          const tid = peerUserIdRef.current;
+          if (tid) socket.emit("call:stop", { targetUserId: tid, reason: "no_answer" });
+          setError("No answer");
+          cleanup();
+        }
+      }, CALLER_RING_TIMEOUT_MS);
     },
     [socket, cleanup]
   );
 
   const acceptCall = useCallback(() => {
     if (!socket || statusRef.current !== "incoming") return;
+    try {
+      assertMediaAvailable();
+    } catch (err) {
+      setError(err.message);
+      const targetId = peerUserIdRef.current;
+      if (targetId) {
+        socket.emit("call:reject", { targetUserId: targetId, reason: "media_unavailable" });
+      }
+      cleanup();
+      return;
+    }
     const targetId = peerUserIdRef.current;
     setStatus("accepted");
     socket.emit("call:accept", { targetUserId: targetId });
-  }, [socket]);
+  }, [socket, cleanup]);
 
   const rejectCall = useCallback(() => {
     if (!socket) return;
@@ -295,20 +375,34 @@ const useCall = () => {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
+        const muted = !audioTrack.enabled;
+        setIsMuted(muted);
+        if (socket && peerUserIdRef.current) {
+          socket.emit("call:signal", {
+            targetUserId: peerUserIdRef.current,
+            signalData: { type: "media-state", muted },
+          });
+        }
       }
     }
-  }, []);
+  }, [socket]);
 
   const toggleVideo = useCallback(() => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoOff(!videoTrack.enabled);
+        const videoOff = !videoTrack.enabled;
+        setIsVideoOff(videoOff);
+        if (socket && peerUserIdRef.current) {
+          socket.emit("call:signal", {
+            targetUserId: peerUserIdRef.current,
+            signalData: { type: "media-state", videoOff },
+          });
+        }
       }
     }
-  }, []);
+  }, [socket]);
 
   // Keep refs to latest callbacks so socket listeners don't need to re-attach
   const startCallerFlowRef = useRef(startCallerFlow);
@@ -336,6 +430,16 @@ const useCall = () => {
       setCallType(data.callType || "audio");
       setPeerUserId(String(data.fromUserId));
       setPeerUserName(data.fromUserName || "Unknown");
+      // Always show system notification on incoming call
+      try {
+        const isVideo = (data.callType || "audio") === "video";
+        showSystemNotification({
+          title: `Incoming ${isVideo ? "Video" : "Audio"} Call`,
+          body: `${data.fromUserName || "Someone"} is calling you`,
+          tag: "incoming-call",
+          requireInteraction: true,
+        });
+      } catch {}
     };
 
     const onAccepted = (data) => {
@@ -389,6 +493,8 @@ const useCall = () => {
     error,
     isMuted,
     isVideoOff,
+    peerMuted,
+    peerVideoOff,
     callDuration,
     startCall,
     acceptCall,

@@ -101,15 +101,34 @@ export const openSystemSettings = async () => {
 
 export const hasNativeBridge = () => hasElectronBridge();
 
+export const ensureNotificationPermission = async () => {
+  if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
+  if (Notification.permission === "granted") return "granted";
+  if (Notification.permission === "denied") return "denied";
+  try {
+    const res = await Notification.requestPermission();
+    return res;
+  } catch {
+    return "default";
+  }
+};
+
 export const showSystemNotification = ({
   title = "TeamChatX",
   body = "",
   icon = "/teamchatXElement.png",
+  tag,
+  requireInteraction = false,
+  silent = false,
 } = {}) => {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return { ok: false, reason: "unsupported" };
   }
   if (Notification.permission !== "granted") {
+    // Fire-and-forget request; caller can retry on next event
+    if (Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
     return { ok: false, reason: "permission" };
   }
   if (!isSecureNotificationContext()) {
@@ -117,7 +136,16 @@ export const showSystemNotification = ({
   }
 
   try {
-    const notification = new Notification(title, { body, icon });
+    const options = { body, icon, silent };
+    if (tag) options.tag = tag;
+    if (requireInteraction) options.requireInteraction = true;
+    const notification = new Notification(title, options);
+    try {
+      notification.onclick = () => {
+        try { window.focus(); } catch {}
+        try { notification.close(); } catch {}
+      };
+    } catch {}
     return { ok: true, notification };
   } catch (error) {
     console.warn("Failed to show notification", error);

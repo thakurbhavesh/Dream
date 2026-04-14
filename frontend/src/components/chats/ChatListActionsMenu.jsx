@@ -102,6 +102,13 @@ const ChatListActionsMenu = ({
     handleCloseMenu();
   };
 
+  // Listen for sidebar meeting button
+  useEffect(() => {
+    const openHandler = () => setMeetingDialogOpen(true);
+    window.addEventListener("teamchatx:openMeeting", openHandler);
+    return () => window.removeEventListener("teamchatx:openMeeting", openHandler);
+  }, []);
+
   const handleMeetingCreated = (meetingData, action) => {
     const userName = authUser?.first_name
       ? `${authUser.first_name} ${authUser.last_name || ""}`.trim()

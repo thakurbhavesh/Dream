@@ -101,8 +101,17 @@ export const SocketProvider = ({
           });
         };
 
-        const handleReconnectAttempt = () => {
+        const handleReconnectAttempt = async () => {
           updateState({ status: "reconnecting", error: null });
+          // Refresh auth token before reconnect — old token may have expired during inactivity
+          try {
+            const freshToken = await getAccessToken({ refreshIfNeeded: true });
+            if (freshToken && instance) {
+              instance.auth = { token: freshToken };
+            }
+          } catch (err) {
+            console.warn("[socket] token refresh on reconnect failed", err);
+          }
         };
 
         const handleError = (error) => {
@@ -164,7 +173,25 @@ export const SocketProvider = ({
 
     connectWithToken();
 
+    // When tab becomes visible again after inactivity, force reconnect with a fresh token
+    const handleVisibility = async () => {
+      if (document.visibilityState !== "visible") return;
+      if (!instance) return;
+      if (instance.connected) return;
+      try {
+        const freshToken = await getAccessToken({ refreshIfNeeded: true });
+        if (freshToken) instance.auth = { token: freshToken };
+      } catch {}
+      try { instance.connect(); } catch {}
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    window.addEventListener("online", handleVisibility);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+      window.removeEventListener("online", handleVisibility);
       if (instance) {
         instance.removeAllListeners();
         instance.close();

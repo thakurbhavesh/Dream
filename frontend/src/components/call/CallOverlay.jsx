@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Alert,
   Avatar,
   Box,
   IconButton,
+  Snackbar,
   Stack,
   Tooltip,
   Typography,
@@ -45,11 +47,29 @@ const CallOverlay = () => {
     remoteStream,
     isMuted,
     isVideoOff,
+    peerMuted,
+    peerVideoOff,
     callDuration,
+    error,
     endCall,
     toggleMute,
     toggleVideo,
   } = useCallContext();
+
+  // Persistent hidden audio element — plays remote audio even when minimized
+  const hiddenAudioRef = useRef(null);
+  useEffect(() => {
+    if (hiddenAudioRef.current && remoteStream) {
+      hiddenAudioRef.current.srcObject = remoteStream;
+      const p = hiddenAudioRef.current.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    }
+  }, [remoteStream]);
+
+  const [errorToast, setErrorToast] = useState("");
+  useEffect(() => {
+    if (error) setErrorToast(error);
+  }, [error]);
 
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -114,11 +134,36 @@ const CallOverlay = () => {
     };
   }, [status]);
 
-  if (!showOverlay) return null;
+  const persistentMedia = createPortal(
+    <>
+      <audio ref={hiddenAudioRef} autoPlay style={{ display: "none" }} />
+      <Snackbar
+        open={!!errorToast}
+        autoHideDuration={5000}
+        onClose={() => setErrorToast("")}
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+        sx={{ zIndex: 10000 }}
+      >
+        <Alert severity="error" variant="filled" onClose={() => setErrorToast("")}>
+          {errorToast}
+        </Alert>
+      </Snackbar>
+    </>,
+    document.body
+  );
+
+  if (!showOverlay) return persistentMedia;
+
+  const withPersistent = (node) => (
+    <>
+      {persistentMedia}
+      {node}
+    </>
+  );
 
   // ─── Calling / Connecting: floating card ─────────────────────────────────
   if (isCalling || isConnecting) {
-    return createPortal(
+    return withPersistent(createPortal(
       <Box
         sx={{
           position: "fixed",
@@ -182,12 +227,12 @@ const CallOverlay = () => {
         </Stack>
       </Box>,
       document.body
-    );
+    ));
   }
 
   // ─── Active: Minimized mode ──────────────────────────────────────────────
   if (minimized && isActive) {
-    return createPortal(
+    return withPersistent(createPortal(
       <Box
         sx={{
           position: "fixed",
@@ -276,12 +321,12 @@ const CallOverlay = () => {
         </Stack>
       </Box>,
       document.body
-    );
+    ));
   }
 
   // ─── Active: Full call UI ────────────────────────────────────────────────
   if (isActive) {
-    return createPortal(
+    return withPersistent(createPortal(
       <Box
         sx={{
           position: "fixed",
@@ -307,7 +352,7 @@ const CallOverlay = () => {
           }}
         >
           {/* Remote video / audio avatar */}
-          {isVideo && remoteStream ? (
+          {isVideo && remoteStream && !peerVideoOff ? (
             <video
               ref={remoteVideoRef}
               autoPlay
@@ -337,12 +382,25 @@ const CallOverlay = () => {
               <Typography variant="h6" color="#aaa">
                 {formatDuration(callDuration)}
               </Typography>
-              {/* Audio element for audio-only calls */}
-              <audio
-                ref={remoteVideoRef}
-                autoPlay
-                style={{ display: "none" }}
-              />
+              {(peerMuted || peerVideoOff) && (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  {peerMuted && (
+                    <Stack direction="row" spacing={0.5} alignItems="center"
+                      sx={{ bgcolor: "rgba(244,67,54,0.2)", px: 1.25, py: 0.5, borderRadius: 2 }}>
+                      <PiMicrophoneSlash size={16} color="#f44336" />
+                      <Typography variant="caption" color="#f44336" fontWeight={600}>muted</Typography>
+                    </Stack>
+                  )}
+                  {isVideo && peerVideoOff && (
+                    <Stack direction="row" spacing={0.5} alignItems="center"
+                      sx={{ bgcolor: "rgba(244,67,54,0.2)", px: 1.25, py: 0.5, borderRadius: 2 }}>
+                      <PiVideoCameraSlash size={16} color="#f44336" />
+                      <Typography variant="caption" color="#f44336" fontWeight={600}>camera off</Typography>
+                    </Stack>
+                  )}
+                </Stack>
+              )}
+              {/* Audio plays via persistent hidden element at root */}
             </Stack>
           )}
 
@@ -494,12 +552,12 @@ const CallOverlay = () => {
         </Box>
       </Box>,
       document.body
-    );
+    ));
   }
 
   // Show call notes dialog even when overlay is hidden (call ended)
   if (callNotesOpen) {
-    return (
+    return withPersistent(
       <CallNotesDialog
         open={callNotesOpen}
         onClose={() => setCallNotesOpen(false)}
@@ -510,7 +568,7 @@ const CallOverlay = () => {
     );
   }
 
-  return null;
+  return persistentMedia;
 };
 
 export default CallOverlay;

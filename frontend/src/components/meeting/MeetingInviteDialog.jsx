@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 import { PiVideoCameraBold, PiXBold } from "react-icons/pi";
 import { useSocket } from "../../contexts/SocketContext.jsx";
+import { showSystemNotification, ensureNotificationPermission } from "../../utils/notificationBridge";
 
 const MeetingInviteDialog = ({ onJoin }) => {
   const socket = useSocket();
@@ -23,10 +24,19 @@ const MeetingInviteDialog = ({ onJoin }) => {
 
     const onInvited = (data) => {
       setInvite(data);
+      try {
+        showSystemNotification({
+          title: "Meeting Invitation",
+          body: `${data?.hostName || "Someone"} invited you to "${data?.meetingTitle || "a meeting"}"`,
+          tag: "meeting-invite",
+          requireInteraction: true,
+        });
+      } catch {}
       // Auto dismiss after 30s
       setTimeout(() => setInvite(null), 30000);
     };
 
+    ensureNotificationPermission().catch(() => {});
     socket.on("meeting:invited", onInvited);
     return () => socket.off("meeting:invited", onInvited);
   }, [socket]);
