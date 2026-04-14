@@ -2,6 +2,8 @@ const jwt = require('jsonwebtoken');
 const meetingModel = require('../models/meetingModel');
 const { success, failure } = require('../utils/response');
 const { sendMailAsync } = require('../utils/mail');
+const db = require('../config/database');
+const { getIO } = require('../socket');
 
 const MAX_GUESTS_PER_MEETING = 2;
 const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -9,6 +11,31 @@ const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const resolveFrontendOrigin = () => {
   const raw = (process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || 'http://localhost:5173').split(',')[0].trim();
   return raw.replace(/\/$/, '');
+};
+
+const sendMemberInviteEmail = async ({ email, meetingTitle, meetingCode, hostName, scheduledAt }) => {
+  const origin = resolveFrontendOrigin();
+  const link = `${origin}/app/meeting`;
+  const when = scheduledAt ? new Date(scheduledAt).toLocaleString() : 'Now';
+  const subject = `Meeting invite: ${meetingTitle || 'Meeting'}`;
+  const html = `
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #111;">
+      <h2 style="margin: 0 0 8px;">You're invited to a meeting</h2>
+      <p style="margin: 0 0 16px; color: #555;">${hostName ? `${hostName} has` : 'You have been'} invited you to a meeting.</p>
+      <div style="background:#f5f7fb; border-radius: 10px; padding: 16px 20px; margin: 20px 0;">
+        <div style="font-weight:600; font-size:18px; margin-bottom:4px;">${meetingTitle || 'Meeting'}</div>
+        <div style="color:#555; font-size:13px;">${when}</div>
+        <div style="color:#555; font-size:13px; margin-top:4px;">Meeting ID: <b>${meetingCode}</b></div>
+      </div>
+      <a href="${link}" style="display:inline-block; background:#1976d2; color:#fff; text-decoration:none; padding:12px 20px; border-radius:8px; font-weight:600;">Open Meetings</a>
+      <p style="margin: 20px 0 6px; color:#555; font-size:13px;">Or log in and paste meeting ID: <b>${meetingCode}</b></p>
+    </div>
+  `;
+  try {
+    await sendMailAsync({ to: email, subject, html });
+  } catch (err) {
+    console.warn('[meeting] member invite mail failed:', err.message);
+  }
 };
 
 const sendGuestInviteEmail = async ({ email, meetingTitle, meetingCode, accessToken, accessCode, hostName, scheduledAt }) => {
@@ -85,16 +112,43 @@ const createMeeting = async (req, res, next) => {
     });
 
     // Add invited participants
+    const invitedUserIds = [];
     if (Array.isArray(participants)) {
       for (const p of participants) {
+        const pid = Number(p.user_id || p.id);
         await meetingModel.addParticipant({
           meeting_id: meeting.id,
-          user_id: p.user_id || p.id,
+          user_id: pid || null,
           email: p.email,
           display_name: p.display_name || p.name,
           role: p.role || 'participant',
         });
+        if (Number.isFinite(pid) && pid > 0 && pid !== userId) invitedUserIds.push(pid);
       }
+    }
+
+    // Fire-and-forget member invite emails
+    if (invitedUserIds.length) {
+      (async () => {
+        try {
+          const { rows } = await db.query(
+            'SELECT user_id, email FROM users WHERE user_id = ANY($1::bigint[])',
+            [invitedUserIds]
+          );
+          for (const u of rows) {
+            if (!u.email) continue;
+            sendMemberInviteEmail({
+              email: u.email,
+              meetingTitle: meeting.title,
+              meetingCode: meeting.meeting_id,
+              hostName: req.user?.name,
+              scheduledAt: meeting.scheduled_at,
+            }).catch(() => {});
+          }
+        } catch (err) {
+          console.warn('[meeting] member invite lookup failed:', err.message);
+        }
+      })();
     }
 
     // External guests — save + email invite with link + code
@@ -288,9 +342,14 @@ const updateMeeting = async (req, res, next) => {
 // PATCH /meetings/:id/status
 const changeMeetingStatus = async (req, res, next) => {
   try {
+    const { userId } = resolveUser(req);
     const meeting = await meetingModel.findById(Number(req.params.id));
     if (!meeting) return failure(res, 'Meeting not found', 404);
     const { status: newStatus } = req.body;
+    // Only the host can end or cancel a meeting
+    if ((newStatus === 'ended' || newStatus === 'cancelled') && Number(meeting.host_id) !== userId) {
+      return failure(res, 'Only the host can end this meeting', 403);
+    }
     const extra = {};
     if (newStatus === 'active') extra.started_at = new Date();
     if (newStatus === 'ended') {
@@ -300,6 +359,19 @@ const changeMeetingStatus = async (req, res, next) => {
       }
     }
     const updated = await meetingModel.updateStatus(meeting.id, newStatus, extra);
+
+    // Broadcast end to all participants via socket so UI closes meeting room + stops screen share
+    if (newStatus === 'ended' || newStatus === 'cancelled') {
+      try {
+        const io = getIO();
+        if (io && meeting.meeting_id) {
+          io.to(`meeting:${meeting.meeting_id}`).emit('meeting:ended', {
+            meetingRoomId: meeting.meeting_id,
+            endedBy: userId,
+          });
+        }
+      } catch (e) { /* non-fatal */ }
+    }
     return success(res, { meeting: updated }, 'Status updated');
   } catch (error) {
     return next(error);

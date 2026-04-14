@@ -238,6 +238,13 @@ const useMeeting = () => {
   // ─── Leave meeting ────────────────────────────────────────────────
   const leaveMeeting = useCallback(() => {
     if (statusRef.current === "idle") return;
+    // Stop screen share tracks so OS-level sharing banner closes immediately
+    if (screenStreamRef.current) {
+      try { screenStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      screenStreamRef.current = null;
+    }
+    setScreenStream(null);
+    setIsScreenSharing(false);
     socket?.emit("meeting:leave", { meetingRoomId: meetingRoomIdRef.current });
     cleanupAll();
     setMeetingRoomId(null);
@@ -508,6 +515,22 @@ const useMeeting = () => {
       else setPinnedSocketId((prev) => prev === targetSocketId ? null : prev);
     };
 
+    const onMeetingEnded = () => {
+      // Host ended the meeting — force-stop screen share + leave room on every client
+      if (screenStreamRef.current) {
+        try { screenStreamRef.current.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        screenStreamRef.current = null;
+      }
+      setScreenStream(null);
+      setIsScreenSharing(false);
+      if (statusRef.current !== "idle") {
+        cleanupAll();
+        setMeetingRoomId(null);
+        setMeetingInfo(null);
+        setStatus("idle");
+      }
+    };
+
     socket.on("meeting:user-joined", onUserJoined);
     socket.on("meeting:user-left", onUserLeft);
     socket.on("meeting:signal", onSignal);
@@ -515,6 +538,7 @@ const useMeeting = () => {
     socket.on("meeting:reaction", onReaction);
     socket.on("meeting:media-state", onMediaState);
     socket.on("meeting:pin", onPin);
+    socket.on("meeting:ended", onMeetingEnded);
 
     return () => {
       socket.off("meeting:user-joined", onUserJoined);
@@ -524,6 +548,7 @@ const useMeeting = () => {
       socket.off("meeting:reaction", onReaction);
       socket.off("meeting:media-state", onMediaState);
       socket.off("meeting:pin", onPin);
+      socket.off("meeting:ended", onMeetingEnded);
     };
   }, [socket, createPeer]);
 
