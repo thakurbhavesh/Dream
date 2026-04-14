@@ -167,6 +167,65 @@ const getMessages = async (meeting_id, { limit = 100, offset = 0 } = {}) => {
   return rows;
 };
 
+// ─── External guests ──────────────────────────────────────────────────────
+const crypto = require('crypto');
+
+const generateGuestToken = () => crypto.randomBytes(24).toString('base64url');
+const generateGuestCode = () => String(Math.floor(100000 + Math.random() * 900000));
+
+const addGuest = async ({ meeting_id, email, display_name, invited_by }) => {
+  const access_token = generateGuestToken();
+  const access_code = generateGuestCode();
+  const { rows } = await db.query(
+    `INSERT INTO meeting_guests (meeting_id, email, display_name, access_token, access_code, invited_by)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (meeting_id, email) DO UPDATE
+       SET access_token = EXCLUDED.access_token,
+           access_code = EXCLUDED.access_code,
+           display_name = EXCLUDED.display_name,
+           invited_by = EXCLUDED.invited_by,
+           invited_at = NOW(),
+           revoked_at = NULL
+     RETURNING *`,
+    [meeting_id, email.toLowerCase(), display_name || null, access_token, access_code, invited_by || null]
+  );
+  return rows[0];
+};
+
+const getGuestByToken = async (access_token) => {
+  const { rows } = await db.query(
+    `SELECT g.*, m.meeting_id AS meeting_code, m.title, m.status, m.scheduled_at,
+            m.organization_id, u.name AS host_name
+     FROM meeting_guests g
+     JOIN meetings m ON m.id = g.meeting_id
+     LEFT JOIN users u ON u.user_id = m.host_id
+     WHERE g.access_token = $1`,
+    [access_token]
+  );
+  return rows[0] || null;
+};
+
+const getGuestsByMeeting = async (meeting_id) => {
+  const { rows } = await db.query(
+    `SELECT guest_id, meeting_id, email, display_name, access_code, invited_at, joined_at, revoked_at
+     FROM meeting_guests WHERE meeting_id = $1 ORDER BY invited_at ASC`,
+    [meeting_id]
+  );
+  return rows;
+};
+
+const countGuestsByMeeting = async (meeting_id) => {
+  const { rows } = await db.query(
+    `SELECT COUNT(*)::int AS cnt FROM meeting_guests WHERE meeting_id = $1 AND revoked_at IS NULL`,
+    [meeting_id]
+  );
+  return rows[0]?.cnt || 0;
+};
+
+const markGuestJoined = async (guest_id) => {
+  await db.query(`UPDATE meeting_guests SET joined_at = NOW() WHERE guest_id = $1`, [guest_id]);
+};
+
 module.exports = {
   generateMeetingId,
   create,
@@ -183,4 +242,9 @@ module.exports = {
   removeParticipant,
   addMessage,
   getMessages,
+  addGuest,
+  getGuestByToken,
+  getGuestsByMeeting,
+  countGuestsByMeeting,
+  markGuestJoined,
 };

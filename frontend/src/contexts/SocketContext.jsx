@@ -42,6 +42,8 @@ export const SocketProvider = ({
   autoConnect = true,
   url,
   withCredentials = true,
+  // If explicitToken is provided (e.g. guest JWT), use it and skip refresh flow
+  explicitToken = null,
 }) => {
   const [socket, setSocket] = useState(null);
   const [connection, setConnection] = useState({
@@ -69,7 +71,7 @@ export const SocketProvider = ({
 
     const connectWithToken = async () => {
       try {
-        const token = await getAccessToken({ refreshIfNeeded: true });
+        const token = explicitToken || (await getAccessToken({ refreshIfNeeded: true }));
         instance = io(socketUrl, {
           autoConnect: false,
           transports: ["websocket", "polling"],
@@ -103,6 +105,7 @@ export const SocketProvider = ({
 
         const handleReconnectAttempt = async () => {
           updateState({ status: "reconnecting", error: null });
+          if (explicitToken) return; // guest token is short-lived; don't refresh
           // Refresh auth token before reconnect — old token may have expired during inactivity
           try {
             const freshToken = await getAccessToken({ refreshIfNeeded: true });
@@ -199,7 +202,7 @@ export const SocketProvider = ({
       setSocket(null);
       setConnection({ status: "idle", error: null, transport: null });
     };
-  }, [autoConnect, socketUrl, withCredentials]);
+  }, [autoConnect, socketUrl, withCredentials, explicitToken]);
 
   const connect = useCallback(() => {
     if (!socket) return;

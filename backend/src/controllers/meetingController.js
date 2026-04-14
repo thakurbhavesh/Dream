@@ -1,5 +1,43 @@
+const jwt = require('jsonwebtoken');
 const meetingModel = require('../models/meetingModel');
 const { success, failure } = require('../utils/response');
+const { sendMailAsync } = require('../utils/mail');
+
+const MAX_GUESTS_PER_MEETING = 2;
+const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const resolveFrontendOrigin = () => {
+  const raw = (process.env.FRONTEND_ORIGIN || process.env.CORS_ORIGIN || 'http://localhost:5173').split(',')[0].trim();
+  return raw.replace(/\/$/, '');
+};
+
+const sendGuestInviteEmail = async ({ email, meetingTitle, meetingCode, accessToken, accessCode, hostName, scheduledAt }) => {
+  const origin = resolveFrontendOrigin();
+  const link = `${origin}/guest/${accessToken}`;
+  const when = scheduledAt ? new Date(scheduledAt).toLocaleString() : 'Now';
+  const subject = `You're invited: ${meetingTitle || 'Meeting'}`;
+  const html = `
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #111;">
+      <h2 style="margin: 0 0 8px;">Meeting Invitation</h2>
+      <p style="margin: 0 0 16px; color: #555;">${hostName ? `${hostName} has` : 'You have been'} invited you to a meeting.</p>
+      <div style="background:#f5f7fb; border-radius: 10px; padding: 16px 20px; margin: 20px 0;">
+        <div style="font-weight:600; font-size:18px; margin-bottom:4px;">${meetingTitle || 'Meeting'}</div>
+        <div style="color:#555; font-size:13px;">${when}</div>
+        <div style="color:#555; font-size:13px; margin-top:4px;">Meeting ID: <b>${meetingCode}</b></div>
+      </div>
+      <a href="${link}" style="display:inline-block; background:#1976d2; color:#fff; text-decoration:none; padding:12px 20px; border-radius:8px; font-weight:600;">Join Meeting</a>
+      <p style="margin: 20px 0 6px; color:#555; font-size:13px;">Or paste this link: <br/><a href="${link}" style="color:#1976d2; word-break: break-all;">${link}</a></p>
+      <p style="margin: 12px 0 6px; color:#555; font-size:13px;">When prompted, enter this access code:</p>
+      <div style="font-size:28px; font-weight:700; letter-spacing:6px; color:#1976d2;">${accessCode}</div>
+      <p style="margin-top:28px; color:#999; font-size:12px;">You are joining as an external guest — no account required.</p>
+    </div>
+  `;
+  try {
+    await sendMailAsync({ to: email, subject, html });
+  } catch (err) {
+    console.warn('[meeting] guest invite mail failed:', err.message);
+  }
+};
 
 const resolveUser = (req) => {
   const userId = Number(req.user?.sub);
@@ -59,11 +97,111 @@ const createMeeting = async (req, res, next) => {
       }
     }
 
+    // External guests — save + email invite with link + code
+    const guestEmails = Array.isArray(req.body.guest_emails) ? req.body.guest_emails : [];
+    const validGuestEmails = [...new Set(
+      guestEmails
+        .map((e) => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+        .filter((e) => e && emailRx.test(e))
+    )].slice(0, MAX_GUESTS_PER_MEETING);
+
+    const createdGuests = [];
+    for (const gEmail of validGuestEmails) {
+      try {
+        const guest = await meetingModel.addGuest({
+          meeting_id: meeting.id,
+          email: gEmail,
+          display_name: null,
+          invited_by: userId,
+        });
+        createdGuests.push(guest);
+        // fire-and-forget email
+        sendGuestInviteEmail({
+          email: gEmail,
+          meetingTitle: meeting.title,
+          meetingCode: meeting.meeting_id,
+          accessToken: guest.access_token,
+          accessCode: guest.access_code,
+          hostName: req.user?.name,
+          scheduledAt: meeting.scheduled_at,
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('[meeting] addGuest failed:', err.message);
+      }
+    }
+
     const allParticipants = await meetingModel.getParticipants(meeting.id);
-    return success(res, { meeting, participants: allParticipants }, 'Meeting created', 201);
+    return success(res, {
+      meeting,
+      participants: allParticipants,
+      guests: createdGuests.map((g) => ({
+        guest_id: g.guest_id, email: g.email, access_code: g.access_code,
+      })),
+    }, 'Meeting created', 201);
   } catch (error) {
     return next(error);
   }
+};
+
+// ─── External guest (public) endpoints ───────────────────────────────────────
+
+// GET /meetings/guest/:token — minimal meeting info (no code required)
+const getGuestMeeting = async (req, res, next) => {
+  try {
+    const guest = await meetingModel.getGuestByToken(req.params.token);
+    if (!guest) return failure(res, 'Invalid or expired invite', 404);
+    if (guest.revoked_at) return failure(res, 'Invite revoked', 403);
+    return success(res, {
+      meeting: {
+        meeting_id: guest.meeting_code,
+        title: guest.title,
+        status: guest.status,
+        scheduled_at: guest.scheduled_at,
+        host_name: guest.host_name,
+      },
+      guest: { email: guest.email, display_name: guest.display_name },
+    }, 'Guest invite found');
+  } catch (error) { return next(error); }
+};
+
+// POST /meetings/guest/:token/verify — body { code, display_name? }
+// Issues short-lived guest JWT for socket handshake
+const verifyGuest = async (req, res, next) => {
+  try {
+    const guest = await meetingModel.getGuestByToken(req.params.token);
+    if (!guest) return failure(res, 'Invalid invite', 404);
+    if (guest.revoked_at) return failure(res, 'Invite revoked', 403);
+    if (guest.status === 'ended' || guest.status === 'cancelled') {
+      return failure(res, 'Meeting has ended', 410);
+    }
+    const code = String(req.body?.code || '').trim();
+    if (!code || code !== guest.access_code) {
+      return failure(res, 'Incorrect code', 401);
+    }
+
+    // Issue a short-lived guest JWT — socket layer will recognize `guest: true`
+    const displayName = (req.body?.display_name || guest.display_name || guest.email.split('@')[0]).toString().slice(0, 80);
+    const token = jwt.sign({
+      sub: `guest-${guest.guest_id}`,
+      guest: true,
+      guest_id: guest.guest_id,
+      name: displayName,
+      email: guest.email,
+      meeting_id: guest.meeting_code,
+      org: guest.organization_id,
+    }, process.env.JWT_SECRET, { expiresIn: '4h' });
+
+    await meetingModel.markGuestJoined(guest.guest_id).catch(() => {});
+
+    return success(res, {
+      token,
+      meeting: {
+        meeting_id: guest.meeting_code,
+        title: guest.title,
+      },
+      display_name: displayName,
+    }, 'Verified');
+  } catch (error) { return next(error); }
 };
 
 // GET /meetings — list org meetings
@@ -228,4 +366,6 @@ module.exports = {
   rsvp,
   addParticipant,
   getMessages,
+  getGuestMeeting,
+  verifyGuest,
 };

@@ -4,6 +4,10 @@ const auth = require('../middlewares/auth');
 
 const router = Router();
 
+// Public guest endpoints (no auth) — must be declared before /:id catch-all
+router.get('/guest/:token', controller.getGuestMeeting);
+router.post('/guest/:token/verify', controller.verifyGuest);
+
 router.post('/', auth, controller.createMeeting);
 router.get('/', auth, controller.getMeetings);
 router.get('/upcoming', auth, controller.getUpcoming);

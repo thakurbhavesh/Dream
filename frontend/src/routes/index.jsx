@@ -10,6 +10,7 @@ import authStore from "../utils/auth";
 const GeneralApp = lazy(() => import("../pages/dashboard/GeneralApp.jsx"));
 const Settings = lazy(() => import("../pages/dashboard/Settings.jsx"));
 const MeetingPage = lazy(() => import("../pages/dashboard/MeetingPage.jsx"));
+const GuestMeetingPage = lazy(() => import("../pages/guest/GuestMeetingPage.jsx"));
 const BillingThankYou = lazy(() => import("../pages/dashboard/BillingThankYou.jsx"));
 const LoginPage = lazy(() => import("../pages/auth/Login.jsx"));
 const RegisterPage = lazy(() => import("../pages/auth/Register.jsx"));
@@ -59,6 +60,10 @@ export default function Router() {
           { path: "reset-password", element: <ResetPasswordPage /> },
           { path: "new-password", element: <NewPasswordPage /> },
         ],
+      },
+      {
+        path: "/guest/:token",
+        element: <GuestMeetingPage />,
       },
       {
         path: "/owner-dashboard",

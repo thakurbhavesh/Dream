@@ -729,6 +729,7 @@ const checkFeatureAllowed = async (orgId, featureKey, messageId, threadId) => {
 const onConnection = (socket) => {
   const userId = String(socket.user.sub);
   const orgId = socket.user.org;
+  const isGuest = !!socket.user.guest;
 
   // Per-socket rate limiters (protect DB from spam)
   const rl = {
@@ -754,42 +755,51 @@ const onConnection = (socket) => {
     broadcast:   createRateLimiter(2, 60_000),  // 2 broadcasts per minute
   };
 
-  // Preload organization controls into cache on connect (non-blocking)
-  if (orgId) preloadOrgControls(orgId).catch(err => console.error('[socket] preloadOrgControls error:', err.message));
+  // Guests skip DB sync — they only need meeting:* handlers
+  if (!isGuest) {
+    // Preload organization controls into cache on connect (non-blocking)
+    if (orgId) preloadOrgControls(orgId).catch(err => console.error('[socket] preloadOrgControls error:', err.message));
 
-  // Sync muted threads to client on connect
-  if (orgId) {
-    threadMuteModel.getMutedThreads(Number(userId), orgId)
-      .then((mutes) => { if (mutes.length) emitToUser(userId, 'thread:mute_sync', mutes); })
-      .catch(err => console.error('[socket] mute sync error:', err.message));
+    // Sync muted threads to client on connect
+    if (orgId) {
+      threadMuteModel.getMutedThreads(Number(userId), orgId)
+        .then((mutes) => { if (mutes.length) emitToUser(userId, 'thread:mute_sync', mutes); })
+        .catch(err => console.error('[socket] mute sync error:', err.message));
+    }
+
+    // Sync DND state to client on connect
+    userSettingsModel.getSetting(Number(userId), 'dnd')
+      .then((dnd) => { if (dnd) emitToUser(userId, 'dnd:state', dnd); })
+      .catch(err => console.error('[socket] DND sync error:', err.message));
+
+    // Cache user's device geo data for message metadata (non-blocking)
+    loadUserGeo(Number(userId)).then((geo) => { socket.geo = geo || {}; }).catch(() => { socket.geo = {}; });
+  } else {
+    socket.geo = {};
   }
-
-  // Sync DND state to client on connect
-  userSettingsModel.getSetting(Number(userId), 'dnd')
-    .then((dnd) => { if (dnd) emitToUser(userId, 'dnd:state', dnd); })
-    .catch(err => console.error('[socket] DND sync error:', err.message));
-
-  // Cache user's device geo data for message metadata (non-blocking)
-  loadUserGeo(Number(userId)).then((geo) => { socket.geo = geo || {}; }).catch(() => { socket.geo = {}; });
 
   const wasAlreadyOnline = isUserOnline(userId);
 
-  addUserSocket(userId, socket.id);
-  if (orgId) {
-    userOrgMap.set(userId, orgId);
-    if (!orgOnlineUsers.has(orgId)) orgOnlineUsers.set(orgId, new Set());
-    orgOnlineUsers.get(orgId).add(userId);
+  if (!isGuest) {
+    addUserSocket(userId, socket.id);
+    if (orgId) {
+      userOrgMap.set(userId, orgId);
+      if (!orgOnlineUsers.has(orgId)) orgOnlineUsers.set(orgId, new Set());
+      orgOnlineUsers.get(orgId).add(userId);
+    }
   }
 
   // Join personal + org rooms (rooms are the most efficient way to broadcast)
-  socket.join(`user:${userId}`);
-  if (orgId) socket.join(`org:${orgId}`);
+  if (!isGuest) {
+    socket.join(`user:${userId}`);
+    if (orgId) socket.join(`org:${orgId}`);
+  }
 
   console.log(`[socket] connected user=${userId} sid=${socket.id} tabs=${userSockets.get(userId)?.size}`);
 
   // Broadcast online to org — only on FIRST tab (not duplicate per tab)
   // Respects organization 'indicators' control
-  if (!wasAlreadyOnline && orgId) {
+  if (!isGuest && !wasAlreadyOnline && orgId) {
     getOrgControl(orgId, 'indicators').then((ctrl) => {
       if (!ctrl || ctrl.enabled) {
         socket.to(`org:${orgId}`).emit('user:online', { userId, status: 'Online' });
@@ -800,7 +810,7 @@ const onConnection = (socket) => {
   }
 
   // Tell new user who's already online (same org only) — O(1) via orgOnlineUsers Set
-  if (orgId) {
+  if (!isGuest && orgId) {
     const orgSet = orgOnlineUsers.get(orgId);
     if (orgSet && orgSet.size > 1) {
       const onlineUsers = [];
@@ -2829,6 +2839,10 @@ const onConnection = (socket) => {
     // Clean up meeting rooms
     if (socket._meetingCleanup) socket._meetingCleanup();
     socketActiveThread.delete(socket.id);
+    if (isGuest) {
+      console.log(`[socket] guest disconnected sid=${socket.id} reason=${reason}`);
+      return;
+    }
     removeUserSocket(userId, socket.id);
     // Clear org mapping on disconnect (only when ALL tabs closed)
     if (!isUserOnline(userId)) {
