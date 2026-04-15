@@ -90,7 +90,7 @@ const MeetingPage = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const { response, payload } = await fetchWithAuth(`${API_BASE_URL}/users?all=1`);
+        const { response, payload } = await fetchWithAuth(`${API_BASE_URL}/users/directory`);
         if (!response.ok) return;
         // Controller returns { data: { count, rows } } via success() wrapper
         const rows =

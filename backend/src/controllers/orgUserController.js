@@ -210,6 +210,31 @@ const getUsers = async (req, res, next) => {
   }
 };
 
+const getDirectory = async (req, res, next) => {
+  try {
+    const organization_id = await resolveOrganizationId(req);
+    const search = parseSearch(req.query);
+    const { rows } = await orgUserModel.findUsersInOrganization({
+      organization_id,
+      search,
+      limit: 100000,
+      offset: 0,
+    });
+    const selfId = Number(req.user?.sub);
+    const list = (rows || [])
+      .map((u) => ({
+        user_id: Number(u.user_id),
+        name: u.name || [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || u.email,
+        email: u.email,
+        avatar: u.profile_url || u.avatar || '',
+      }))
+      .filter((u) => u.user_id && u.user_id !== selfId);
+    return success(res, { count: list.length, rows: list }, 'Organization directory retrieved');
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const getUser = async (req, res, next) => {
   try {
     const organization_id = await resolveOrganizationId(req);
@@ -662,6 +687,7 @@ const bulkDeleteUsers = async (req, res, next) => {
 module.exports = {
   createUser,
   getUsers,
+  getDirectory,
   getUser,
   updateUser,
   bulkUpdateUsers,

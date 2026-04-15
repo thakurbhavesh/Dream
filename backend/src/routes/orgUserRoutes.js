@@ -28,6 +28,10 @@ router
   .post(auth, blockRole4, validateCreateOrgUser, orgUserController.createUser);
 
 router
+  .route('/directory')
+  .get(auth, orgUserController.getDirectory);
+
+router
   .route('/bulk')
   .patch(auth, blockRole4, validateBulkUpdateOrgUsers, orgUserController.bulkUpdateUsers)
   .delete(auth, blockRole4, validateBulkDeleteOrgUsers, orgUserController.bulkDeleteUsers);
