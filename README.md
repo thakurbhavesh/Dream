@@ -2,6 +2,9 @@
 
 Last updated: 2026-03-13
 
+#collaborator
+- Hardik
+
 Repository structure:
 - `backend/` Node.js + Express + PostgreSQL API
 - `frontend/` React + Vite client
