@@ -13,6 +13,7 @@ import {
   Typography,
   useTheme,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { PiLockKeyOpen } from "react-icons/pi";
@@ -33,7 +34,6 @@ import { useChatLockContext } from "../../contexts/ChatLockContext.jsx";
 import { LockMode } from "../../hooks/useChatLock.js";
 import { FaUserLock } from "react-icons/fa";
 import useConversationCache from "../../hooks/useConversationCache.js";
-import { buildSurfaceGradient } from "../../utils/themeGradients.js";
 import useSecureStorageValue from "../../hooks/useSecureStorageValue.js";
 import { SETTINGS_STORAGE_KEYS } from "./settings/storageKeys.js";
 import {
@@ -436,6 +436,18 @@ const GeneralApp = () => {
     message: null,
     threadId: null,
   });
+  // Confirmation dialog state for destructive thread-level actions
+  // (exit / delete group / delete chat). Split from `actionDialog` so the
+  // existing per-message flow stays untouched.
+  const [threadActionConfirm, setThreadActionConfirm] = useState({
+    open: false,
+    type: null, // 'leave' | 'delete-group' | 'hide'
+    thread: null,
+    busy: false,
+  });
+  const closeThreadActionConfirm = useCallback(() => {
+    setThreadActionConfirm((prev) => ({ ...prev, open: false, busy: false }));
+  }, []);
   const [messageInfoState, setMessageInfoState] = useState({
     open: false,
     message: null,
@@ -1464,9 +1476,10 @@ const GeneralApp = () => {
   }, [messageInfoState.threadId, activeThread, threadsForActiveOrg]);
 
   const threadsLoading =
+    !activeOrganizationId ||
     Boolean(loadingStates?.[activeOrganizationId]) ||
     orgTransitionLoading ||
-    (activeOrganizationId && (!threadsForActiveOrg || threadsForActiveOrg.length === 0) && loadingStates?.[activeOrganizationId] === undefined);
+    ((!threadsForActiveOrg || threadsForActiveOrg.length === 0) && loadingStates?.[activeOrganizationId] === undefined);
 
   useEffect(() => {
     if (!activeOrganizationId) return;
@@ -1783,6 +1796,42 @@ const GeneralApp = () => {
       activeOrganizationId,
       dispatch,
       emitGroupSystemEvent,
+      invalidate,
+      removeActiveSelection,
+      removeThread,
+      showMessageToast,
+    ]
+  );
+
+  // Soft-hide a group from *this user's* chat list (local-to-user action).
+  // Group + other members unaffected. Invoked only when user is already an
+  // inactive member (left / kicked / banned) — see sidebar gating.
+  const handleHideGroupThread = useCallback(
+    async (thread) => {
+      if (!thread?.id || !activeOrganizationId) return false;
+      if (!isGroupThread(thread)) return false;
+      const numericId = Number(String(thread.id).replace(/^group-/, ""));
+      if (!numericId) return false;
+
+      try {
+        const { hideGroupThread: apiHide } = await import("../../services/chatApi.js");
+        await apiHide(numericId);
+      } catch (err) {
+        console.warn("[hideGroupThread] API:", err?.message);
+        showMessageToast("Couldn't hide chat. Please try again.", "error");
+        return false;
+      }
+
+      removeThread(activeOrganizationId, thread.id, { removeMessages: true });
+      invalidate(thread.id);
+      removeActiveSelection(thread.id);
+      dispatch(closeSidebar());
+      showMessageToast("Chat deleted", "success");
+      return true;
+    },
+    [
+      activeOrganizationId,
+      dispatch,
       invalidate,
       removeActiveSelection,
       removeThread,
@@ -2268,8 +2317,15 @@ const GeneralApp = () => {
       thread={activeThread}
       messages={conversationMessages}
       onClose={closeInfoSidebar}
-      onLeaveGroup={handleLeaveGroup}
-      onDeleteGroup={handleDeleteGroup}
+      onLeaveGroup={(thread) =>
+        setThreadActionConfirm({ open: true, type: "leave", thread, busy: false })
+      }
+      onDeleteGroup={(thread) =>
+        setThreadActionConfirm({ open: true, type: "delete-group", thread, busy: false })
+      }
+      onHideGroupThread={(thread) =>
+        setThreadActionConfirm({ open: true, type: "hide", thread, busy: false })
+      }
       onGroupEvent={emitGroupSystemEvent}
       onMemberViewProfile={handleMemberViewProfile}
       onMemberDirectMessage={handleMemberDirectMessage}
@@ -3088,47 +3144,61 @@ const GeneralApp = () => {
                       searchOpen={searchOpen}
                       onSearchClose={() => setSearchOpen(false)}
                     />
-                    {activeThread?.canChat === false ? (
-                      <Box sx={{ p: 2, textAlign: "center", bgcolor: "action.disabledBackground", borderTop: 1, borderColor: "divider" }}>
-                        <Typography variant="body2" color="text.secondary">
-                          {activeThread?.hasLeft ? "You left this group" : activeThread?.is_airtime ? "Only group admins can send messages" : "You can't send messages to this group"}
-                        </Typography>
-                      </Box>
-                    ) : (
-                    <ConversationFooter
-                      threadId={activeThread?.id}
-                      thread={activeThread}
-                      externalAttachments={externalAttachmentsForActiveThread}
-                      onExternalAttachmentsHandled={
-                        handleExternalAttachmentsConsumed
-                      }
-                      onSendMessages={handleComposerSend}
-                      replyReference={
-                        replyReference?.threadId === activeThreadId
-                          ? replyReference
-                          : null
-                      }
-                      onCancelReply={clearReplyReference}
-                      editingReference={
-                        editingReference?.threadId === activeThreadId
-                          ? editingReference
-                          : null
-                      }
-                      onCancelEdit={clearEditingReference}
-                      onSubmitEdit={handleComposerEditSubmit}
-                      pollEditingReference={
-                        pollEditingReference?.threadId === activeThreadId
-                          ? pollEditingReference
-                          : null
-                      }
-                      onCancelPollEdit={clearPollEditingReference}
-                      onSubmitPollEdit={handlePollEditSubmit}
-                      onTypingStart={handleTypingStart}
-                      onTypingStop={handleTypingStop}
-                      smartReplies={smartReplies}
-                      onSmartRepliesDismiss={() => setSmartReplies([])}
-                    />
-                    )}
+                    {(() => {
+                      const status = String(activeThread?.membershipStatus || "").toLowerCase();
+                      const planExpired = Boolean(
+                        currentUser?.planExpired ||
+                          currentUser?.subscription_status === "expired" ||
+                          currentUser?.plan_status === "expired" ||
+                          activeThread?.planExpired
+                      );
+                      let reason = null;
+                      if (status === "kicked" || status === "removed") reason = "You were removed from this group";
+                      else if (status === "banned") reason = "You were banned from this group";
+                      else if (activeThread?.hasLeft || status === "left") reason = "You left this group — you can't send messages here";
+                      else if (activeThread?.is_airtime && activeThread?.canChat === false) reason = "Only admins can send messages in this group";
+                      else if (planExpired) reason = "Your plan has expired — renew to continue messaging";
+                      else if (activeThread?.canChat === false) reason = "You can't send messages here";
+
+                      const readOnly = Boolean(reason);
+                      return (
+                        <ConversationFooter
+                          threadId={activeThread?.id}
+                          thread={activeThread}
+                          externalAttachments={externalAttachmentsForActiveThread}
+                          onExternalAttachmentsHandled={
+                            handleExternalAttachmentsConsumed
+                          }
+                          onSendMessages={handleComposerSend}
+                          replyReference={
+                            replyReference?.threadId === activeThreadId
+                              ? replyReference
+                              : null
+                          }
+                          onCancelReply={clearReplyReference}
+                          editingReference={
+                            editingReference?.threadId === activeThreadId
+                              ? editingReference
+                              : null
+                          }
+                          onCancelEdit={clearEditingReference}
+                          onSubmitEdit={handleComposerEditSubmit}
+                          pollEditingReference={
+                            pollEditingReference?.threadId === activeThreadId
+                              ? pollEditingReference
+                              : null
+                          }
+                          onCancelPollEdit={clearPollEditingReference}
+                          onSubmitPollEdit={handlePollEditSubmit}
+                          onTypingStart={handleTypingStart}
+                          onTypingStop={handleTypingStop}
+                          smartReplies={smartReplies}
+                          onSmartRepliesDismiss={() => setSmartReplies([])}
+                          placeholderOverride={reason}
+                          inputReadOnly={readOnly}
+                        />
+                      );
+                    })()}
                     <MessageInfoOverlay
                       key={messageInfoState.version}
                       open={Boolean(
@@ -3187,84 +3257,155 @@ const GeneralApp = () => {
                     />
                   </Box>
                 </>
-              ) : (
-                <Stack
-                  spacing={2}
-                  alignItems="center"
-                  justifyContent="center"
-                  textAlign="center"
-                  sx={{
-                    flexGrow: 1,
-                    m: 1,
-                    borderRadius: 2,
-                    background: buildSurfaceGradient(theme),
-                  }}
-                >
-                  <Stack spacing={1} direction="row" alignItems="center">
-                    <Box
+              ) : (() => {
+                const hasThreads = (threadsForActiveOrg?.length || 0) > 0;
+                const stateKey = threadsLoading
+                  ? "loading"
+                  : hasThreads
+                  ? "idle"
+                  : "welcome";
+                const heading = threadsLoading
+                  ? "Syncing your conversations"
+                  : hasThreads
+                  ? "Pick a conversation"
+                  : `Welcome, ${welcomeName}`;
+                const subtext = threadsLoading
+                  ? "This usually takes a moment. Your chats will appear on the left."
+                  : hasThreads
+                  ? "Select any chat from the list to open it here."
+                  : "Pick someone from the list to start your first conversation.";
+                const isDark = theme.palette.mode === "dark";
+                const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
+                return (
+                  <Stack
+                    alignItems="center"
+                    justifyContent="center"
+                    spacing={3}
+                    sx={{
+                      flexGrow: 1,
+                      m: 1,
+                      px: 4,
+                      borderRadius: 2,
+                      textAlign: "center",
+                      position: "relative",
+                      backgroundColor: isDark
+                        ? theme.palette.background.default
+                        : theme.palette.background.paper,
+                      backgroundImage: `radial-gradient(ellipse 520px 360px at 50% 42%, ${alpha(
+                        theme.palette.primary.main,
+                        isDark ? 0.09 : 0.05
+                      )} 0%, transparent 70%)`,
+                      boxShadow: isDark
+                        ? `inset 0 0 0 1px ${alpha(theme.palette.common.white, 0.04)}`
+                        : `inset 0 0 0 1px ${alpha(theme.palette.primary.main, 0.06)}`,
+                      "@keyframes gapp-stagger-in": {
+                        from: { opacity: 0, transform: "translateY(6px)" },
+                        to: { opacity: 1, transform: "translateY(0)" },
+                      },
+                      "@keyframes gapp-dot-pulse": {
+                        "0%, 100%": { opacity: 0.35, transform: "scale(0.85)" },
+                        "50%": { opacity: 1, transform: "scale(1)" },
+                      },
+                      "@media (prefers-reduced-motion: reduce)": {
+                        "& [data-animate]": {
+                          animation: "none !important",
+                          opacity: "1 !important",
+                          transform: "none !important",
+                        },
+                      },
+                    }}
+                  >
+                    <Stack
+                      direction="row"
+                      alignItems="center"
+                      spacing={1.25}
+                      data-animate
                       sx={{
-                        height: "60px",
-                        minHeight: "60px",
-                        width: "100%",
-                        borderRadius: "8px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor:
-                          theme.palette.mode === "dark"
-                            ? "rgba(255, 255, 255, 0.8)"
-                            : "",
-                        boxShadow:
-                          theme.palette.mode === "dark"
-                            ? "inset 0 0 0 1px rgba(255, 255, 255, 0.12)"
-                            : "",
-                        padding: "4px 8px",
-                        flex: 1,
+                        animation: `gapp-stagger-in 360ms ${easeOut} both`,
+                        animationDelay: "0ms",
                       }}
                     >
-                      <img
-                        src={mascotSrc}
-                        alt={"TeamChatX"}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "contain",
+                      <Box
+                        sx={{
+                          width: 52,
+                          height: 52,
+                          borderRadius: 1.5,
+                          p: 0.75,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isDark
+                            ? "rgba(255, 255, 255, 0.92)"
+                            : "rgba(255, 255, 255, 0.72)",
+                          boxShadow: isDark
+                            ? "inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 1px 2px rgba(0,0,0,0.18)"
+                            : "0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06)",
                         }}
-                      />
-                    </Box>
-                    <Typography
-                      variant="h5"
-                      color={
-                        theme.palette.mode === "light"
-                          ? theme.palette.primary.main
-                          : theme.palette.text.primary
-                      }
-                      fontWeight={800}
+                      >
+                        <img
+                          src={mascotSrc}
+                          alt=""
+                          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                        />
+                      </Box>
+                      <Typography
+                        variant="h6"
+                        fontWeight={700}
+                        color={isDark ? theme.palette.text.primary : theme.palette.primary.main}
+                        sx={{ letterSpacing: "-0.01em" }}
+                      >
+                        TeamChatX
+                      </Typography>
+                    </Stack>
+
+                    <Stack
+                      key={stateKey}
+                      alignItems="center"
+                      spacing={1.25}
+                      data-animate
                       sx={{
-                        textShadow:
-                          theme.palette.mode === "light"
-                            ? "-2px 1px 0px rgba(255, 255, 255, 0.8)"
-                            : "-2px 1px 0px rgba(0, 0, 0, 0.5)",
+                        animation: `gapp-stagger-in 360ms ${easeOut} both`,
+                        animationDelay: "90ms",
                       }}
                     >
-                      TeamChatX
-                    </Typography>
+                      {threadsLoading && (
+                        <Box
+                          aria-hidden
+                          sx={{ display: "flex", gap: 0.75, mb: 0.5 }}
+                        >
+                          {[0, 1, 2].map((i) => (
+                            <Box
+                              key={i}
+                              sx={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                backgroundColor: theme.palette.primary.main,
+                                animation: `gapp-dot-pulse 1.3s ease ${i * 0.16}s infinite`,
+                              }}
+                            />
+                          ))}
+                        </Box>
+                      )}
+                      <Typography
+                        variant="h5"
+                        fontWeight={700}
+                        color="text.primary"
+                        sx={{ letterSpacing: "-0.015em", lineHeight: 1.25 }}
+                      >
+                        {heading}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ maxWidth: 420, lineHeight: 1.55 }}
+                      >
+                        {subtext}
+                      </Typography>
+                    </Stack>
                   </Stack>
-                  <Typography
-                    variant="h5"
-                    sx={{ fontWeight: 700, color: theme.palette.text.primary }}
-                  >
-                    Welcome back, {welcomeName}!
-                  </Typography>
-                  <Typography
-                    variant="caption2"
-                    color="text.secondary"
-                    sx={{ maxWidth: 500 }}
-                  >
-                    Select a user from the list to open the conversation view.
-                  </Typography>
-                </Stack>
-              )}
+                );
+              })()}
             </Box>
           </Box>
 
@@ -3382,6 +3523,71 @@ const GeneralApp = () => {
           </Button>
         </DialogActions>
       </Dialog>
+      {(() => {
+        const { open, type, thread, busy } = threadActionConfirm;
+        const copy =
+          type === "leave"
+            ? {
+                title: "Exit this group?",
+                body: `You'll stop receiving new messages from "${thread?.label || thread?.username || "this group"}". Past conversations will stay visible to you.`,
+                confirm: "Exit Group",
+                confirmColor: "warning",
+              }
+            : type === "delete-group"
+            ? {
+                title: "Delete this group?",
+                body: `"${thread?.label || thread?.username || "This group"}" will be permanently deleted for everyone. This cannot be undone.`,
+                confirm: "Delete Group",
+                confirmColor: "error",
+              }
+            : type === "hide"
+            ? {
+                title: "Delete this chat?",
+                body: `"${thread?.label || thread?.username || "This chat"}" will be removed from your list. Only you are affected — other members are not notified.`,
+                confirm: "Delete Chat",
+                confirmColor: "error",
+              }
+            : null;
+        if (!copy) return null;
+        const runAction = async () => {
+          if (!thread) return;
+          setThreadActionConfirm((prev) => ({ ...prev, busy: true }));
+          try {
+            if (type === "leave") await handleLeaveGroup(thread);
+            else if (type === "delete-group") await handleDeleteGroup(thread);
+            else if (type === "hide") await handleHideGroupThread(thread);
+          } finally {
+            closeThreadActionConfirm();
+          }
+        };
+        return (
+          <Dialog
+            open={open}
+            onClose={busy ? undefined : closeThreadActionConfirm}
+            maxWidth="xs"
+            fullWidth
+          >
+            <DialogTitle sx={{ fontWeight: 700 }}>{copy.title}</DialogTitle>
+            <DialogContent>
+              <DialogContentText>{copy.body}</DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={closeThreadActionConfirm} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                onClick={runAction}
+                color={copy.confirmColor}
+                variant="contained"
+                disabled={busy}
+                autoFocus
+              >
+                {busy ? "Please wait…" : copy.confirm}
+              </Button>
+            </DialogActions>
+          </Dialog>
+        );
+      })()}
       <LiveAssistant />
     </>
   );

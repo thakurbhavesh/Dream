@@ -2,10 +2,12 @@ import {
   Avatar,
   Box,
   CircularProgress,
+  Divider,
   Stack,
   Typography,
   useTheme,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import React, {
   useCallback,
   useEffect,
@@ -62,43 +64,180 @@ const isElementMostlyVisible = (element, container) => {
   return visibilityRatio >= REPLY_VISIBILITY_RATIO;
 };
 
-const EmptyThreadState = React.memo(({ wallpaperSource, label }) => {
+const formatCreationDayLabel = (value) => {
+  if (!value) return "Today";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "Today";
+  const today = new Date();
+  const isSameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  if (isSameDay) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const isYesterday =
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate();
+  if (isYesterday) return "Yesterday";
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+};
+
+const EmptyThreadState = React.memo(({ wallpaperSource, label, thread, currentUserId }) => {
   const theme = useTheme();
+  const status = String(thread?.membershipStatus || "").toLowerCase();
+  const isInactive =
+    thread?.hasLeft || ["left", "kicked", "removed", "banned"].includes(status);
+  const threadKind = String(
+    thread?.type || thread?.threadType || thread?.conversationType || ""
+  ).toLowerCase();
+  const isGroupThread =
+    threadKind === "group" ||
+    thread?.isGroup === true ||
+    Array.isArray(thread?.members) ||
+    Array.isArray(thread?.participants);
+
+  const inactiveCopy =
+    status === "kicked" || status === "removed"
+      ? {
+          heading: "No conversation to show",
+          body: "You were removed from this group. Past messages are no longer available to you.",
+        }
+      : status === "banned"
+      ? {
+          heading: "No conversation to show",
+          body: "You were banned from this group.",
+        }
+      : {
+          heading: "No messages to show",
+          body: "You left this group. Past conversations aren't available to you here.",
+        };
+
+  const containerSx = {
+    position: "relative",
+    p: 2,
+    background: wallpaperSource
+      ? theme.palette.mode === "light"
+        ? "rgba(255,255,255,0.6)"
+        : "transparent"
+      : theme.palette.background.paper,
+    backdropFilter: wallpaperSource ? "blur(80px)" : undefined,
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+  };
+
+  // Active members in an empty group: show the group-creation marker so the
+  // view feels alive — same layout as the populated timeline (date divider +
+  // system-event pill). Matches WhatsApp's empty-group experience.
+  if (!isInactive && isGroupThread) {
+    const creatorId = thread?.createdBy?.id ?? thread?.createdBy?.user_id;
+    const creatorName = thread?.createdBy?.name || "Someone";
+    const isSelfCreator =
+      currentUserId != null &&
+      creatorId != null &&
+      String(creatorId) === String(currentUserId);
+    const creationLabel = isSelfCreator
+      ? "You created the group"
+      : `${creatorName} created the group`;
+    const dayLabel = formatCreationDayLabel(thread?.createdAt || thread?.created_at);
+
+    return (
+      <Box
+        sx={{
+          position: "relative",
+          height: "100%",
+          background: "transparent",
+          display: "flex",
+          flexDirection: "column",
+          gap: 1.25,
+          pt: 2.5,
+          pb: 2,
+          px: 2,
+        }}
+      >
+        <Divider
+          sx={{
+            "&::before, &::after": { borderColor: theme.palette.divider },
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{
+              px: 2,
+              py: 0.5,
+              borderRadius: 999,
+              bgcolor: theme.palette.common.white,
+              color: theme.palette.common.black,
+            }}
+          >
+            {dayLabel}
+          </Typography>
+        </Divider>
+        <Box sx={{ width: "100%", display: "flex", justifyContent: "center" }}>
+          <Typography
+            variant="caption"
+            sx={{
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 999,
+              backgroundColor:
+                theme.palette.mode === "light"
+                  ? alpha(theme.palette.text.primary, 0.6)
+                  : alpha(theme.palette.text.primary, 0.12),
+              color: theme.palette.common.white,
+              textAlign: "center",
+            }}
+          >
+            {creationLabel}
+          </Typography>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
-    <Box
-      sx={{
-        position: "relative",
-        p: 2,
-        background: wallpaperSource
-          ? theme.palette.mode === "light"
-            ? "rgba(255,255,255,0.6)"
-            : "transparent"
-          : theme.palette.background.paper,
-        backdropFilter: wallpaperSource ? "blur(80px)" : undefined,
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        gap: 3,
-      }}
-    >
+    <Box sx={containerSx}>
       <Stack
         spacing={1}
         alignItems="center"
         justifyContent="center"
-        sx={{ flexGrow: 1, color: "text.secondary" }}
+        sx={{ flexGrow: 1, color: "text.secondary", textAlign: "center", px: 3 }}
       >
-        <img src="/illustrations/say-hello-illustration.png" />
-        <Typography
-          variant="h5"
-          sx={{ fontWeight: 600, color: theme.palette.text.primary }}
-        >
-          Start the conversation
-        </Typography>
-        <Typography variant="body2">
-          Send a quick hello to{" "}
-          <b style={{ color: theme.palette.primary.main }}>{label}</b> to get
-          things moving.
-        </Typography>
+        {isInactive ? (
+          <>
+            <Typography
+              variant="h6"
+              sx={{ fontWeight: 600, color: theme.palette.text.primary }}
+            >
+              {inactiveCopy.heading}
+            </Typography>
+            <Typography variant="body2" sx={{ maxWidth: 420 }}>
+              {inactiveCopy.body}
+            </Typography>
+          </>
+        ) : (
+          <>
+            <img src="/illustrations/say-hello-illustration.png" alt="" />
+            <Typography
+              variant="h5"
+              sx={{ fontWeight: 600, color: theme.palette.text.primary }}
+            >
+              Start the conversation
+            </Typography>
+            <Typography variant="body2">
+              Send a quick hello to{" "}
+              <b style={{ color: theme.palette.primary.main }}>{label}</b> to
+              get things moving.
+            </Typography>
+          </>
+        )}
       </Stack>
     </Box>
   );
@@ -210,7 +349,12 @@ const EmptyThreadState = React.memo(({ wallpaperSource, label }) => {
       [openMenu]
     );
 
-    const isEmpty = totalMessages === 0 && !loading && !suppressEmptyState;
+    // Use the `messages` prop directly (not the internally-synced
+    // `totalMessages`), because `useThreadMessagesState` syncs its internal
+    // `orderedMessages` via `useEffect` — lagging one render cycle after
+    // `threadId`/`messages` change. Reading the prop prevents a brief flash
+    // of the empty state between "loading ends" and "messages render".
+    const isEmpty = messages.length === 0 && !loading && !suppressEmptyState;
 
     useEffect(() => {
       const fingerprint = showGroupTyping
@@ -418,6 +562,8 @@ const EmptyThreadState = React.memo(({ wallpaperSource, label }) => {
           <EmptyThreadState
             wallpaperSource={wallpaperSource}
             label={thread?.label ?? "your teammate"}
+            thread={thread}
+            currentUserId={currentUserId}
           />
         ) : (
           <Box sx={{ position: "relative", height: "100%" }}>

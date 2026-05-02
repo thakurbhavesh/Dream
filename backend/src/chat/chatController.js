@@ -161,6 +161,7 @@ const getMessages = async (req, res, next) => {
     const before = req.query.before || null; // ISO timestamp for pagination
 
     let messages;
+    let rawFetchedCount = 0;
 
     if (threadId.startsWith('dm-')) {
       const otherUserId = Number(threadId.replace('dm-', ''));
@@ -182,22 +183,24 @@ const getMessages = async (req, res, next) => {
         location: readerDevice.city && readerDevice.country ? `${readerDevice.city}, ${readerDevice.country}` : readerDevice.country || readerDevice.city || null,
         ip: readerDevice.ip_address || '',
       };
+      rawFetchedCount = Number(rows.rawRowCount ?? rows.length);
       messages = rows.map((row) => normalizeDMMessage(row, userId, readerGeo));
     } else if (threadId.startsWith('group-')) {
       const groupId = Number(threadId.replace('group-', ''));
       if (!groupId) { const e = new Error('Invalid thread id'); e.status = 400; throw e; }
 
-      // Check if user has left the group — if so, only show messages up to leave time
+      // Check if user has left or been removed — if so, only show messages up to that time
       const memberResult = await db.query(
         `SELECT status, updated_at FROM group_members
          WHERE group_id = $1 AND user_id = $2 AND organization_id = $3`,
         [groupId, userId, orgId]
       );
       const member = memberResult.rows[0];
-      const leftAt = member?.status === 'left' ? member.updated_at : null;
+      const leftAt = ['left', 'kicked'].includes(member?.status) ? member.updated_at : null;
 
       const rows = await model.getGroupMessages(orgId, groupId, { limit, before, userId, leftAt });
       await signProfileFieldsArray(rows);
+      rawFetchedCount = Number(rows.rawRowCount ?? rows.length);
       messages = rows.map((row) => normalizeGroupMessage(row, userId));
     } else {
       const e = new Error('Unknown thread type'); e.status = 400; throw e;
@@ -206,8 +209,10 @@ const getMessages = async (req, res, next) => {
     // Sign S3 file URLs in file messages (fileKey → fresh presigned URL)
     await signMessageFileUrlsArray(messages);
 
-    // hasMore = true if we got exactly `limit` messages (likely more exist)
-    const hasMore = messages.length >= limit;
+    // hasMore = true if SQL returned a full page (raw count hit the limit);
+    // use raw count instead of filtered count so recalled/deleted messages
+    // don't incorrectly signal "end of history".
+    const hasMore = rawFetchedCount >= limit;
 
     return success(res, { messages, threadId, hasMore }, 'Messages retrieved');
   } catch (err) {
@@ -947,6 +952,66 @@ const leaveGroup = async (req, res, next) => {
   }
 };
 
+// ─── POST /chat/groups/:groupId/hide ──────────────────────────────────────────
+// Soft-hide a group thread from this user's chat list. Does NOT leave/delete
+// the group; only flips `hidden_from_list = TRUE` on the caller's membership
+// row so the thread list query filters it out. Idempotent.
+const hideGroupThread = async (req, res, next) => {
+  try {
+    const { userId, orgId } = resolveUser(req);
+    const groupId = Number(req.params.groupId);
+    if (!groupId) {
+      const e = new Error('Invalid group ID'); e.status = 400; throw e;
+    }
+
+    const { rows } = await db.query(
+      `UPDATE group_members
+         SET hidden_from_list = TRUE, updated_at = NOW()
+         WHERE group_id = $1 AND user_id = $2 AND organization_id = $3
+         RETURNING group_member_id, status`,
+      [groupId, userId, orgId]
+    );
+    if (!rows.length) {
+      const e = new Error('Not a member of this group'); e.status = 404; throw e;
+    }
+
+    return success(
+      res,
+      { groupId, hidden: true, membershipStatus: rows[0].status },
+      'Group thread hidden'
+    );
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// ─── POST /chat/groups/:groupId/unhide ────────────────────────────────────────
+// Inverse of hideGroupThread. Useful for "show deleted chats" flows.
+const unhideGroupThread = async (req, res, next) => {
+  try {
+    const { userId, orgId } = resolveUser(req);
+    const groupId = Number(req.params.groupId);
+    if (!groupId) {
+      const e = new Error('Invalid group ID'); e.status = 400; throw e;
+    }
+
+    const { rows } = await db.query(
+      `UPDATE group_members
+         SET hidden_from_list = FALSE, updated_at = NOW()
+         WHERE group_id = $1 AND user_id = $2 AND organization_id = $3
+         RETURNING group_member_id`,
+      [groupId, userId, orgId]
+    );
+    if (!rows.length) {
+      const e = new Error('Not a member of this group'); e.status = 404; throw e;
+    }
+
+    return success(res, { groupId, hidden: false }, 'Group thread restored');
+  } catch (err) {
+    return next(err);
+  }
+};
+
 // ─── GET /chat/groups/:groupId/timeline ───────────────────────────────────────
 const getGroupTimeline = async (req, res, next) => {
   try {
@@ -1193,6 +1258,8 @@ module.exports = {
   smartSearch,
   createGroupWithMembers,
   leaveGroup,
+  hideGroupThread,
+  unhideGroupThread,
   getGroupTimeline,
   getGroupInfo,
   getExchangeInfo,

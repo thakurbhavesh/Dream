@@ -363,6 +363,7 @@ const Login = () => {
       role: resolvedRole,
       roleKey: resolvedRoleKey,
       lastLoginAt: resolvedLastLoginAt,
+      planExpired: Boolean(user?.plan_expired),
       profile: {
         mobile: resolvedMobile,
         avatar: resolvedAvatar,

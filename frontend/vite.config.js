@@ -15,6 +15,49 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: 'all',  // Allow tunnel domains
+    proxy: {
+      '/api-proxy': {
+        target: 'https://dream-s3pi.onrender.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (p) => p.replace(/^\/api-proxy/, ''),
+        cookieDomainRewrite: { '*': '' },
+        cookiePathRewrite: { '*': '/' },
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+          proxy.on('proxyRes', (proxyRes) => {
+            const sc = proxyRes.headers['set-cookie'];
+            if (Array.isArray(sc)) {
+              proxyRes.headers['set-cookie'] = sc.map((c) =>
+                c
+                  .replace(/;\s*Secure/gi, '')
+                  .replace(/;\s*SameSite=None/gi, '; SameSite=Lax')
+                  .replace(/;\s*Domain=[^;]+/gi, '')
+              );
+            }
+          });
+        },
+      },
+      '/socket.io': {
+        target: 'https://dream-s3pi.onrender.com',
+        changeOrigin: true,
+        secure: true,
+        ws: true,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+          proxy.on('proxyReqWs', (proxyReq) => {
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          });
+        },
+      },
+    },
   },
   build: {
     chunkSizeWarningLimit: 900,

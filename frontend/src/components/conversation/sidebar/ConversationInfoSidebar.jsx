@@ -183,6 +183,7 @@ const ConversationInfoSidebar = ({
   messages,
   onLeaveGroup,
   onDeleteGroup,
+  onHideGroupThread,
   onGroupEvent,
   onMemberViewProfile,
   onMemberDirectMessage,
@@ -1673,17 +1674,58 @@ const ConversationInfoSidebar = ({
                             )}
                           </Box>
 
-                          {/* ─── Sticky Bottom: Exit + Delete ─── */}
-                          <Stack spacing={1} sx={{ flexShrink: 0, p: 1.5, borderTop: 1, borderColor: "divider" }}>
-                            <Button variant="outlined" size="small" fullWidth onClick={() => onLeaveGroup?.(thread)} sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}>
-                              Exit Group
-                            </Button>
-                            {isAdmin && (
-                              <Button variant="contained" color="error" size="small" fullWidth onClick={() => onDeleteGroup?.(thread)} sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}>
-                                Delete Group
-                              </Button>
-                            )}
-                          </Stack>
+                          {/* ─── Sticky Bottom: contextual actions ─── */}
+                          {(() => {
+                            const membershipStatus = String(thread?.membershipStatus || "").toLowerCase();
+                            const isInactiveMember =
+                              Boolean(thread?.hasLeft) ||
+                              ["left", "kicked", "removed", "banned"].includes(membershipStatus);
+
+                            if (isInactiveMember) {
+                              // User is no longer an active member — only local-side "Delete Chat"
+                              return (
+                                <Stack spacing={1} sx={{ flexShrink: 0, p: 1.5, borderTop: 1, borderColor: "divider" }}>
+                                  <Button
+                                    variant="contained"
+                                    color="error"
+                                    size="small"
+                                    fullWidth
+                                    onClick={() => onHideGroupThread?.(thread)}
+                                    sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+                                  >
+                                    Delete Chat
+                                  </Button>
+                                </Stack>
+                              );
+                            }
+
+                            // Active member — Exit always; Delete Group only for admins
+                            return (
+                              <Stack spacing={1} sx={{ flexShrink: 0, p: 1.5, borderTop: 1, borderColor: "divider" }}>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  fullWidth
+                                  onClick={() => onLeaveGroup?.(thread)}
+                                  sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+                                >
+                                  Exit Group
+                                </Button>
+                                {isAdmin && (
+                                  <Button
+                                    variant="contained"
+                                    color="error"
+                                    size="small"
+                                    fullWidth
+                                    onClick={() => onDeleteGroup?.(thread)}
+                                    sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+                                  >
+                                    Delete Group
+                                  </Button>
+                                )}
+                              </Stack>
+                            );
+                          })()}
                         </Stack>
                       ) : null}
 

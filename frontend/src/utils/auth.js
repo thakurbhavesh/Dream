@@ -190,6 +190,7 @@ export const authStore = {
     roleKey = "",
     profile = null,
     lastLoginAt = "",
+    planExpired = false,
   } = {}) => {
     if (typeof window === "undefined") return;
     const normalizedToken = String(token || "").trim();
@@ -227,6 +228,7 @@ export const authStore = {
       role: normalizedRole,
       roleKey: normalizedRoleKey,
       ...(profile && typeof profile === "object" ? profile : {}),
+      planExpired: Boolean(planExpired),
       lastLoginAt,
     });
     emitChange();

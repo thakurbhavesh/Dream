@@ -453,34 +453,47 @@ const ChatList = ({
                   })}
                 </Box>
               </Box>
-            ) : hasUnreadFilterActive ? null : (
-              <Stack
-                alignItems="center"
-                justifyContent="center"
-                sx={{
-                  height: "70vh",
-                  color: theme.palette.text.secondary,
-                  textAlign: "center",
-                }}
-              >
-                <Box
+            ) : hasUnreadFilterActive ? null : (() => {
+              const isSearching = deferredSearch.trim().length > 0;
+              const emptyTitle = isSearching
+                ? (showGroupsOnly ? "No Group found" : "No User found")
+                : (showGroupsOnly ? "No groups yet" : "No conversations yet");
+              const emptyHint = isSearching
+                ? "Try a different search term."
+                : (showGroupsOnly
+                  ? "Create a group to start collaborating."
+                  : "Start a new chat to see it appear here.");
+              return (
+                <Stack
+                  alignItems="center"
+                  justifyContent="center"
+                  spacing={0.5}
                   sx={{
-                    width: 250,
-                    height: 250,
-                    borderRadius: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
+                    height: "70vh",
+                    color: theme.palette.text.secondary,
+                    textAlign: "center",
+                    px: 3,
                   }}
                 >
-                  <img style={{ flex: 1 }} src="/illustrations/no-user-found.png" />
-                </Box>
-                <Typography variant="subtitle1">{showGroupsOnly ? "No Group found" : "No User found"}</Typography>
-                <Typography variant="caption" sx={{ opacity: 0.7 }}>
-                  Try a different search term.
-                </Typography>
-              </Stack>
-            )}
+                  <Box
+                    sx={{
+                      width: 250,
+                      height: 250,
+                      borderRadius: 1,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <img style={{ flex: 1 }} src="/illustrations/no-user-found.png" alt="" />
+                  </Box>
+                  <Typography variant="subtitle1">{emptyTitle}</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.7 }}>
+                    {emptyHint}
+                  </Typography>
+                </Stack>
+              );
+            })()}
           </Box>
         </CustomScrollbars>
 

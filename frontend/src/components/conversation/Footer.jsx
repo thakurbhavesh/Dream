@@ -357,6 +357,8 @@ const ConversationFooter = ({
   onTypingStop,
   smartReplies = [],
   onSmartRepliesDismiss,
+  placeholderOverride = null,
+  inputReadOnly = false,
 }) => {
   const theme = useTheme();
   const [localSmartReplies, setLocalSmartReplies] = useState([]);
@@ -536,6 +538,7 @@ const ConversationFooter = ({
   const getActiveDraftKey = useCallback(() => currentDraftKeyRef.current, []);
 
   const focusComposerEditor = useCallback(() => {
+    if (inputReadOnly) return;
     if (typeof window === "undefined" || typeof document === "undefined") {
       return;
     }
@@ -549,7 +552,7 @@ const ConversationFooter = ({
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
-  }, []);
+  }, [inputReadOnly]);
 
   const {
     snackbar,
@@ -2549,13 +2552,14 @@ const ConversationFooter = ({
           <Box sx={{ flex: 1, position: "relative" }}>
             <Box
               ref={editorRef}
-              contentEditable
+              contentEditable={!inputReadOnly}
               suppressContentEditableWarning
-              onInput={handleEditorInput}
-              onKeyDown={handleEditorKeyDown}
-              onKeyUp={handleEditorCaretChange}
-              onMouseUp={handleEditorCaretChange}
-              onPaste={handlePaste}
+              tabIndex={inputReadOnly ? -1 : 0}
+              onInput={inputReadOnly ? undefined : handleEditorInput}
+              onKeyDown={inputReadOnly ? (e) => e.preventDefault() : handleEditorKeyDown}
+              onKeyUp={inputReadOnly ? undefined : handleEditorCaretChange}
+              onMouseUp={inputReadOnly ? undefined : handleEditorCaretChange}
+              onPaste={inputReadOnly ? (e) => e.preventDefault() : handlePaste}
               sx={{
                 width: "100%",
                 maxHeight: 250,
@@ -2584,12 +2588,17 @@ const ConversationFooter = ({
                   position: "absolute",
                   top: 8,
                   left: 12,
+                  right: 12,
                   color: theme.palette.text.secondary,
                   opacity: theme.palette.mode === "dark" ? 0.7 : 0.8,
                   pointerEvents: "none",
+                  fontStyle: placeholderOverride ? "italic" : "normal",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                Type your message..
+                {placeholderOverride || "Type your message.."}
               </Box>
             ) : null}
           </Box>
@@ -2597,18 +2606,25 @@ const ConversationFooter = ({
           <Stack direction="row" spacing={0} alignItems="flex-start">
             <IconButton
               disableRipple
+              disabled={inputReadOnly}
               sx={{
                 alignSelf: "flex-start",
                 width: 45,
                 height: 45,
-                borderRadius: "6px 0 0 6px",
+                borderRadius: "6px",
                 backgroundColor: "primary.main",
                 color: "#fff",
                 "&:hover": {
                   backgroundColor: "primary.dark",
                 },
+                "&.Mui-disabled": {
+                  backgroundColor: "primary.main",
+                  color: "#fff",
+                  opacity: 0.5,
+                  cursor: "not-allowed",
+                },
               }}
-              onClick={handleSendMessage}
+              onClick={inputReadOnly ? undefined : handleSendMessage}
             >
               <PiPaperPlaneRight size={20} />
             </IconButton>
@@ -2621,7 +2637,16 @@ const ConversationFooter = ({
           direction="row"
           alignItems="center"
           justifyContent="space-between"
-          sx={{ px: 2, py: 1 }}
+          sx={{
+            px: 2,
+            py: 1,
+            ...(inputReadOnly && {
+              pointerEvents: "none",
+              opacity: 0.5,
+              userSelect: "none",
+            }),
+          }}
+          aria-disabled={inputReadOnly || undefined}
         >
           <Stack direction="row" alignItems="center" spacing={1.25}>
             <Tooltip title="Attach file">

@@ -7,7 +7,20 @@ const CustomScrollbars = forwardRef(
     const theme = useTheme();
     const scrollbarRef = useRef(null);
     useImperativeHandle(ref, () => ({
-      scrollToTop: () => scrollbarRef.current?.scrollToTop(),
+      // Accepts optional pixel position. Without an argument this behaves like
+      // the library's scrollToTop (goes to 0). With a number, it forwards to
+      // scrollTop(n) so callers can anchor the scroll at an exact position —
+      // this is what `useStickyScroll` relies on to preserve the user's
+      // reading position when older messages are prepended.
+      scrollToTop: (top) => {
+        const sb = scrollbarRef.current;
+        if (!sb) return;
+        if (typeof top === "number" && Number.isFinite(top)) {
+          sb.scrollTop(top);
+        } else {
+          sb.scrollToTop();
+        }
+      },
       scrollToBottom: () => scrollbarRef.current?.scrollToBottom(),
       getScrollTop: () => scrollbarRef.current?.getScrollTop(),
       getScrollHeight: () => scrollbarRef.current?.getScrollHeight(),

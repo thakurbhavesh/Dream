@@ -176,8 +176,9 @@ const getGroupThreads = async (orgId, userId) => {
     LEFT JOIN users creator ON creator.user_id = g.created_by
     WHERE gm.user_id = $2
       AND gm.organization_id = $1
-      AND gm.status IN ('active', 'left')
+      AND gm.status IN ('active', 'left', 'kicked')
       AND g.status = 'active'
+      AND COALESCE(gm.hidden_from_list, FALSE) = FALSE
     ORDER BY lm.created_at DESC NULLS LAST
   `;
   const { rows } = await db.query(query, [orgId, userId]);
@@ -380,7 +381,11 @@ const getDMMessages = async (orgId, userId, otherUserId, { limit = 50, before } 
     return !meta.recalled && !r._recalled && !r._deletedByUser;
   });
 
-  return filtered.reverse(); // return chronological order
+  const result = filtered.reverse(); // chronological order
+  // Expose raw (pre-filter) fetched count so callers can compute pagination
+  // correctly even when some rows are hidden (recalled/deleted-by-user).
+  result.rawRowCount = rows.length;
+  return result;
 };
 
 /**
@@ -490,7 +495,10 @@ const getGroupMessages = async (orgId, groupId, { limit = 50, before, userId, le
     return !meta.recalled && !r._recalled && !r._deletedByUser;
   });
 
-  return filtered.reverse();
+  const result = filtered.reverse();
+  // Expose raw (pre-filter) fetched count for accurate pagination.
+  result.rawRowCount = rows.length;
+  return result;
 };
 
 // ─── Send Message ──────────────────────────────────────────────────────────────

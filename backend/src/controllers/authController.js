@@ -2019,6 +2019,23 @@ const login = async (req, res, next) => {
       refreshToken: refresh_token,
     });
 
+    // Derive plan-expired flag for the user's organization (best-effort; non-blocking)
+    let plan_expired = false;
+    if (user.organization_id) {
+      try {
+        const subscription = await billingModel.findLatestSubscriptionByOrganization(user.organization_id);
+        if (subscription) {
+          const subStatus = String(subscription.status || '').toLowerCase();
+          const endDate = subscription.end_date ? new Date(subscription.end_date) : null;
+          plan_expired =
+            subStatus === 'expired' ||
+            subStatus === 'cancelled' ||
+            subStatus === 'canceled' ||
+            (endDate && !Number.isNaN(endDate.getTime()) && endDate.getTime() < Date.now());
+        }
+      } catch (_) { /* ignore — default to false */ }
+    }
+
     return success(
       res,
       {
@@ -2039,6 +2056,7 @@ const login = async (req, res, next) => {
           role_id: user.role_id || null,
           role_key: user.role_key || null,
           last_login_at: lastLoginAt,
+          plan_expired,
         },
         otp_skipped_for_trusted_device: Boolean(canSkipOtp),
       },

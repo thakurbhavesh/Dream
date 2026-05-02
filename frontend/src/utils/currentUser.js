@@ -58,6 +58,13 @@ const normalizeCurrentUser = (raw = {}) => {
     ""
   );
 
+  const planExpired = Boolean(
+    raw.planExpired ||
+      raw.plan_expired ||
+      String(raw.subscription_status || "").toLowerCase() === "expired" ||
+      String(raw.plan_status || "").toLowerCase() === "expired"
+  );
+
   return {
     id: sanitizeString(raw.id, ""),
     name,
@@ -70,6 +77,7 @@ const normalizeCurrentUser = (raw = {}) => {
     roleKey,
     image: sanitizeString(raw.image || raw.avatar || "", ""),
     remainingCredits: Number(raw.remainingCredits ?? 0) || 0,
+    planExpired,
   };
 };
 

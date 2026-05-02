@@ -1,4 +1,4 @@
-import { alpha, Avatar, Box, Chip, Stack, Typography, useTheme } from "@mui/material";
+import { alpha, Avatar, Box, Stack, Typography, useTheme } from "@mui/material";
 import React, { useCallback, useMemo, useState } from "react";
 import { BeatLoader } from "react-spinners";
 import {
@@ -14,7 +14,26 @@ import {
   extractFilesFromDataTransfer,
   isFileDropEvent,
 } from "../../utils/fileDropUtils.js";
-import { HiOutlineUserGroup } from "react-icons/hi2";
+import {
+  HiOutlineUserGroup,
+  HiOutlineArrowRightOnRectangle,
+  HiOutlineUserMinus,
+  HiOutlineNoSymbol,
+} from "react-icons/hi2";
+
+const INACTIVE_STATUS_META = {
+  left:   { text: "You left this group",             Icon: HiOutlineArrowRightOnRectangle },
+  kicked: { text: "You were removed from this group", Icon: HiOutlineUserMinus },
+  removed:{ text: "You were removed from this group", Icon: HiOutlineUserMinus },
+  banned: { text: "You were banned from this group",  Icon: HiOutlineNoSymbol },
+};
+
+const resolveInactiveMeta = (thread) => {
+  const raw = String(thread?.membershipStatus || "").toLowerCase();
+  if (INACTIVE_STATUS_META[raw]) return INACTIVE_STATUS_META[raw];
+  if (thread?.hasLeft) return INACTIVE_STATUS_META.left;
+  return null;
+};
 import { useTypingIndicator } from "../../contexts/TypingIndicatorContext.jsx";
 import {
   formatSystemEventLabel,
@@ -220,7 +239,9 @@ const GroupElement = ({
             ? "0px 1px 1px rgba(0, 0, 0, 0.08)"
             : "0px 1px 1px rgba(255, 255, 255, 0.08)",
         p: 0.4,
-        transition: "background-color 0.1s ease, box-shadow 0.1s ease",
+        opacity: resolveInactiveMeta(thread) ? 0.6 : 1,
+        transition: "background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+        "&:hover": resolveInactiveMeta(thread) ? { opacity: 0.85 } : undefined,
         pointerEvents: disabled ? "none" : "auto",
         userSelect: "none",
         "&:hover .avatar-hover": {
@@ -291,14 +312,6 @@ const GroupElement = ({
             }}
           >
             <HiOutlineUserGroup size={16} /> {label}
-            {thread?.hasLeft && (
-              <Chip
-                label="Left"
-                size="small"
-                variant="outlined"
-                sx={{ ml: 0.5, height: 18, fontSize: "0.65rem", fontWeight: 600 }}
-              />
-            )}
           </Typography>
           <Typography
             variant="caption"
@@ -310,18 +323,40 @@ const GroupElement = ({
               textOverflow: "ellipsis",
             }}
           >
-            {isTyping && typingSummary ? (
-              <Stack direction="row" spacing={0.75} alignItems="center">
-                <BeatLoader
-                  size={6}
-                  speedMultiplier={0.9}
-                  color={typingLoaderColor}
-                />
-                <Box component="span" fontStyle={"italic"}>{typingSummary}</Box>
-              </Stack>
-            ) : (
-              renderedPreview
-            )}
+            {(() => {
+              const inactiveMeta = resolveInactiveMeta(thread);
+              if (inactiveMeta) {
+                const { Icon, text } = inactiveMeta;
+                return (
+                  <Stack
+                    direction="row"
+                    spacing={0.5}
+                    alignItems="center"
+                    component="span"
+                    sx={{
+                      fontStyle: "italic",
+                      color: theme.palette.text.disabled,
+                    }}
+                  >
+                    <Icon size={13} aria-hidden />
+                    <Box component="span">{text}</Box>
+                  </Stack>
+                );
+              }
+              if (isTyping && typingSummary) {
+                return (
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <BeatLoader
+                      size={6}
+                      speedMultiplier={0.9}
+                      color={typingLoaderColor}
+                    />
+                    <Box component="span" fontStyle={"italic"}>{typingSummary}</Box>
+                  </Stack>
+                );
+              }
+              return renderedPreview;
+            })()}
           </Typography>
         </Box>
 

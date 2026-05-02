@@ -77,6 +77,29 @@ export const leaveGroup = async (groupId) => {
 };
 
 /**
+ * Soft-hide a group from the caller's chat list (local-to-user action).
+ * Does NOT leave or delete the group; only sets the user-scoped flag so the
+ * thread stops appearing in their list across sessions and devices.
+ */
+export const hideGroupThread = async (groupId) => {
+  const { response, payload } = await fetchWithAuth(
+    `${BASE}/groups/${groupId}/hide`,
+    { method: "POST" }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Failed to hide chat");
+  return payload?.data ?? {};
+};
+
+export const unhideGroupThread = async (groupId) => {
+  const { response, payload } = await fetchWithAuth(
+    `${BASE}/groups/${groupId}/unhide`,
+    { method: "POST" }
+  );
+  if (!response.ok) throw new Error(payload?.message ?? "Failed to restore chat");
+  return payload?.data ?? {};
+};
+
+/**
  * Get group timeline.
  */
 export const fetchGroupTimeline = async (groupId, { limit = 50, offset = 0 } = {}) => {

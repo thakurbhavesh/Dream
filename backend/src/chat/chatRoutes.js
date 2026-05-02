@@ -30,6 +30,8 @@ router.post('/groups/create',       auth, controller.createGroupWithMembers);
 
 // Group management
 router.post('/groups/:groupId/leave',    auth, controller.leaveGroup);
+router.post('/groups/:groupId/hide',      auth, controller.hideGroupThread);
+router.post('/groups/:groupId/unhide',    auth, controller.unhideGroupThread);
 router.get('/groups/:groupId/timeline',  auth, controller.getGroupTimeline);
 router.get('/groups/:groupId/info',      auth, controller.getGroupInfo);
 

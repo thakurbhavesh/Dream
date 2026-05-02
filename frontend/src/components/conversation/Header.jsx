@@ -127,9 +127,15 @@ const ConversationHeader = ({
   }, [thread]);
 
   const groupMemberCount = useMemo(() => {
-    if (Array.isArray(thread?.members)) return thread.members.length;
-    if (Array.isArray(thread?.participants)) return thread.participants.length;
-    return 0;
+    const fromArray = Array.isArray(thread?.members)
+      ? thread.members.length
+      : Array.isArray(thread?.participants)
+      ? thread.participants.length
+      : 0;
+    const fromCount = Number.isFinite(Number(thread?.memberCount))
+      ? Number(thread.memberCount)
+      : 0;
+    return Math.max(fromArray, fromCount);
   }, [thread]);
 
   const initials = useMemo(() => {
