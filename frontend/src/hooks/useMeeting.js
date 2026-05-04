@@ -38,6 +38,10 @@ const useMeeting = () => {
   const [pinnedSocketId, setPinnedSocketId] = useState(null);
   const [duration, setDuration] = useState(0);
   const [viewMode, setViewMode] = useState("gallery");
+  // Set when the host (or anyone with permission) emits meeting:ended.
+  // The room screen reads this to show "Meeting has ended" instead of
+  // auto-dismissing silently. Cleared on the next joinMeeting call.
+  const [endedByHost, setEndedByHost] = useState(false);
 
   const peersRef = useRef(new Map());
   const remoteStreamsRef = useRef(new Map());
@@ -205,6 +209,7 @@ const useMeeting = () => {
   // ─── Join meeting (no media) ──────────────────────────────────────
   const joinMeeting = useCallback(async ({ meetingRoomId: roomId, meetingData, userName }) => {
     if (statusRef.current !== "idle") return;
+    setEndedByHost(false);
     setStatus("joining");
     setMeetingRoomId(roomId);
     setMeetingInfo(meetingData || null);
@@ -562,10 +567,11 @@ const useMeeting = () => {
       setScreenStream(null);
       setIsScreenSharing(false);
       if (statusRef.current !== "idle") {
+        setEndedByHost(true);
         cleanupAll();
-        setMeetingRoomId(null);
-        setMeetingInfo(null);
         setStatus("idle");
+        // Keep meetingRoomId / meetingInfo so the room screen can show
+        // a friendly "Meeting has ended" notice before the user dismisses it.
       }
     };
 
@@ -594,13 +600,19 @@ const useMeeting = () => {
     };
   }, [socket, createPeer]);
 
+  const dismissEndedNotice = useCallback(() => {
+    setEndedByHost(false);
+    setMeetingRoomId(null);
+    setMeetingInfo(null);
+  }, []);
+
   return {
     status, meetingRoomId, meetingInfo, participants, localStream, screenStream,
     isMuted, isVideoOff, isScreenSharing, chatMessages, handRaised, reactions,
-    pinnedSocketId, duration, viewMode,
+    pinnedSocketId, duration, viewMode, endedByHost,
     joinMeeting, leaveMeeting, toggleMute, toggleVideo, toggleScreenShare,
     sendChatMessage, sendReaction, toggleHandRaise, pinParticipant, setViewMode,
-    muteAll, removeParticipant,
+    muteAll, removeParticipant, dismissEndedNotice,
   };
 };
 

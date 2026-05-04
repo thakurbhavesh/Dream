@@ -37,7 +37,7 @@ import {
   PiXBold,
   PiArrowLeftBold,
 } from "react-icons/pi";
-import { createMeeting } from "../../services/meetingApi.js";
+import { createMeeting, joinByCode as joinByCodeApi } from "../../services/meetingApi.js";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
 import { useSocket } from "../../contexts/SocketContext.jsx";
 import { useMeetingContext } from "../../contexts/MeetingContext.jsx";
@@ -237,17 +237,31 @@ const MeetingPage = () => {
     }
   };
 
-  const handleJoinByCode = () => {
+  const handleJoinByCode = async () => {
     const code = joinCode.trim().toUpperCase();
     if (!code) return;
-    meeting.joinMeeting({
-      meetingRoomId: code,
-      meetingData: { meeting_id: code, title: "Meeting" },
-      userName,
-      enableVideo: true,
-      enableAudio: true,
-    });
-    setMeetingRoomOpen(true);
+    // Validate first — backend returns 410 for ended/cancelled meetings, 404
+    // for unknown codes. Only proceed to socket join if the meeting is live.
+    try {
+      const data = await joinByCodeApi(code);
+      const meetingData = data?.meeting || data;
+      meeting.joinMeeting({
+        meetingRoomId: code,
+        meetingData: meetingData || { meeting_id: code, title: "Meeting" },
+        userName,
+        enableVideo: true,
+        enableAudio: true,
+      });
+      setMeetingRoomOpen(true);
+    } catch (err) {
+      const msg = err?.message || "Failed to join";
+      // joinByCode throws with the backend's failure() message — for ended/
+      // cancelled meetings that's "Meeting has ended". Surface it directly.
+      const friendly = /ended|cancel|not\s*found/i.test(msg)
+        ? "This meeting link has expired."
+        : msg;
+      setToast({ open: true, message: friendly, severity: "error" });
+    }
   };
 
   const copyCode = useCallback(() => {
@@ -456,13 +470,26 @@ const MeetingPage = () => {
           <Paper elevation={0} sx={{ p: 2, border: `1px solid ${theme.palette.divider}`, borderRadius: 2, height: "100%" }}>
             <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>Upcoming Meetings</Typography>
             <MeetingsList
-              onJoinMeeting={(m) => {
-                meeting.joinMeeting({
-                  meetingRoomId: m.meeting_id,
-                  meetingData: m,
-                  userName, enableVideo: true, enableAudio: true,
-                });
-                setMeetingRoomOpen(true);
+              onJoinMeeting={async (m) => {
+                // Validate the meeting is still active. The host may have
+                // ended it after the list loaded; bail out before opening
+                // the room if the backend responds 410.
+                try {
+                  const fresh = await joinByCodeApi(m.meeting_id);
+                  const meetingData = fresh?.meeting || m;
+                  meeting.joinMeeting({
+                    meetingRoomId: m.meeting_id,
+                    meetingData,
+                    userName, enableVideo: true, enableAudio: true,
+                  });
+                  setMeetingRoomOpen(true);
+                } catch (err) {
+                  const msg = err?.message || "Failed to join";
+                  const friendly = /ended|cancel|not\s*found/i.test(msg)
+                    ? "This meeting has ended."
+                    : msg;
+                  setToast({ open: true, message: friendly, severity: "error" });
+                }
               }}
             />
           </Paper>

@@ -17,6 +17,7 @@ import {
   Divider,
   Button,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import {
   PiMicrophoneBold,
   PiMicrophoneSlashBold,
@@ -345,12 +346,14 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
   const [participantsOpen, setParticipantsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Auto-close when meeting ends (status becomes idle)
+  // Auto-close when meeting goes idle, but ONLY if the host didn't end it.
+  // If endedByHost is set, we keep the room mounted so the user sees a
+  // "Meeting has ended" overlay; tapping the dismiss button leaves the room.
   useEffect(() => {
-    if (meeting.status === "idle") {
+    if (meeting.status === "idle" && !meeting.endedByHost) {
       onLeave?.();
     }
-  }, [meeting.status, onLeave]);
+  }, [meeting.status, meeting.endedByHost, onLeave]);
 
   // Auto-pin a remote participant when they start screen sharing.
   // Unpin them when they stop. Local user sharing is handled separately
@@ -442,7 +445,72 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
   ];
   const [showReactions, setShowReactions] = useState(false);
 
-  // If meeting is idle, don't render
+  // Meeting was ended by the host — render a centered notice instead of
+  // disappearing silently. Dismiss returns the user to the meetings page.
+  if (meeting.status === "idle" && meeting.endedByHost) {
+    const handleDismiss = () => {
+      meeting.dismissEndedNotice?.();
+      onLeave?.();
+    };
+    return (
+      <Box
+        sx={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1400,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          bgcolor: "rgba(10, 14, 26, 0.92)",
+          p: 3,
+        }}
+      >
+        <Paper
+          elevation={4}
+          sx={{
+            maxWidth: 420,
+            width: "100%",
+            p: 4,
+            borderRadius: 3,
+            textAlign: "center",
+            bgcolor: theme.palette.background.paper,
+          }}
+        >
+          <Box
+            sx={{
+              width: 64,
+              height: 64,
+              mx: "auto",
+              mb: 2,
+              borderRadius: "50%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: alpha(theme.palette.error.main, 0.12),
+            }}
+          >
+            <PiPhoneDisconnectBold size={28} color={theme.palette.error.main} />
+          </Box>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
+            Meeting has ended
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3, lineHeight: 1.6 }}>
+            The host ended this meeting. The invite link is no longer active —
+            anyone who tries to join with the same code will see an "ended" notice.
+          </Typography>
+          <Button
+            variant="contained"
+            onClick={handleDismiss}
+            sx={{ minWidth: 140, textTransform: "none", borderRadius: 2 }}
+          >
+            Got it
+          </Button>
+        </Paper>
+      </Box>
+    );
+  }
+
+  // If meeting is idle for any other reason (user left, never joined), don't render
   if (meeting.status === "idle") return null;
 
   return (
