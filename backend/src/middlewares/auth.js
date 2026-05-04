@@ -23,6 +23,13 @@ const auth = (req, res, next) => {
 
   try {
     const payload = jwt.verify(resolvedToken, process.env.JWT_SECRET);
+    const sub = Number(payload?.sub);
+    const org = Number(payload?.org);
+    if (!Number.isFinite(sub) || sub <= 0 || !Number.isFinite(org) || org <= 0) {
+      const err = new Error('Invalid token claims');
+      err.status = 401;
+      return next(err);
+    }
     req.user = payload;
     return next();
   } catch (error) {
