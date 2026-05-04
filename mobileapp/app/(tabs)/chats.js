@@ -628,6 +628,7 @@ export default function ChatsScreen() {
                 { icon: 'chatbubble-ellipses', label: 'New Chat', onPress: () => { setShowHeaderMenu(false); router.push('/(tabs)/contacts'); } },
                 { icon: 'people-outline', label: 'New Group', onPress: () => { setShowHeaderMenu(false); router.push('/chat/create-group'); } },
                 { icon: 'megaphone-outline', label: 'Broadcast', onPress: () => { setShowHeaderMenu(false); router.push('/chat/broadcast'); } },
+                { icon: 'videocam-outline', label: 'Meetings', onPress: () => { setShowHeaderMenu(false); router.push('/meetings'); } },
                 { icon: 'star-outline', label: 'Starred Messages', onPress: () => { setShowHeaderMenu(false); router.push('/chat/starred'); } },
                 { icon: 'qr-code-outline', label: 'Linked Devices', onPress: () => { setShowHeaderMenu(false); router.push('/chat/linked-devices'); } },
                 { icon: 'settings-outline', label: 'Settings', onPress: () => { setShowHeaderMenu(false); router.push('/(tabs)/profile'); } },

@@ -123,6 +123,7 @@ function InnerLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chat" />
+        <Stack.Screen name="meetings" />
         <Stack.Screen name="call" options={{ animation: 'slide_from_bottom', gestureEnabled: false }} />
       </Stack>
       <IncomingCallOverlay />

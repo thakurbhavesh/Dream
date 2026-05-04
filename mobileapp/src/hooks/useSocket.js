@@ -101,7 +101,9 @@ const connectSocket = async (forceNew = false) => {
 
     const socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ['polling', 'websocket'],
+      // Try websocket first (lower latency, no upgrade round-trip); fall back to
+      // long-polling only if the network/proxy blocks WS.
+      transports: ['websocket', 'polling'],
       upgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
