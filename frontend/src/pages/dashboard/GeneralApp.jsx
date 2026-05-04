@@ -14,22 +14,27 @@ import {
   useTheme,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shallowEqual, useDispatch, useSelector } from "react-redux";
 import { PiLockKeyOpen } from "react-icons/pi";
 import OrganizationTabs from "../../components/OrganizationTabs.jsx";
 import ConversationHeader from "../../components/conversation/Header.jsx";
 import ConversationMessage from "../../components/conversation/Message.jsx";
 import ConversationFooter from "../../components/conversation/Footer.jsx";
-import MessageInfoOverlay from "../../components/conversation/messages/MessageInfoOverlay.jsx";
 import ConversationInfoSidebar from "../../components/conversation/sidebar/ConversationInfoSidebar.jsx";
 import LiveAssistant from "../../components/LiveAssistant/index.jsx";
 import { appBrandingAssets, agentSelfId, setRealUserId } from "../../data/CommonData.js";
-import TranslateDialog from "../../components/conversation/messages/TranslateDialog.jsx";
-import SummarizeDialog from "../../components/conversation/messages/SummarizeDialog.jsx";
-import ToneAdjusterDialog from "../../components/conversation/messages/ToneAdjusterDialog.jsx";
 import ChatList from "../../components/chats/ChatList.jsx";
 import ChatListActionsMenu from "../../components/chats/ChatListActionsMenu.jsx";
+
+// Lazy-loaded dialogs/overlays — split out of the main bundle, loaded on first open.
+const MessageInfoOverlay = lazy(() => import("../../components/conversation/messages/MessageInfoOverlay.jsx"));
+const TranslateDialog = lazy(() => import("../../components/conversation/messages/TranslateDialog.jsx"));
+const SummarizeDialog = lazy(() => import("../../components/conversation/messages/SummarizeDialog.jsx"));
+const ToneAdjusterDialog = lazy(() => import("../../components/conversation/messages/ToneAdjusterDialog.jsx"));
+const ForwardMessageDialog = lazy(() => import("../../components/conversation/messages/ForwardMessageDialog.jsx"));
+const ThreadSoundPicker = lazy(() => import("../../components/conversation/ThreadSoundPicker.jsx"));
+const DisappearingMessagesDialog = lazy(() => import("../../components/conversation/DisappearingMessagesDialog.jsx"));
 import { useChatLockContext } from "../../contexts/ChatLockContext.jsx";
 import { LockMode } from "../../hooks/useChatLock.js";
 import { FaUserLock } from "react-icons/fa";
@@ -47,8 +52,6 @@ import { threadService } from "../../services/threadService.js";
 import { THREAD_NAVIGATE_EVENT } from "../../utils/threadNavigationEvents.js";
 import { toggleReactionOnMessage } from "../../components/conversation/messages/reactions.js";
 import useMutedThreads from "../../hooks/useMutedThreads.js";
-import ThreadSoundPicker from "../../components/conversation/ThreadSoundPicker.jsx";
-import DisappearingMessagesDialog from "../../components/conversation/DisappearingMessagesDialog.jsx";
 import {
   buildReplyContextPayload,
   canEditMessage,
@@ -61,7 +64,6 @@ import {
   isOwnMessage,
 } from "../../components/conversation/messages/helpers.js";
 import { copyImageSourceToClipboard } from "../../utils/blobUtils.js";
-import ForwardMessageDialog from "../../components/conversation/messages/ForwardMessageDialog.jsx";
 import { closeSidebar, openSidebar } from "../../redux/slices/app.js";
 import { detectDeviceLabel } from "../../utils/deviceDetect.js";
 import isGroupThread from "../../utils/threadUtils.js";
@@ -3199,62 +3201,76 @@ const GeneralApp = () => {
                         />
                       );
                     })()}
-                    <MessageInfoOverlay
-                      key={messageInfoState.version}
-                      open={Boolean(
-                        messageInfoState.open && messageInfoState.message
+                    <Suspense fallback={null}>
+                      {messageInfoState.open && messageInfoState.message && (
+                        <MessageInfoOverlay
+                          key={messageInfoState.version}
+                          open
+                          message={messageInfoState.message}
+                          thread={infoOverlayThread || activeThread || {}}
+                          currentUserId={CURRENT_USER_ID}
+                          onClose={handleCloseMessageInfo}
+                        />
                       )}
-                      message={messageInfoState.message}
-                      thread={infoOverlayThread || activeThread || {}}
-                      currentUserId={CURRENT_USER_ID}
-                      onClose={handleCloseMessageInfo}
-                    />
-                    <ForwardMessageDialog
-                      open={forwardState.open}
-                      threads={threadsForActiveOrg}
-                      pendingMessageCount={forwardState.messages.length || 0}
-                      onClose={closeForwardDialog}
-                      onSubmit={handleForwardSubmit}
-                    />
-                    <TranslateDialog
-                      open={translateDialogState.open}
-                      message={translateDialogState.message}
-                      onClose={() => setTranslateDialogState({ open: false, message: null, threadId: null })}
-                      onTranslated={({ language, translated }) => {
-                        if (!translateDialogState.message || !translateDialogState.threadId) return;
-                        const updated = {
-                          ...translateDialogState.message,
-                          content: {
-                            ...(translateDialogState.message.content || {}),
-                            translatedText: translated,
-                            translatedLang: language,
-                          },
-                        };
-                        upsertMessage(translateDialogState.threadId, updated);
-                        patchMessage?.(translateDialogState.threadId, updated);
-                      }}
-                    />
-                    <SummarizeDialog
-                      open={summarizeDialogState.open}
-                      message={summarizeDialogState.message}
-                      onClose={() => setSummarizeDialogState({ open: false, message: null })}
-                    />
-                    <ToneAdjusterDialog
-                      open={toneAdjustDialogState.open}
-                      messageText={getMessagePlainText(toneAdjustDialogState.message) || ""}
-                      onClose={() => setToneAdjustDialogState({ open: false, message: null })}
-                    />
-                    <ThreadSoundPicker
-                      open={soundPickerState.open}
-                      onClose={() => setSoundPickerState({ open: false, threadId: null })}
-                      onSelect={handleSoundPickerSelect}
-                    />
-                    <DisappearingMessagesDialog
-                      open={disappearDialogState.open}
-                      onClose={() => setDisappearDialogState({ open: false, threadId: null, currentTimer: 0 })}
-                      currentTimer={disappearDialogState.currentTimer}
-                      onSave={handleDisappearSave}
-                    />
+                      {forwardState.open && (
+                        <ForwardMessageDialog
+                          open
+                          threads={threadsForActiveOrg}
+                          pendingMessageCount={forwardState.messages.length || 0}
+                          onClose={closeForwardDialog}
+                          onSubmit={handleForwardSubmit}
+                        />
+                      )}
+                      {translateDialogState.open && (
+                        <TranslateDialog
+                          open
+                          message={translateDialogState.message}
+                          onClose={() => setTranslateDialogState({ open: false, message: null, threadId: null })}
+                          onTranslated={({ language, translated }) => {
+                            if (!translateDialogState.message || !translateDialogState.threadId) return;
+                            const updated = {
+                              ...translateDialogState.message,
+                              content: {
+                                ...(translateDialogState.message.content || {}),
+                                translatedText: translated,
+                                translatedLang: language,
+                              },
+                            };
+                            upsertMessage(translateDialogState.threadId, updated);
+                            patchMessage?.(translateDialogState.threadId, updated);
+                          }}
+                        />
+                      )}
+                      {summarizeDialogState.open && (
+                        <SummarizeDialog
+                          open
+                          message={summarizeDialogState.message}
+                          onClose={() => setSummarizeDialogState({ open: false, message: null })}
+                        />
+                      )}
+                      {toneAdjustDialogState.open && (
+                        <ToneAdjusterDialog
+                          open
+                          messageText={getMessagePlainText(toneAdjustDialogState.message) || ""}
+                          onClose={() => setToneAdjustDialogState({ open: false, message: null })}
+                        />
+                      )}
+                      {soundPickerState.open && (
+                        <ThreadSoundPicker
+                          open
+                          onClose={() => setSoundPickerState({ open: false, threadId: null })}
+                          onSelect={handleSoundPickerSelect}
+                        />
+                      )}
+                      {disappearDialogState.open && (
+                        <DisappearingMessagesDialog
+                          open
+                          onClose={() => setDisappearDialogState({ open: false, threadId: null, currentTimer: 0 })}
+                          currentTimer={disappearDialogState.currentTimer}
+                          onSave={handleDisappearSave}
+                        />
+                      )}
+                    </Suspense>
                   </Box>
                 </>
               ) : (() => {
