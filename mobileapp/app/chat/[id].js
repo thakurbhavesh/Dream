@@ -22,7 +22,7 @@ import ImageViewer from '../../src/components/ImageViewer';
 import { toggleStarredMessage } from './starred';
 import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
-import { getMessages, uploadFile, sendMessageRest } from '../../src/api/chat';
+import { getMessages, uploadFile, sendMessageRest, aiSmartReplies, aiSmartCompose } from '../../src/api/chat';
 import { getCachedMessages, cacheMessages, appendCachedMessage, updateCachedMessage } from '../../src/services/cache';
 import { enqueue, dequeue, getQueue, processQueue, isOnline } from '../../src/services/offlineQueue';
 import api from '../../src/api/config';
@@ -63,6 +63,83 @@ const addDateSeparators = (msgs) => {
   return result;
 };
 
+// ─── Schedule modal: simple date+time entry → emits message:schedule ─────
+function ScheduleMessageModal({ isDark, theme, initialText, onCancel, onSchedule }) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const def = (() => {
+    const d = new Date(Date.now() + 60 * 60_000); // 1h from now
+    return {
+      date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    };
+  })();
+  const [date, setDate] = useState(def.date);
+  const [time, setTime] = useState(def.time);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    const iso = new Date(`${date}T${time}:00`).toISOString();
+    const ts = new Date(iso).getTime();
+    if (Number.isNaN(ts) || ts <= Date.now() + 30_000) {
+      Alert.alert('Pick a time at least 1 minute in the future');
+      return;
+    }
+    setSubmitting(true);
+    await onSchedule({ sendAt: iso });
+    setSubmitting(false);
+  };
+
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+        <View style={[z.scheduleSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="time-outline" size={20} color={theme.accent} />
+            <Text style={[z.scheduleTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>Schedule message</Text>
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity onPress={onCancel} hitSlop={10}>
+              <Ionicons name="close" size={22} color={isDark ? '#94a3b8' : '#64748b'} />
+            </TouchableOpacity>
+          </View>
+          <Text style={[z.scheduleLabel, { color: isDark ? '#94a3b8' : '#64748b' }]} numberOfLines={2}>
+            "{(initialText || '').slice(0, 80)}{initialText && initialText.length > 80 ? '…' : ''}"
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[z.scheduleLabel, { color: isDark ? '#94a3b8' : '#64748b' }]}>Date</Text>
+              <TextInput
+                style={[z.scheduleInput, { backgroundColor: isDark ? '#0f172a' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#f1f5f9' : '#0f172a' }]}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={isDark ? '#475569' : '#94a3b8'}
+                value={date}
+                onChangeText={setDate}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[z.scheduleLabel, { color: isDark ? '#94a3b8' : '#64748b' }]}>Time</Text>
+              <TextInput
+                style={[z.scheduleInput, { backgroundColor: isDark ? '#0f172a' : '#f8fafc', borderColor: isDark ? '#334155' : '#e2e8f0', color: isDark ? '#f1f5f9' : '#0f172a' }]}
+                placeholder="HH:MM"
+                placeholderTextColor={isDark ? '#475569' : '#94a3b8'}
+                value={time}
+                onChangeText={setTime}
+              />
+            </View>
+          </View>
+          <TouchableOpacity
+            style={[{ backgroundColor: theme.accent, opacity: submitting ? 0.6 : 1, padding: 14, borderRadius: 12, alignItems: 'center' }]}
+            disabled={submitting}
+            onPress={submit}
+            activeOpacity={0.85}
+          >
+            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '700' }}>Schedule message</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function ChatScreen() {
   const { id: threadId, name, avatar } = useLocalSearchParams();
   const { user } = useAuth();
@@ -91,6 +168,11 @@ export default function ChatScreen() {
   const [infoMsg, setInfoMsg] = useState(null);
   const [translateMsg, setTranslateMsg] = useState(null); // { text, original } — shows language picker
   const [toneMsg, setToneMsg] = useState(null); // { text, original } — shows tone picker
+  const [smartReplies, setSmartReplies] = useState([]); // string[] up to 3
+  const [smartReplyFor, setSmartReplyFor] = useState(null); // last incoming msg id we already fetched for
+  const [composeHint, setComposeHint] = useState(''); // ghost completion
+  const composeTimerRef = useRef(null);
+  const [scheduleModal, setScheduleModal] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   // New features
@@ -1055,6 +1137,55 @@ export default function ChatScreen() {
   // For inverted FlatList — reverse so newest is first (renders at bottom)
   const data = addDateSeparators(displayMessages).slice().reverse();
 
+  // ─── Smart replies: refresh chips when a new incoming msg lands and the
+  // composer is empty ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (text.trim()) { setSmartReplies([]); return; }
+    if (!messages.length) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.direction === 'outgoing' || String(last.author?.id) === String(user?.id)) {
+      setSmartReplies([]);
+      return;
+    }
+    const lastText = last?.content?.text || last?.message || '';
+    if (!lastText || lastText.length < 2) return;
+    if (smartReplyFor === last.id) return; // already fetched
+    setSmartReplyFor(last.id);
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await aiSmartReplies(lastText, { senderName: last?.author?.name || '' });
+        if (cancelled) return;
+        const list = (r?.suggestions || []).filter(Boolean).slice(0, 3);
+        setSmartReplies(list);
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [messages, text, smartReplyFor, user?.id]);
+
+  // ─── Smart compose: fetch ghost completion ~800ms after typing stops
+  useEffect(() => {
+    if (composeTimerRef.current) clearTimeout(composeTimerRef.current);
+    const t2 = text.trim();
+    if (t2.length < 6 || /[.!?]\s*$/.test(t2)) { setComposeHint(''); return; }
+    composeTimerRef.current = setTimeout(async () => {
+      try {
+        const r = await aiSmartCompose(t2, { threadType: isGroup ? 'group' : 'dm' });
+        const completion = (r?.completions?.[0] || '').trim();
+        if (!completion) { setComposeHint(''); return; }
+        // Show only the trailing portion the user hasn't typed yet
+        const lower = completion.toLowerCase();
+        const lowerText = t2.toLowerCase();
+        if (lower.startsWith(lowerText)) {
+          setComposeHint(completion.slice(t2.length));
+        } else {
+          setComposeHint(completion);
+        }
+      } catch { setComposeHint(''); }
+    }, 800);
+    return () => { if (composeTimerRef.current) clearTimeout(composeTimerRef.current); };
+  }, [text, isGroup]);
+
   // Brand colors from theme
   const BRAND = t.accent;
   const headerBg = isDark ? '#1f2c34' : BRAND;
@@ -1841,6 +1972,48 @@ export default function ChatScreen() {
           paddingBottom: kbOpen ? 2 : Math.max(insets.bottom, 6),
           display: (hasLeftGroup || (isAirtime && !isGroupAdmin)) ? 'none' : 'flex',
         }]}>
+          {/* AI Smart Reply chips */}
+          {!isRecording && smartReplies.length > 0 && !text.trim() && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 6, gap: 6 }}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={[z.smartChip, { backgroundColor: isDark ? '#0f172a' : '#fff', borderColor: BRAND }]}>
+                <Ionicons name="sparkles" size={11} color={BRAND} />
+                <Text style={[z.smartChipLabel, { color: BRAND }]}>AI</Text>
+              </View>
+              {smartReplies.map((s, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[z.smartChip, { backgroundColor: isDark ? '#1e293b' : '#fff', borderColor: isDark ? '#334155' : '#e2e8f0' }]}
+                  onPress={() => { setText(s); setSmartReplies([]); inputRef.current?.focus(); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[z.smartChipLabel, { color: isDark ? '#e2e8f0' : '#0f172a' }]} numberOfLines={1}>
+                    {s.length > 60 ? s.slice(0, 60) + '…' : s}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Smart compose ghost hint */}
+          {!isRecording && composeHint && text.trim() && (
+            <TouchableOpacity
+              style={[z.composeHint, { backgroundColor: isDark ? '#0f172a' : '#fff', borderColor: BRAND }]}
+              onPress={() => { setText(text + composeHint); setComposeHint(''); inputRef.current?.focus(); }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="sparkles" size={11} color={BRAND} />
+              <Text style={[z.composeHintTxt, { color: isDark ? '#94a3b8' : '#64748b' }]} numberOfLines={1}>
+                {composeHint.trim()}
+              </Text>
+              <Text style={[z.composeHintAccept, { color: BRAND }]}>Tap to add</Text>
+            </TouchableOpacity>
+          )}
+
           {!isRecording && (
           <View style={[z.inputRow, { backgroundColor: inputBg, borderColor: inputBorder }]}>
             <TouchableOpacity onPress={() => { setShowEmoji(!showEmoji); setShowAttach(false); setShowGif(false); Keyboard.dismiss(); }} style={z.footerIcon}>
@@ -1895,7 +2068,7 @@ export default function ChatScreen() {
           ) : (
             <TouchableOpacity
               onPress={text.trim() ? handleSend : startRecording}
-              onLongPress={!text.trim() ? startRecording : undefined}
+              onLongPress={text.trim() ? () => setScheduleModal(true) : startRecording}
               style={[z.sendBtn, { backgroundColor: text.trim() ? BRAND : (isDark ? '#2a3942' : '#e2e8f0') }]}
               disabled={sending}
               activeOpacity={0.7}
@@ -1906,6 +2079,35 @@ export default function ChatScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* ─── Schedule message modal ─── */}
+        {scheduleModal && (
+          <ScheduleMessageModal
+            isDark={isDark}
+            theme={t}
+            initialText={text}
+            onCancel={() => setScheduleModal(false)}
+            onSchedule={async ({ sendAt }) => {
+              try {
+                const res = await emit('message:schedule', {
+                  threadId,
+                  message: text.trim(),
+                  messageType: 'text',
+                  sendAt,
+                });
+                if (res?.ok) {
+                  setText('');
+                  setScheduleModal(false);
+                  toast('Scheduled', 'success');
+                } else {
+                  toast(res?.error || 'Schedule failed', 'error');
+                }
+              } catch (e) {
+                toast(e?.message || 'Schedule failed', 'error');
+              }
+            }}
+          />
+        )}
 
         {/* ─── Emoji Picker ─── */}
         {showEmoji && <EmojiPicker onSelect={e => setText(prev => prev + e)} onClose={() => setShowEmoji(false)} />}
@@ -2158,4 +2360,13 @@ const z = StyleSheet.create({
   },
   menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   menuItemText: { fontSize: 15, fontWeight: '600' },
+  smartChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1, maxWidth: 220 },
+  smartChipLabel: { fontSize: 12, fontWeight: '600' },
+  composeHint: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, marginHorizontal: 8, marginBottom: 4, borderRadius: 12, borderWidth: 1 },
+  composeHintTxt: { flex: 1, fontSize: 13, fontStyle: 'italic' },
+  composeHintAccept: { fontSize: 11, fontWeight: '700' },
+  scheduleSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 12 },
+  scheduleTitle: { fontSize: 16, fontWeight: '700' },
+  scheduleLabel: { fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+  scheduleInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
 });

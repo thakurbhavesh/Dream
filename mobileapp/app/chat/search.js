@@ -11,6 +11,7 @@ import Avatar from '../../src/components/Avatar';
 import { useTheme } from '../../src/store/ThemeContext';
 import { useAuth } from '../../src/store/AuthContext';
 import api from '../../src/api/config';
+import { semanticSearchMessages, smartSearchMessages } from '../../src/api/chat';
 
 const { width: W } = Dimensions.get('window');
 // BRAND resolved from theme in component
@@ -59,11 +60,32 @@ export default function SearchScreen() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
+  const [searchMode, setSearchMode] = useState('normal'); // 'normal' | 'semantic' | 'smart'
+  const [aiNote, setAiNote] = useState(''); // interpretation / intent shown above results
 
-  const doSearch = useCallback(async (q, type) => {
-    if ((!q || q.trim().length < 2) && !type) { setResults(null); setTotal(0); return; }
+  const doSearch = useCallback(async (q, type, mode) => {
+    if ((!q || q.trim().length < 2) && !type) { setResults(null); setTotal(0); setAiNote(''); return; }
     setLoading(true);
+    setAiNote('');
     try {
+      // AI modes need a real query
+      if (mode === 'semantic' && q && q.trim().length >= 2) {
+        const r = await semanticSearchMessages(q.trim(), { limit: 50 });
+        const items = r?.results || [];
+        setResults(items);
+        setTotal(items.length);
+        if (r?.interpretation) setAiNote(r.interpretation);
+        return;
+      }
+      if (mode === 'smart' && q && q.trim().length >= 2) {
+        const r = await smartSearchMessages(q.trim(), { limit: 50 });
+        const items = r?.results || [];
+        setResults(items);
+        setTotal(items.length);
+        if (r?.filters?.intent) setAiNote(r.filters.intent);
+        return;
+      }
+      // Normal text search (with optional type filter)
       const params = { limit: 50 };
       if (q && q.trim().length >= 2) params.q = q.trim();
       if (type) params.types = type;
@@ -72,19 +94,30 @@ export default function SearchScreen() {
       const items = r?.results || r?.messages || r || [];
       setResults(items);
       setTotal(r?.total || items.length);
-    } catch { setResults([]); setTotal(0); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setResults([]);
+      setTotal(0);
+      if (mode !== 'normal') setAiNote('AI search unavailable — try Normal mode.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const handleQuery = (q) => {
     setQuery(q);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => doSearch(q, typeFilter), 400);
+    const delay = searchMode === 'normal' ? 400 : 600;
+    timer.current = setTimeout(() => doSearch(q, typeFilter, searchMode), delay);
   };
 
   const handleTypeFilter = (key) => {
     setTypeFilter(key);
-    doSearch(query, key);
+    doSearch(query, key, searchMode);
+  };
+
+  const handleModeChange = (mode) => {
+    setSearchMode(mode);
+    doSearch(query, typeFilter, mode);
   };
 
   const cardBg = isDark ? '#1e293b' : '#fff';
@@ -215,25 +248,57 @@ export default function SearchScreen() {
           </View>
         </View>
 
-        {/* Type filter chips */}
-        <FlatList
-          data={TYPE_FILTERS}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={i => i.label}
-          contentContainerStyle={z.chipRow}
-          renderItem={({ item: f }) => {
-            const active = typeFilter === f.key;
+        {/* Search-mode toggle (Normal / Semantic / Smart) */}
+        <View style={[z.modeRow, { backgroundColor: isDark ? '#0f172a' : '#f1f5f9' }]}>
+          {[
+            { key: 'normal', label: 'Normal', icon: 'search' },
+            { key: 'semantic', label: 'Semantic', icon: 'sparkles' },
+            { key: 'smart', label: 'Smart', icon: 'compass' },
+          ].map((mode) => {
+            const active = searchMode === mode.key;
             return (
               <TouchableOpacity
-                style={[z.chip, { backgroundColor: active ? chipActiveBg : chipBg, borderColor: active ? BRAND : 'transparent' }]}
-                onPress={() => handleTypeFilter(active ? null : f.key)} activeOpacity={0.7}>
-                <Ionicons name={f.icon} size={14} color={active ? BRAND : t.textTer} />
-                <Text style={[z.chipLabel, { color: active ? BRAND : t.textTer }]}>{f.label}</Text>
+                key={mode.key}
+                style={[z.modeBtn, active && { backgroundColor: isDark ? '#1e293b' : '#fff' }]}
+                onPress={() => handleModeChange(mode.key)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name={mode.icon} size={13} color={active ? BRAND : t.textTer} />
+                <Text style={[z.modeLabel, { color: active ? BRAND : t.textTer }]}>{mode.label}</Text>
               </TouchableOpacity>
             );
-          }}
-        />
+          })}
+        </View>
+
+        {/* AI interpretation hint */}
+        {!!aiNote && (
+          <View style={[z.aiNote, { backgroundColor: `${BRAND}15`, borderColor: BRAND }]}>
+            <Ionicons name="sparkles-outline" size={12} color={BRAND} />
+            <Text style={[z.aiNoteTxt, { color: BRAND }]} numberOfLines={2}>{aiNote}</Text>
+          </View>
+        )}
+
+        {/* Type filter chips — only meaningful in normal mode */}
+        {searchMode === 'normal' && (
+          <FlatList
+            data={TYPE_FILTERS}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={i => i.label}
+            contentContainerStyle={z.chipRow}
+            renderItem={({ item: f }) => {
+              const active = typeFilter === f.key;
+              return (
+                <TouchableOpacity
+                  style={[z.chip, { backgroundColor: active ? chipActiveBg : chipBg, borderColor: active ? BRAND : 'transparent' }]}
+                  onPress={() => handleTypeFilter(active ? null : f.key)} activeOpacity={0.7}>
+                  <Ionicons name={f.icon} size={14} color={active ? BRAND : t.textTer} />
+                  <Text style={[z.chipLabel, { color: active ? BRAND : t.textTer }]}>{f.label}</Text>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        )}
       </View>
 
       {/* ─── Results ─── */}
@@ -322,4 +387,9 @@ const z = StyleSheet.create({
   emptyCircle: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   emptyTitle: { fontSize: 16, fontWeight: '700' },
   emptySub: { fontSize: 13, textAlign: 'center', paddingHorizontal: 40, lineHeight: 18 },
+  modeRow: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 8, borderRadius: 10, padding: 3 },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 7 },
+  modeLabel: { fontSize: 12, fontWeight: '700' },
+  aiNote: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 12, marginBottom: 8, padding: 8, borderRadius: 8, borderWidth: 1 },
+  aiNoteTxt: { flex: 1, fontSize: 11, fontStyle: 'italic' },
 });

@@ -94,6 +94,22 @@ export const aiSmartReplies = async (message, { context, senderName } = {}) => {
   return data?.data || data;
 };
 
+export const aiSmartCompose = async (partialText, { context, threadType } = {}) => {
+  const { data } = await api.post('/translate/smart-compose', { partialText, context, threadType });
+  return data?.data || data;
+};
+
+// ─── Semantic / Smart search ────────────────────────────────────────────
+export const semanticSearchMessages = async (query, { threadId, limit = 50 } = {}) => {
+  const { data } = await api.post('/translate/semantic-search', { query, threadId, limit });
+  return data?.data || data;
+};
+
+export const smartSearchMessages = async (query, { threadId, limit = 50 } = {}) => {
+  const { data } = await api.post('/chat/smart-search', { query, threadId, limit });
+  return data?.data || data;
+};
+
 // ─── Push subscription (Expo token) ─────────────────────────────────────
 // Reuses the same /push/subscribe endpoint as web; we encode the Expo
 // token inside the subscription.endpoint with an "expo:" prefix so the
