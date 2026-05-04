@@ -1,6 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform, AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
+import { registerExpoPushSubscription } from '../api/chat';
 
 // Configure notification behavior — show even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -132,4 +134,39 @@ export const clearNotifications = async () => {
 // Set badge count
 export const setBadgeCount = async (count) => {
   try { await Notifications.setBadgeCountAsync(count); } catch {}
+};
+
+// ─── Expo push token registration ────────────────────────────────────
+// Get an Expo push token (sent through Expo's push service → APNS/FCM)
+// and register it with our backend so server-initiated notifications
+// reach the device when the app is killed.
+const TOKEN_CACHE_KEY = 'expoPushToken';
+
+export const registerExpoTokenWithBackend = async () => {
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      if (req.status !== 'granted') return null;
+    }
+    // Resolve project id (Expo Go vs EAS build)
+    const projectId =
+      Constants?.expoConfig?.extra?.eas?.projectId ||
+      Constants?.easConfig?.projectId ||
+      undefined;
+    const tokenResult = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+    const token = tokenResult?.data;
+    if (!token) return null;
+
+    // Skip re-register if backend already has this token for this user
+    const last = await SecureStore.getItemAsync(TOKEN_CACHE_KEY).catch(() => null);
+    if (last === token) return token;
+
+    await registerExpoPushSubscription(token);
+    await SecureStore.setItemAsync(TOKEN_CACHE_KEY, token).catch(() => {});
+    return token;
+  } catch (err) {
+    console.log('[notif] expo token registration failed:', err?.message);
+    return null;
+  }
 };

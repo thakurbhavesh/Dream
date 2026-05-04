@@ -24,6 +24,7 @@ import {
   requestNotificationPermission,
   setupNotificationChannel,
   showMessageNotification,
+  registerExpoTokenWithBackend,
 } from '../src/services/notifications';
 
 // Global font override
@@ -56,6 +57,12 @@ function NotificationListener() {
     requestNotificationPermission();
     setupNotificationChannel();
   }, []);
+
+  // Register Expo push token with backend after auth (best-effort, non-blocking)
+  useEffect(() => {
+    if (!user) return;
+    registerExpoTokenWithBackend().catch(() => {});
+  }, [user?.id]);
 
   // Listen to socket notification events — with dedup to prevent double
   useEffect(() => {

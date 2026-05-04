@@ -90,6 +90,7 @@ export default function ChatScreen() {
   const [aiResult, setAiResult] = useState(null);
   const [infoMsg, setInfoMsg] = useState(null);
   const [translateMsg, setTranslateMsg] = useState(null); // { text, original } — shows language picker
+  const [toneMsg, setToneMsg] = useState(null); // { text, original } — shows tone picker
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   // New features
@@ -291,12 +292,24 @@ export default function ChatScreen() {
       }
     });
 
-    // Read ack — update tick status
+    // Read ack — update tick status (blue double check)
     const unsub4 = on('message:read_ack', (data) => {
       if (data?.threadId === threadId) {
         setMessages(prev => prev.map(m =>
           m.direction === 'outgoing' && m.status !== 'read' ? { ...m, status: 'read' } : m
         ));
+      }
+    });
+    // Delivered ack — update to grey double check
+    const unsub4b = on('message:delivered_ack', (data) => {
+      if (data?.threadId === threadId) {
+        const ids = Array.isArray(data?.messageIds) ? new Set(data.messageIds.map(String)) : null;
+        setMessages(prev => prev.map(m => {
+          if (m.direction !== 'outgoing') return m;
+          if (m.status === 'read') return m;
+          if (ids && !ids.has(String(m.id))) return m;
+          return { ...m, status: 'delivered' };
+        }));
       }
     });
 
@@ -374,7 +387,7 @@ export default function ChatScreen() {
       }
     });
 
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); unsub7(); unsubStatus(); unsubOnlineList(); unsub8(); unsub9(); unsub10(); };
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub4b(); unsub5(); unsub6(); unsub7(); unsubStatus(); unsubOnlineList(); unsub8(); unsub9(); unsub10(); };
   }, [threadId, on, user?.id]);
 
   // Text formatting helpers
@@ -971,6 +984,10 @@ export default function ChatScreen() {
       if (!msgText) return toast('Nothing to translate', 'info');
       // Show language picker first
       setTranslateMsg({ text: msgText, original: msgText });
+    } else if (action === 'tone') {
+      const msgText = msg?.content?.text || msg?.content?.url || msg?.content?.code || '';
+      if (!msgText) return toast('Nothing to adjust', 'info');
+      setToneMsg({ text: msgText, original: msgText });
     } else if (action === 'summarize') {
       const c = msg?.content || {};
       const msgText = c?.text || c?.url || c?.code || '';
@@ -1339,19 +1356,78 @@ export default function ChatScreen() {
           </Modal>
         )}
 
-        {/* ─── AI Result Modal (Translate / Summarize) ─── */}
+        {/* ─── Tone Picker Modal ─── */}
+        {toneMsg && (
+          <Modal visible transparent animationType="slide" onRequestClose={() => setToneMsg(null)}>
+            <View style={z.aiOverlay}>
+              <View style={[z.aiSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
+                <View style={z.aiHeader}>
+                  <View style={[z.aiIconWrap, { backgroundColor: '#10b98112' }]}>
+                    <Ionicons name="options-outline" size={20} color="#10b981" />
+                  </View>
+                  <Text style={[z.aiTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>Adjust tone</Text>
+                  <TouchableOpacity onPress={() => setToneMsg(null)} hitSlop={10}>
+                    <Ionicons name="close" size={22} color={isDark ? '#94a3b8' : '#64748b'} />
+                  </TouchableOpacity>
+                </View>
+                <View style={[z.aiOriginal, { backgroundColor: isDark ? '#0f172a' : '#f8fafc', marginHorizontal: 16, marginTop: 8 }]}>
+                  <Text style={[z.aiOrigLabel, { color: isDark ? '#64748b' : '#94a3b8' }]}>Original</Text>
+                  <Text style={[z.aiOrigText, { color: isDark ? '#94a3b8' : '#64748b' }]} numberOfLines={3}>{toneMsg.original}</Text>
+                </View>
+                <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
+                  {[
+                    { key: 'professional', label: 'Professional', icon: 'briefcase-outline' },
+                    { key: 'friendly', label: 'Friendly', icon: 'happy-outline' },
+                    { key: 'formal', label: 'Formal', icon: 'school-outline' },
+                    { key: 'diplomatic', label: 'Diplomatic', icon: 'leaf-outline' },
+                  ].map(opt => (
+                    <TouchableOpacity key={opt.key}
+                      style={[z.langRow, { borderBottomColor: isDark ? '#334155' : '#f1f5f9' }]}
+                      onPress={async () => {
+                        const msgText = toneMsg.text;
+                        setToneMsg(null);
+                        toast('Adjusting tone...', 'info');
+                        try {
+                          const { data } = await api.post('/translate/tone-adjust', { text: msgText, tone: opt.key });
+                          const r = data?.data || data;
+                          const adjusted = r?.adjusted || r?.text || '';
+                          if (adjusted) {
+                            setAiResult({ type: 'tone', text: adjusted, original: msgText, lang: opt.label });
+                          } else { toast('Failed', 'error'); }
+                        } catch (e) { toast(e?.response?.data?.message || 'Failed', 'error'); }
+                      }} activeOpacity={0.6}>
+                      <Ionicons name={opt.icon} size={18} color="#10b981" />
+                      <Text style={[z.langName, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{opt.label}</Text>
+                      <Ionicons name="chevron-forward" size={16} color={isDark ? '#475569' : '#cbd5e1'} />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+        )}
+
+        {/* ─── AI Result Modal (Translate / Summarize / Tone) ─── */}
         {aiResult && (
           <Modal visible transparent animationType="fade" onRequestClose={() => setAiResult(null)}>
             <View style={z.aiOverlay}>
               <View style={[z.aiSheet, { backgroundColor: isDark ? '#1e293b' : '#fff' }]}>
                 <View style={z.aiHeader}>
-                  <View style={[z.aiIconWrap, { backgroundColor: aiResult.type === 'translate' ? '#06b6d412' : '#8b5cf612' }]}>
-                    <Ionicons name={aiResult.type === 'translate' ? 'language-outline' : 'sparkles-outline'}
-                      size={20} color={aiResult.type === 'translate' ? '#06b6d4' : '#8b5cf6'} />
-                  </View>
-                  <Text style={[z.aiTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>
-                    {aiResult.type === 'translate' ? `Translation${aiResult.lang ? ` (${aiResult.lang})` : ''}` : 'Summary'}
-                  </Text>
+                  {(() => {
+                    const meta = aiResult.type === 'translate'
+                      ? { bg: '#06b6d412', icon: 'language-outline', color: '#06b6d4', title: `Translation${aiResult.lang ? ` (${aiResult.lang})` : ''}` }
+                      : aiResult.type === 'tone'
+                        ? { bg: '#10b98112', icon: 'options-outline', color: '#10b981', title: `${aiResult.lang || 'Adjusted'} tone` }
+                        : { bg: '#8b5cf612', icon: 'sparkles-outline', color: '#8b5cf6', title: 'Summary' };
+                    return (
+                      <>
+                        <View style={[z.aiIconWrap, { backgroundColor: meta.bg }]}>
+                          <Ionicons name={meta.icon} size={20} color={meta.color} />
+                        </View>
+                        <Text style={[z.aiTitle, { color: isDark ? '#f1f5f9' : '#0f172a' }]}>{meta.title}</Text>
+                      </>
+                    );
+                  })()}
                   <TouchableOpacity onPress={() => setAiResult(null)} hitSlop={10}>
                     <Ionicons name="close" size={22} color={isDark ? '#94a3b8' : '#64748b'} />
                   </TouchableOpacity>

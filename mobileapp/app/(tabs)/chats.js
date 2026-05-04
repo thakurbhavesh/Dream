@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../../src/components/Avatar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ImageViewer from '../../src/components/ImageViewer';
-import { getThreads } from '../../src/api/chat';
+import { getThreads, hideGroupThread } from '../../src/api/chat';
 import api from '../../src/api/config';
 import { getCachedThreads, cacheThreads, updateCachedThread } from '../../src/services/cache';
 import { useAuth } from '../../src/store/AuthContext';
@@ -607,6 +607,21 @@ export default function ChatsScreen() {
               {[
                 { icon: pinnedChats?.has?.(longPressItem.id) ? 'pin' : 'pin-outline', label: pinnedChats?.has?.(longPressItem.id) ? 'Unpin' : 'Pin to top', onPress: () => togglePin(longPressItem.id), color: t.accent },
                 { icon: 'archive-outline', label: 'Archive', onPress: () => toggleArchive(longPressItem.id), color: '#f59e0b' },
+                ...(String(longPressItem.id || '').startsWith('group-') ? [{
+                  icon: 'eye-off-outline',
+                  label: 'Hide from list',
+                  color: '#64748b',
+                  onPress: async () => {
+                    const groupId = String(longPressItem.id).replace('group-', '');
+                    setLongPressItem(null);
+                    try {
+                      await hideGroupThread(groupId);
+                      setThreads((prev) => prev.filter((th) => th.id !== `group-${groupId}`));
+                    } catch (e) {
+                      console.warn('[hide-thread] failed:', e?.message);
+                    }
+                  },
+                }] : []),
                 { icon: 'notifications-off-outline', label: 'Mute', onPress: () => setLongPressItem(null), color: '#64748b' },
               ].map((a, i) => (
                 <TouchableOpacity key={i} style={[s.actionRow, { borderTopColor: isDark ? '#334155' : '#f1f5f9' }]} onPress={a.onPress} activeOpacity={0.6}>

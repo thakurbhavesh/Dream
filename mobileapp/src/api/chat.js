@@ -53,3 +53,63 @@ export const searchMessages = async (query, threadId) => {
   const { data } = await api.get('/chat/search', { params });
   return data?.data || data;
 };
+
+// ─── Organizations ──────────────────────────────────────────────────────
+export const getOrganizations = async () => {
+  const { data } = await api.get('/chat/organizations');
+  return data?.data?.organizations || data?.organizations || [];
+};
+
+// ─── Hidden group threads ───────────────────────────────────────────────
+export const hideGroupThread = async (groupId) => {
+  const { data } = await api.post(`/chat/groups/${groupId}/hide`);
+  return data?.data || data;
+};
+
+export const unhideGroupThread = async (groupId) => {
+  const { data } = await api.post(`/chat/groups/${groupId}/unhide`);
+  return data?.data || data;
+};
+
+// ─── AI per-message tools (mirror /translate endpoints) ─────────────────
+export const aiTranslate = async (text, targetLanguage) => {
+  const { data } = await api.post('/translate', { text, targetLanguage });
+  return data?.data || data;
+};
+
+export const aiSummarize = async ({ text, fileUrl, fileName, fileType, fileKey, previousSummary } = {}) => {
+  const { data } = await api.post('/translate/summarize', {
+    text, fileUrl, fileName, fileType, fileKey, previousSummary,
+  });
+  return data?.data || data;
+};
+
+export const aiToneAdjust = async (text, tone = 'professional') => {
+  const { data } = await api.post('/translate/tone-adjust', { text, tone });
+  return data?.data || data;
+};
+
+export const aiSmartReplies = async (message, { context, senderName } = {}) => {
+  const { data } = await api.post('/translate/smart-reply', { message, context, senderName });
+  return data?.data || data;
+};
+
+// ─── Push subscription (Expo token) ─────────────────────────────────────
+// Reuses the same /push/subscribe endpoint as web; we encode the Expo
+// token inside the subscription.endpoint with an "expo:" prefix so the
+// backend dispatcher can route correctly.
+export const registerExpoPushSubscription = async (expoToken) => {
+  if (!expoToken) return null;
+  const subscription = {
+    endpoint: `expo:${expoToken}`,
+    keys: { p256dh: '', auth: '' },
+  };
+  const { data } = await api.post('/push/subscribe', { subscription });
+  return data?.data || data;
+};
+
+export const unregisterExpoPushSubscription = async (expoToken) => {
+  if (!expoToken) return null;
+  const { data } = await api.post('/push/unsubscribe', { endpoint: `expo:${expoToken}` });
+  return data?.data || data;
+};

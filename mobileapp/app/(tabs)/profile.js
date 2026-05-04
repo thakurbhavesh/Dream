@@ -74,7 +74,7 @@ const FONTS_LIST = ['SF Display', 'Poppins', 'Noto Sans', 'Inter', 'Roboto'];
 const FONT_SIZES_LIST = ['Small', 'Normal', 'Large'];
 
 export default function ProfileScreen() {
-  const { user, refreshUser, logout: doLogout } = useAuth();
+  const { user, refreshUser, logout: doLogout, organizations, orgsLoading, loadOrganizations, switchOrganization } = useAuth();
   const { theme: t, mode, setTheme, isDark, setBrand, setFont, setFontSize, brandColor: currentBrand, fontFamily: currentFont, fontSizeKey: currentFontSize } = useTheme();
   const toast = useToast();
 
@@ -185,6 +185,18 @@ export default function ProfileScreen() {
     const sub = AppState.addEventListener('change', (state) => { if (state === 'active') loadPerms(); });
     return () => sub.remove();
   }, [loadPerms]);
+
+  // Load organizations once user is available so switcher is ready
+  useEffect(() => {
+    if (user && loadOrganizations) loadOrganizations();
+  }, [user, loadOrganizations]);
+
+  const handleSwitchOrg = useCallback(async (orgId) => {
+    if (Number(orgId) === Number(user?.orgId)) return;
+    await switchOrganization(orgId);
+    if (refreshUser) await refreshUser();
+    toast?.success?.('Organization switched');
+  }, [user?.orgId, switchOrganization, refreshUser, toast]);
 
   const requestPerm = useCallback(async (type) => {
     try {
@@ -373,6 +385,43 @@ export default function ProfileScreen() {
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={t.textTer} />
               </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {/* ═══════════ ORGANIZATIONS ═══════════ */}
+        {organizations.length > 1 && (
+          <>
+            <Text style={[z.groupLabel, { color: t.textTer }]}>ORGANIZATIONS</Text>
+            <View style={[z.section, { backgroundColor: t.card }]}>
+              {organizations.map((org, idx) => {
+                const active = Number(org.organization_id) === Number(user?.orgId);
+                return (
+                  <TouchableOpacity
+                    key={org.organization_id}
+                    style={[z.sectionHeader, idx > 0 && { borderTopWidth: 1, borderTopColor: t.borderLight }]}
+                    onPress={() => handleSwitchOrg(org.organization_id)}
+                    activeOpacity={0.6}
+                    disabled={active}
+                  >
+                    <View style={[z.sectionIcon, { backgroundColor: active ? t.accentBg : '#94a3b815' }]}>
+                      <Ionicons name={active ? 'checkmark-circle' : 'business-outline'} size={17} color={active ? t.accent : t.textTer} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[z.sectionLabel, { color: t.text }]} numberOfLines={1}>{org.org_name || `Org #${org.organization_id}`}</Text>
+                      <Text style={{ fontSize: 11, color: t.textTer, marginTop: 1 }} numberOfLines={1}>
+                        {org.role_name || org.role_key || 'Member'}{active ? ' · Current' : ''}
+                      </Text>
+                    </View>
+                    {!active && <Ionicons name="swap-horizontal" size={16} color={t.textTer} />}
+                  </TouchableOpacity>
+                );
+              })}
+              {orgsLoading && (
+                <View style={{ padding: 12, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color={t.accent} />
+                </View>
+              )}
             </View>
           </>
         )}

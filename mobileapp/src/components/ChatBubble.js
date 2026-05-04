@@ -167,6 +167,7 @@ const getActions = (isOwn, type, message, viewerIsAdmin) => {
   if (type === 'text' || type === 'link' || type === 'code') {
     actions.push({ key: 'translate', icon: 'language-outline', label: 'Translate', color: '#06b6d4' });
     actions.push({ key: 'summarize', icon: 'sparkles-outline', label: 'Summarize', color: '#8b5cf6' });
+    actions.push({ key: 'tone', icon: 'options-outline', label: 'Adjust tone', color: '#10b981' });
   }
   // Actions
   actions.push({ key: 'reply', icon: 'arrow-undo', label: 'Reply', color: '#3b82f6' });
