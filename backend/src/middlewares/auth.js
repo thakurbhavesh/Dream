@@ -23,9 +23,10 @@ const auth = (req, res, next) => {
 
   try {
     const payload = jwt.verify(resolvedToken, process.env.JWT_SECRET);
-    const sub = Number(payload?.sub);
-    const org = Number(payload?.org);
-    if (!Number.isFinite(sub) || sub <= 0 || !Number.isFinite(org) || org <= 0) {
+    // Reject only tokens with no `sub` at all. Accept both numeric user ids
+    // and string subs (e.g. 'guest-123' for meeting guests). `org` is optional
+    // since owner-level / pre-org-assignment tokens may legitimately omit it.
+    if (payload?.sub === undefined || payload?.sub === null || payload?.sub === '') {
       const err = new Error('Invalid token claims');
       err.status = 401;
       return next(err);
