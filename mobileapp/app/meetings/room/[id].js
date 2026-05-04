@@ -15,7 +15,7 @@ import {
   StatusBar,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../src/store/AuthContext';
@@ -99,6 +99,13 @@ export default function MeetingRoomScreen() {
   const { user } = useAuth();
   const { theme: t } = useTheme();
   const meeting = useMeeting();
+  const insets = useSafeAreaInsets();
+  // Bottom controls dock sits ABOVE the home indicator; everything above it
+  // (scroll content, reactions feed) needs the same offset so nothing hides
+  // behind the dock.
+  const controlsBottom = Math.max(insets.bottom, 12);
+  const controlsHeight = 68; // ctrlBtn 48 + 10 padding * 2
+  const scrollBottomPad = controlsBottom + controlsHeight + 16;
   const [meetingData, setMeetingData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showChat, setShowChat] = useState(false);
@@ -204,7 +211,7 @@ export default function MeetingRoomScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      <SafeAreaView style={[s.container, { backgroundColor: '#0f172a' }]} edges={['top', 'bottom']}>
+      <SafeAreaView style={[s.container, { backgroundColor: '#0f172a' }]} edges={['top']}>
         {/* Header */}
         <View style={s.header}>
           <View style={{ flex: 1 }}>
@@ -223,7 +230,7 @@ export default function MeetingRoomScreen() {
         </View>
 
         {/* Stage: pinned tile (if any) + grid */}
-        <ScrollView contentContainerStyle={{ padding: 8, paddingBottom: 100 }}>
+        <ScrollView contentContainerStyle={{ padding: 8, paddingBottom: scrollBottomPad }}>
           {pinnedTile && (
             <ParticipantTile
               participant={pinnedTile}
@@ -261,7 +268,7 @@ export default function MeetingRoomScreen() {
         </ScrollView>
 
         {/* Bottom controls */}
-        <View style={s.controls}>
+        <View style={[s.controls, { bottom: controlsBottom }]}>
           <TouchableOpacity
             style={[s.ctrlBtn, meeting.isMuted ? s.ctrlOff : s.ctrlOn]}
             onPress={meeting.toggleMute}
