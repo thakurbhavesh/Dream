@@ -199,6 +199,10 @@ export const SocketProvider = ({
         instance.removeAllListeners();
         instance.close();
       }
+      // Drop the global ref so consumers don't reach into a closed socket.
+      if (typeof window !== "undefined" && window.__chatSocket === instance) {
+        delete window.__chatSocket;
+      }
       setSocket(null);
       setConnection({ status: "idle", error: null, transport: null });
     };

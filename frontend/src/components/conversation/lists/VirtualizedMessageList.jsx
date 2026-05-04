@@ -255,54 +255,62 @@ const VirtualizedMessageList = ({
       return;
     }
     setApiSearchLoading(true);
+    let cancelled = false;
     apiSearchTimerRef.current = setTimeout(() => {
       if (semanticSearchMode && hasTextQuery) {
         // AI Semantic Search — search by meaning
         semanticSearchMessages(searchQuery, { threadId, limit: 100 })
           .then((data) => {
+            if (cancelled) return;
             const results = (data?.results ?? []).map((r) => ({ ...r, id: String(r.id), _apiResult: true }));
             setApiSearchResults(results);
             setSemanticInterpretation(data?.interpretation || "");
             setSmartSearchIntent("");
           })
           .catch((err) => {
+            if (cancelled) return;
             console.error("[semantic-search] error:", err?.message);
             setApiSearchResults([]);
             setSemanticInterpretation("");
           })
-          .finally(() => setApiSearchLoading(false));
+          .finally(() => { if (!cancelled) setApiSearchLoading(false); });
       } else if (smartSearchMode && hasTextQuery) {
         // AI Smart Search — natural language query
         smartSearchMessages(searchQuery, { threadId, limit: 100 })
           .then((data) => {
+            if (cancelled) return;
             const results = (data?.results ?? []).map((r) => ({ ...r, id: String(r.id), _apiResult: true }));
             setApiSearchResults(results);
             setSmartSearchIntent(data?.filters?.intent || "");
             setSemanticInterpretation("");
           })
           .catch((err) => {
+            if (cancelled) return;
             console.error("[smart-search] error:", err?.message);
             setApiSearchResults([]);
             setSmartSearchIntent("");
           })
-          .finally(() => setApiSearchLoading(false));
+          .finally(() => { if (!cancelled) setApiSearchLoading(false); });
       } else {
         // Normal search
         const typesArray = hasTypeFilter ? [...typeFilters] : undefined;
         apiSearchMessages(hasTextQuery ? searchQuery : "", { threadId, limit: 100, types: typesArray })
           .then((data) => {
+            if (cancelled) return;
             const results = (data?.results ?? []).map((r) => ({ ...r, id: String(r.id), _apiResult: true }));
             setApiSearchResults(results);
             setSmartSearchIntent("");
           })
           .catch((err) => {
+            if (cancelled) return;
             console.error("[search] API error:", err?.message);
             setApiSearchResults([]);
           })
-          .finally(() => setApiSearchLoading(false));
+          .finally(() => { if (!cancelled) setApiSearchLoading(false); });
       }
     }, (smartSearchMode || semanticSearchMode) ? 600 : 400);
     return () => {
+      cancelled = true;
       if (apiSearchTimerRef.current) clearTimeout(apiSearchTimerRef.current);
     };
   }, [searchQuery, searchEnabled, threadId, currentUserId, typeFiltersKey, smartSearchMode, semanticSearchMode]);
