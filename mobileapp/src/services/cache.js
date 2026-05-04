@@ -48,7 +48,10 @@ export const updateCachedThread = async (threadId, updates) => {
     const idx = threads.findIndex(t => t.id === threadId);
     if (idx === -1) return;
     threads[idx] = { ...threads[idx], ...updates };
-    await AsyncStorage.setItem(KEYS.threads, JSON.stringify(threads));
+    // Re-write through the TTL wrapper so the cache keeps its 24h expiry;
+    // a raw setItem here would strip the _ts envelope and turn the cache
+    // into immortal storage.
+    await setWithTTL(KEYS.threads, threads);
   } catch {}
 };
 
