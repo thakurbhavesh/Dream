@@ -5042,8 +5042,9 @@ const getOtpLogs = async (req, res, next) => {
               ov.attempt_count, ov.max_attempts, ov.ip_address,
               ov.created_at, ov.expires_at, ov.verified_at, ov.updated_at
        FROM otp_verifications ov
-       JOIN users u ON u.user_id = ov.user_id
+       LEFT JOIN users u ON u.user_id = ov.user_id
        WHERE ov.organization_id = $1
+          OR (ov.organization_id IS NULL AND ov.user_id IS NULL)
        ORDER BY ov.created_at DESC
        LIMIT 25`,
       [orgId]

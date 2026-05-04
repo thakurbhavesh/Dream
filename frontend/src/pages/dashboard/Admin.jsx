@@ -34,6 +34,7 @@ const Controls = lazy(() => import("../../components/Admin/tabs/Controls.jsx"));
 const Billing = lazy(() => import("../../components/Admin/tabs/Billing.jsx"));
 const Advanced = lazy(() => import("../../components/Admin/tabs/Advanced.jsx"));
 const ActivityLogs = lazy(() => import("../../components/Admin/tabs/ActivityLogs.jsx"));
+const OtpVerifications = lazy(() => import("../../components/Admin/tabs/OtpVerifications.jsx"));
 
 const preloadAdminTabs = () => {
   import("../../components/Admin/tabs/Users.jsx");
@@ -42,6 +43,7 @@ const preloadAdminTabs = () => {
   import("../../components/Admin/tabs/Billing.jsx");
   import("../../components/Admin/tabs/Advanced.jsx");
   import("../../components/Admin/tabs/ActivityLogs.jsx");
+  import("../../components/Admin/tabs/OtpVerifications.jsx");
 };
 
 const ensureDeviceId = () => {
@@ -124,7 +126,7 @@ const Admin = () => {
   }, []);
 
   const tabItems = useMemo(() => {
-    const tabs = ["Home", "Users", "Groups", "Controls", "Billing", "Activity Logs"];
+    const tabs = ["Home", "Users", "Groups", "Controls", "Billing", "Activity Logs", "OTP Verifications"];
     if (role === "1") {
       tabs.push("Advanced");
     }
@@ -297,6 +299,8 @@ const Admin = () => {
       case 5:
         return <ActivityLogs />;
       case 6:
+        return <OtpVerifications />;
+      case 7:
         return role === "1" ? <Advanced /> : null;
       default:
         return null;
