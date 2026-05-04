@@ -94,7 +94,6 @@ export default function MeetingDetailScreen() {
     setBusy(true);
     try {
       await changeMeetingStatus(id, 'live');
-      Alert.alert('Started', 'Meeting is now live. Real-time room is on the web app for now.');
       await load();
     } catch (e) {
       Alert.alert('Failed', e?.response?.data?.message || e.message);
@@ -310,13 +309,6 @@ export default function MeetingDetailScreen() {
             </View>
           )}
 
-          {/* Note about video room */}
-          <View style={[s.note, { backgroundColor: t.accentBg, borderColor: t.accent }]}>
-            <Ionicons name="information-circle-outline" size={18} color={t.accent} />
-            <Text style={[s.noteTxt, { color: t.accent }]}>
-              Video room is currently web-only. Use the meeting link on web to join the live call.
-            </Text>
-          </View>
         </ScrollView>
 
         {/* Action bar */}
@@ -324,7 +316,10 @@ export default function MeetingDetailScreen() {
           {isHost && !isLive && !isPast && (
             <TouchableOpacity
               style={[s.actionBtn, { backgroundColor: t.accent }]}
-              onPress={startMeeting}
+              onPress={async () => {
+                await startMeeting();
+                router.push(`/meetings/room/${id}`);
+              }}
               disabled={busy}
               activeOpacity={0.85}
             >
@@ -332,16 +327,37 @@ export default function MeetingDetailScreen() {
               <Text style={s.actionTxt}>Start meeting</Text>
             </TouchableOpacity>
           )}
-          {isHost && isLive && (
+          {isLive && !isHost && (
             <TouchableOpacity
-              style={[s.actionBtn, { backgroundColor: '#dc2626' }]}
-              onPress={endMeeting}
+              style={[s.actionBtn, { backgroundColor: t.accent }]}
+              onPress={() => router.push(`/meetings/room/${id}`)}
               disabled={busy}
               activeOpacity={0.85}
             >
-              <Ionicons name="stop" size={18} color="#fff" />
-              <Text style={s.actionTxt}>End meeting</Text>
+              <Ionicons name="enter" size={18} color="#fff" />
+              <Text style={s.actionTxt}>Join now</Text>
             </TouchableOpacity>
+          )}
+          {isHost && isLive && (
+            <>
+              <TouchableOpacity
+                style={[s.actionBtn, { backgroundColor: t.accent }]}
+                onPress={() => router.push(`/meetings/room/${id}`)}
+                disabled={busy}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="enter" size={18} color="#fff" />
+                <Text style={s.actionTxt}>Rejoin</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.iconBtn, { backgroundColor: '#dc262615' }]}
+                onPress={endMeeting}
+                disabled={busy}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="stop" size={18} color="#dc2626" />
+              </TouchableOpacity>
+            </>
           )}
           {isHost && !isLive && (
             <TouchableOpacity
