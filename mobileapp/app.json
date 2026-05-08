@@ -83,6 +83,14 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "TeamChatX needs camera access to scan QR codes for linking your web browser.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "TeamChatX needs your location to share it in chats."

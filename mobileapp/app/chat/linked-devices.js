@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, FlatList, Alert, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,8 +7,18 @@ import api from '../../src/api/config';
 import { useToast } from '../../src/components/Toast';
 import { useTheme } from '../../src/store/ThemeContext';
 
+// expo-camera is a native module — load lazily so the screen never crashes
+// in Expo Go when the binary isn't present, and so we can show a clear
+// fallback UI instead of a black scanner.
 let CameraView, useCameraPermissions;
-try { const c = require('expo-camera'); CameraView = c.CameraView; useCameraPermissions = c.useCameraPermissions; } catch {}
+let cameraLoadError = null;
+try {
+  const c = require('expo-camera');
+  CameraView = c.CameraView;
+  useCameraPermissions = c.useCameraPermissions;
+} catch (err) {
+  cameraLoadError = err?.message || 'expo-camera not available';
+}
 
 const timeAgo = (d) => {
   if (!d) return '';
@@ -30,6 +40,13 @@ export default function LinkedDevicesScreen() {
   const [loading, setLoading] = useState(true);
   const [scanned, setScanned] = useState(false);
   const [processing, setProcessing] = useState(false);
+  // Camera permission hook — only call when expo-camera loaded successfully.
+  // Calling it conditionally is safe here because the lifetime of the hook
+  // is fixed: either the native module exists and we call it once, or it
+  // doesn't and we never call it.
+  const [permission, requestPermission] = (typeof useCameraPermissions === 'function')
+    ? useCameraPermissions()
+    : [null, null];
 
   const ACCENT = t.accent;
   const bg = isDark ? '#0b141a' : '#fff';
@@ -104,14 +121,88 @@ export default function LinkedDevicesScreen() {
     finally { setProcessing(false); }
   };
 
+  const openLinker = useCallback(async () => {
+    setScanned(false);
+    if (!CameraView || typeof useCameraPermissions !== 'function') {
+      Alert.alert(
+        'Scanner unavailable',
+        'The QR scanner requires the full app build. If you are using Expo Go, open the EAS development or production build instead.'
+      );
+      return;
+    }
+    // Resolve current permission first; ask only if not already granted.
+    let granted = permission?.granted;
+    if (!granted && requestPermission) {
+      const res = await requestPermission();
+      granted = res?.granted;
+    }
+    if (!granted) {
+      // Permission denied — bounce user to scan screen anyway so they see
+      // the explicit "Open Settings" CTA there.
+      setMode('scan');
+      return;
+    }
+    setMode('scan');
+  }, [permission?.granted, requestPermission]);
+
+  const openSystemSettings = () => {
+    if (Platform.OS === 'ios') {
+      Linking.openURL('app-settings:').catch(() => Linking.openSettings?.());
+    } else {
+      Linking.openSettings?.();
+    }
+  };
+
   // ─── Scanner ───
   if (mode === 'scan') {
+    const cameraMissing = !CameraView;
+    const permissionLoading = !cameraMissing && permission == null;
+    const permissionDenied = !cameraMissing && permission && !permission.granted;
+
     return (
       <View style={[z.root, { backgroundColor: '#000' }]}>
-        {CameraView ? (
-          <CameraView style={z.camera} barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={scanned ? undefined : handleScan} />
-        ) : <View style={z.camera}><Text style={{ color: '#fff', textAlign: 'center', marginTop: 100 }}>Camera not available</Text></View>}
+        {cameraMissing ? (
+          <View style={[z.camera, z.fallbackBox]}>
+            <Ionicons name="alert-circle-outline" size={48} color="#fff" />
+            <Text style={z.fallbackTitle}>Scanner unavailable</Text>
+            <Text style={z.fallbackBody}>
+              {cameraLoadError
+                ? 'The camera module failed to load. This screen needs the full EAS build of the app — Expo Go cannot run native camera code.'
+                : 'Camera module is missing from this build.'}
+            </Text>
+          </View>
+        ) : permissionLoading ? (
+          <View style={[z.camera, z.fallbackBox]}>
+            <ActivityIndicator color="#fff" />
+            <Text style={[z.fallbackBody, { marginTop: 12 }]}>Requesting camera permission…</Text>
+          </View>
+        ) : permissionDenied ? (
+          <View style={[z.camera, z.fallbackBox]}>
+            <Ionicons name="camera-reverse-outline" size={48} color="#fff" />
+            <Text style={z.fallbackTitle}>Camera access needed</Text>
+            <Text style={z.fallbackBody}>
+              We need camera permission to scan the QR code on the web login page.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+              {permission?.canAskAgain ? (
+                <TouchableOpacity style={z.fallbackBtn} onPress={requestPermission} activeOpacity={0.8}>
+                  <Text style={z.fallbackBtnTxt}>Allow camera</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={z.fallbackBtn} onPress={openSystemSettings} activeOpacity={0.8}>
+                  <Text style={z.fallbackBtnTxt}>Open Settings</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        ) : (
+          <CameraView
+            style={z.camera}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={scanned ? undefined : handleScan}
+          />
+        )}
 
         <View style={[z.scanHeader, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={() => { setMode('list'); setScanned(false); }} style={z.scanClose}>
@@ -121,20 +212,24 @@ export default function LinkedDevicesScreen() {
           <View style={{ width: 44 }} />
         </View>
 
-        <View style={z.scanCenter}>
-          <View style={z.scanFrame}>
-            <View style={[z.c, z.tl]} /><View style={[z.c, z.tr]} />
-            <View style={[z.c, z.bl]} /><View style={[z.c, z.br]} />
-          </View>
-          <Text style={z.scanHint}>Point camera at QR code{'\n'}on web login page</Text>
-          {processing && <ActivityIndicator color="#fff" style={{ marginTop: 16 }} />}
-        </View>
+        {!cameraMissing && permission?.granted && (
+          <>
+            <View style={z.scanCenter}>
+              <View style={z.scanFrame}>
+                <View style={[z.c, z.tl]} /><View style={[z.c, z.tr]} />
+                <View style={[z.c, z.bl]} /><View style={[z.c, z.br]} />
+              </View>
+              <Text style={z.scanHint}>Point camera at QR code{'\n'}on web login page</Text>
+              {processing && <ActivityIndicator color="#fff" style={{ marginTop: 16 }} />}
+            </View>
 
-        {scanned && !processing && (
-          <TouchableOpacity style={z.rescanBtn} onPress={() => setScanned(false)}>
-            <Ionicons name="refresh" size={18} color="#fff" />
-            <Text style={z.rescanText}>Scan Again</Text>
-          </TouchableOpacity>
+            {scanned && !processing && (
+              <TouchableOpacity style={z.rescanBtn} onPress={() => setScanned(false)}>
+                <Ionicons name="refresh" size={18} color="#fff" />
+                <Text style={z.rescanText}>Scan Again</Text>
+              </TouchableOpacity>
+            )}
+          </>
         )}
       </View>
     );
@@ -160,7 +255,7 @@ export default function LinkedDevicesScreen() {
           <>
             {/* Link button */}
             <TouchableOpacity style={[z.linkBtn, { borderColor: ACCENT }]}
-              onPress={() => { setScanned(false); setMode('scan'); }} activeOpacity={0.7}>
+              onPress={openLinker} activeOpacity={0.7}>
               <View style={[z.linkIcon, { backgroundColor: ACCENT }]}>
                 <Ionicons name="qr-code" size={22} color="#fff" />
               </View>
@@ -275,4 +370,10 @@ const z = StyleSheet.create({
   scanHint: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600', marginTop: 24, textAlign: 'center', lineHeight: 20 },
   rescanBtn: { position: 'absolute', bottom: 60, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#3b82f6', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 28 },
   rescanText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  fallbackBox: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 },
+  fallbackTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginTop: 6 },
+  fallbackBody: { color: 'rgba(255,255,255,0.78)', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  fallbackBtn: { backgroundColor: '#3b82f6', paddingHorizontal: 22, paddingVertical: 12, borderRadius: 24 },
+  fallbackBtnTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
