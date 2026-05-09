@@ -1,0 +1,91 @@
+name: Desktop Release
+
+# Triggers:
+#  • push a tag like  desktop-v1.0.1   →  full Win + macOS + Linux build,
+#                                          uploads to GitHub Releases as
+#                                          v<package.json version>.
+#  • Actions tab → "Run workflow"      →  manual trigger (handy when retrying
+#                                          a failed run without bumping
+#                                          the version again).
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+# electron-builder needs to create / append to a Release in this repo.
+permissions:
+  contents: write
+
+# Avoid two parallel runs (e.g. tag push + manual dispatch) clobbering each
+# other's upload assets. Tag-based runs queue; cancel-in-progress=false
+# means a second push won't kill the first.
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest   # → TeamChatX-Setup-X.Y.Z.exe + latest.yml
+          - os: macos-latest     # → TeamChatX-X.Y.Z.dmg + latest-mac.yml
+          - os: ubuntu-latest    # → TeamChatX-X.Y.Z.AppImage + latest-linux.yml
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # Cache npm by lockfile so reinstalls are seconds, not minutes.
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop-app/package-lock.json
+
+      # Frontend must be built first — electron-builder's extraResources copy
+      # ../frontend/dist into the installer's resources/frontend folder.
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install desktop deps
+        working-directory: desktop-app
+        run: npm ci --no-audit --no-fund
+
+      # The actual build + publish step. electron-builder reads:
+      #  • GH_TOKEN     → uploads to GitHub Releases (auto-provided
+      #                    by Actions; scoped to this repo only).
+      #  • CSC_IDENTITY_AUTO_DISCOVERY=false → skip macOS code-signing
+      #                    (no Apple Developer cert in CI). Builds will be
+      #                    unsigned but still installable; users see a
+      #                    Gatekeeper warning the first launch.
+      - name: Build & publish desktop installer
+        working-directory: desktop-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run release
+
+      # Always-run safety net: if publish step fails, surface the unpacked
+      # output as a workflow artifact so we can debug locally.
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-${{ matrix.os }}-debug
+          path: desktop-app/release/**
+          if-no-files-found: ignore
+          retention-days: 7
