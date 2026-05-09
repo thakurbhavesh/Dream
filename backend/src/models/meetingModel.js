@@ -81,7 +81,16 @@ const getAttendanceReport = async (meeting_id) => {
 };
 
 const findById = async (id) => {
-  const { rows } = await db.query('SELECT * FROM meetings WHERE id = $1', [id]);
+  // Join host so the details dialog can render name + avatar without a
+  // second round trip. Falls back to the raw row if the host user was
+  // deleted.
+  const { rows } = await db.query(
+    `SELECT m.*, u.name AS host_name, u.email AS host_email, u.profile_url AS host_avatar
+     FROM meetings m
+     LEFT JOIN users u ON u.user_id = m.host_id
+     WHERE m.id = $1`,
+    [id]
+  );
   return rows[0];
 };
 

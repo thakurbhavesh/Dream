@@ -28,8 +28,9 @@ import {
   PiUsersThreeBold,
 } from "react-icons/pi";
 import { getUpcomingMeetings, getPastMeetings, rsvpMeeting, deleteMeeting, getMeetingAttendance } from "../../services/meetingApi.js";
-import { Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
+import { Dialog, DialogTitle, DialogContent, DialogActions, Snackbar } from "@mui/material";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
+import MeetingDetailsDialog from "./MeetingDetailsDialog.jsx";
 
 const statusColors = {
   waiting: "info",
@@ -66,6 +67,9 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
   const [attendanceOpen, setAttendanceOpen] = useState(false);
   const [attendanceData, setAttendanceData] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  // Full-info "click on a card" details dialog
+  const [detailsOpenId, setDetailsOpenId] = useState(null);
+  const [detailsToast, setDetailsToast] = useState("");
 
   const openAttendance = async (meeting) => {
     setAttendanceOpen(true);
@@ -200,11 +204,18 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
             return (
               <Box
                 key={m.id}
+                onClick={(e) => {
+                  // Tapping inline buttons / chips shouldn't open the dialog;
+                  // they handle click via stopPropagation below where needed.
+                  if (e.defaultPrevented) return;
+                  setDetailsOpenId(m.id);
+                }}
                 sx={{
                   p: 1.5,
                   borderRadius: 1.5,
                   mb: 0.5,
                   bgcolor: theme.palette.action.hover,
+                  cursor: "pointer",
                   "&:hover": { bgcolor: theme.palette.action.selected },
                   transition: "background 0.15s",
                 }}
@@ -246,14 +257,14 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                           label={m.meeting_id}
                           size="small"
                           variant="outlined"
-                          onClick={() => copyId(m.meeting_id)}
+                          onClick={(e) => { e.stopPropagation(); copyId(m.meeting_id); }}
                           icon={<PiCopyBold size={10} />}
                           sx={{ height: 22, fontSize: 11, cursor: "pointer" }}
                         />
                       </Tooltip>
                       {tab !== "past" && (
                         <Tooltip title="Copy invite link">
-                          <IconButton size="small" onClick={() => copyInviteLink(m.meeting_id)} sx={{ p: 0.5 }}>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); copyInviteLink(m.meeting_id); }} sx={{ p: 0.5 }}>
                             <PiLinkBold size={12} />
                           </IconButton>
                         </Tooltip>
@@ -272,7 +283,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                         variant="contained"
                         size="small"
                         startIcon={<PiVideoCameraBold size={14} />}
-                        onClick={() => onJoinMeeting?.(m)}
+                        onClick={(e) => { e.stopPropagation(); onJoinMeeting?.(m); }}
                         sx={{ minWidth: 0, px: 1.5, py: 0.5, fontSize: 12, textTransform: "none" }}
                       >
                         Join
@@ -280,7 +291,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                     )}
                     {tab !== "past" && isHost && m.status === "waiting" && (
                       <Tooltip title="Delete">
-                        <IconButton size="small" onClick={() => handleDelete(m.id)}>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDelete(m.id); }}>
                           <PiTrashBold size={14} />
                         </IconButton>
                       </Tooltip>
@@ -288,12 +299,12 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                     {tab === "past" && isHost && (
                       <>
                         <Tooltip title="Attendance report">
-                          <IconButton size="small" onClick={() => openAttendance(m)}>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); openAttendance(m); }}>
                             <PiUsersThreeBold size={14} />
                           </IconButton>
                         </Tooltip>
                         <Tooltip title="Remove from history">
-                          <IconButton size="small" onClick={() => handleDelete(m.id)}>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); handleDelete(m.id); }}>
                             <PiTrashBold size={14} />
                           </IconButton>
                         </Tooltip>
@@ -311,7 +322,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                       color="success"
                       variant="outlined"
                       icon={<PiCheckBold size={12} />}
-                      onClick={() => handleRsvp(m.id, "accepted")}
+                      onClick={(e) => { e.stopPropagation(); handleRsvp(m.id, "accepted"); }}
                       sx={{ cursor: "pointer", height: 24 }}
                     />
                     <Chip
@@ -320,7 +331,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                       color="error"
                       variant="outlined"
                       icon={<PiXBold size={12} />}
-                      onClick={() => handleRsvp(m.id, "declined")}
+                      onClick={(e) => { e.stopPropagation(); handleRsvp(m.id, "declined"); }}
                       sx={{ cursor: "pointer", height: 24 }}
                     />
                     <Chip
@@ -328,7 +339,7 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
                       size="small"
                       variant="outlined"
                       icon={<PiQuestionBold size={12} />}
-                      onClick={() => handleRsvp(m.id, "tentative")}
+                      onClick={(e) => { e.stopPropagation(); handleRsvp(m.id, "tentative"); }}
                       sx={{ cursor: "pointer", height: 24 }}
                     />
                   </Stack>
@@ -372,6 +383,21 @@ const MeetingsList = ({ onJoinMeeting, onClose }) => {
           <Button onClick={() => setAttendanceOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Full meeting details — opens when a card is clicked */}
+      <MeetingDetailsDialog
+        open={Boolean(detailsOpenId)}
+        meetingId={detailsOpenId}
+        onClose={() => setDetailsOpenId(null)}
+        onCopyToast={(msg) => setDetailsToast(msg)}
+      />
+      <Snackbar
+        open={Boolean(detailsToast)}
+        autoHideDuration={1800}
+        onClose={() => setDetailsToast("")}
+        message={detailsToast}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 };
