@@ -1,10 +1,18 @@
-const { app, BrowserWindow, ipcMain, shell, session } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, shell, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { exec } = require("child_process");
 const { setupDownloadManager } = require("./downloadManager");
 
 const isDev = !app.isPackaged;
+const DEV_URL = "http://localhost:5173/app";
+
+// Single-instance lock — second launch focuses the existing window instead
+// of opening another full process (which would mean two socket sessions).
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 const APP_USER_MODEL_ID = "com.teamchatx.desktop";
 const WIN_NOTIFICATION_REG_PATH = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\${APP_USER_MODEL_ID}`;
 const isWindows = process.platform === "win32";
@@ -122,34 +130,142 @@ function createWindow() {
       symbolColor: "#ffffff",
       height: 36,
     };
+  } else if (process.platform === "darwin") {
+    // macOS: show native traffic-light buttons but keep them flush so the
+    // chrome blends with the app background. Without this the window is
+    // borderless and there's no way to close/min/max with the mouse.
+    windowOptions.titleBarStyle = "hiddenInset";
+    windowOptions.frame = true;
+    windowOptions.transparent = false;
   }
 
   const win = new BrowserWindow(windowOptions);
 
   if (isDev) {
     // During dev: load from Vite/React dev server
-    win.loadURL("http://localhost:5173/app");
+    win.loadURL(DEV_URL).catch((err) => {
+      console.error("[main] dev server load failed (is `npm run dev` running?):", err.message);
+    });
   } else {
-    // In production: load built index.html
-    const indexPath = path.join(
-      __dirname,
-      "../chatx-frontend/build/index.html"
-    );
-    if (fs.existsSync(indexPath)) {
+    // In production: load the Vite build output. The previous path pointed
+    // to ../chatx-frontend/build/index.html, which doesn't exist in this
+    // repo — Vite emits to ../frontend/dist. Try both for safety.
+    const candidates = [
+      path.join(__dirname, "../frontend/dist/index.html"),
+      path.join(__dirname, "../chatx-frontend/build/index.html"), // legacy
+    ];
+    const indexPath = candidates.find((p) => fs.existsSync(p));
+    if (indexPath) {
       win.loadFile(indexPath);
     } else {
-      console.error("Build not found! Run frontend build first.");
+      console.error("[main] frontend build not found. Run `npm run build` in /frontend first.");
+      // Render a simple HTML so the user sees a clear error instead of a blank window
+      win.loadURL(
+        "data:text/html;charset=utf-8," +
+        encodeURIComponent(
+          '<body style="font-family:system-ui;padding:40px;color:#0f172a;background:#f8fafc">' +
+          '<h1 style="margin:0 0 12px">TeamChatX desktop</h1>' +
+          '<p>Frontend build was not found. Run:</p>' +
+          '<pre style="background:#0f172a;color:#fff;padding:12px;border-radius:6px">cd frontend && npm run build</pre>' +
+          '<p>Then launch this app again.</p></body>'
+        )
+      );
     }
   }
+
+  return win;
 }
+
+// Permissions we want to allow from the renderer. Anything else (e.g.
+// midi-sysex, openExternal that requires user gesture, hid, serial, etc.)
+// is denied so a compromised page can't quietly demand sensitive access.
+const ALLOWED_PERMISSIONS = new Set([
+  "media",                   // mic / camera for calls
+  "notifications",
+  "clipboard-read",          // paste image into chat
+  "clipboard-sanitized-write",
+  "fullscreen",              // meeting full-screen
+  "display-capture",         // screen share
+  "geolocation",             // share location feature
+]);
+
+const buildApplicationMenu = () => {
+  const isMac = process.platform === "darwin";
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    }] : []),
+    {
+      label: "File",
+      submenu: [
+        isMac ? { role: "close" } : { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        ...(isMac
+          ? [{ role: "pasteAndMatchStyle" }, { role: "delete" }, { role: "selectAll" }]
+          : [{ role: "delete" }, { type: "separator" }, { role: "selectAll" }]),
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        ...(isDev ? [{ role: "toggleDevTools" }] : []),
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        ...(isMac ? [{ type: "separator" }, { role: "front" }] : [{ role: "close" }]),
+      ],
+    },
+  ];
+  return Menu.buildFromTemplate(template);
+};
 
 app.whenReady().then(() => {
   if (isWindows) {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
 
+  Menu.setApplicationMenu(buildApplicationMenu());
+
   session.defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback, details = {}) => {
+      if (!ALLOWED_PERMISSIONS.has(permission)) {
+        // Deny anything not on the allow-list (midi-sysex, hid, serial, etc.)
+        callback(false);
+        return;
+      }
       if (permission === "media") {
         const mediaTypes = Array.isArray(details.mediaTypes)
           ? details.mediaTypes
@@ -174,6 +290,16 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// When the user launches the app a second time, focus the existing window.
+app.on("second-instance", () => {
+  const [existing] = BrowserWindow.getAllWindows();
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+  }
 });
 
 app.on("window-all-closed", () => {
