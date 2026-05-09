@@ -1,17 +1,28 @@
 name: Desktop Release
 
 # Triggers:
-#  • push a tag like  desktop-v1.0.1   →  full Win + macOS + Linux build,
-#                                          uploads to GitHub Releases as
-#                                          v<package.json version>.
-#  • Actions tab → "Run workflow"      →  manual trigger (handy when retrying
-#                                          a failed run without bumping
-#                                          the version again).
+#  • Push a tag like  desktop-v1.0.1   →  Windows installer auto-published.
+#  • Actions tab → "Run workflow"      →  manual trigger with toggles for
+#                                          macOS / Linux builds (off by
+#                                          default, electron-builder cross-
+#                                          platform builds need extra setup
+#                                          that isn't in place yet).
 on:
   push:
     tags:
       - 'desktop-v*'
   workflow_dispatch:
+    inputs:
+      build_macos:
+        description: 'Also build macOS .dmg (experimental — needs Apple cert for signing)'
+        required: false
+        default: 'false'
+        type: boolean
+      build_linux:
+        description: 'Also build Linux .AppImage (experimental)'
+        required: false
+        default: 'false'
+        type: boolean
 
 # electron-builder needs to create / append to a Release in this repo.
 permissions:
@@ -25,18 +36,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest   # → TeamChatX-Setup-X.Y.Z.exe + latest.yml
-          - os: macos-latest     # → TeamChatX-X.Y.Z.dmg + latest-mac.yml
-          - os: ubuntu-latest    # → TeamChatX-X.Y.Z.AppImage + latest-linux.yml
-
-    runs-on: ${{ matrix.os }}
-
+  windows:
+    name: Build Windows installer
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,14 +47,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # Cache npm by lockfile so reinstalls are seconds, not minutes.
           cache: 'npm'
           cache-dependency-path: |
             frontend/package-lock.json
             desktop-app/package-lock.json
 
-      # Frontend must be built first — electron-builder's extraResources copy
-      # ../frontend/dist into the installer's resources/frontend folder.
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci --no-audit --no-fund
@@ -65,27 +64,113 @@ jobs:
         working-directory: desktop-app
         run: npm ci --no-audit --no-fund
 
-      # The actual build + publish step. electron-builder reads:
-      #  • GH_TOKEN     → uploads to GitHub Releases (auto-provided
-      #                    by Actions; scoped to this repo only).
-      #  • CSC_IDENTITY_AUTO_DISCOVERY=false → skip macOS code-signing
-      #                    (no Apple Developer cert in CI). Builds will be
-      #                    unsigned but still installable; users see a
-      #                    Gatekeeper warning the first launch.
-      - name: Build & publish desktop installer
+      # GH_TOKEN is auto-provided by Actions (scoped to this repo only),
+      # used by electron-builder to publish the .exe + latest.yml.
+      - name: Build & publish Windows installer
         working-directory: desktop-app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run release
 
-      # Always-run safety net: if publish step fails, surface the unpacked
-      # output as a workflow artifact so we can debug locally.
       - name: Upload debug artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-build-${{ matrix.os }}-debug
+          name: desktop-build-windows-debug
+          path: desktop-app/release/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  macos:
+    # Skip on tag push by default (DMG signing without an Apple Developer
+    # certificate trips macOS Gatekeeper warnings + sometimes the build
+    # itself). Enable from the Actions tab via Run workflow → toggle on.
+    if: github.event_name == 'workflow_dispatch' && inputs.build_macos == true
+    name: Build macOS .dmg
+    runs-on: macos-latest
+    needs: windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop-app/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install desktop deps
+        working-directory: desktop-app
+        run: npm ci --no-audit --no-fund
+
+      - name: Build & publish macOS dmg (unsigned)
+        working-directory: desktop-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run release
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-macos-debug
+          path: desktop-app/release/**
+          if-no-files-found: ignore
+          retention-days: 7
+
+  linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_linux == true
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+    needs: windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop-app/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install desktop deps
+        working-directory: desktop-app
+        run: npm ci --no-audit --no-fund
+
+      - name: Build & publish Linux AppImage
+        working-directory: desktop-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-linux-debug
           path: desktop-app/release/**
           if-no-files-found: ignore
           retention-days: 7
