@@ -26,9 +26,26 @@ const CAT_COLORS = {
 // ─── Release data ────────────────────────────────────────
 const releases = [
   {
+    version: "1.5.3",
+    date: "May 10, 2026",
+    tag: "Latest",
+    platforms: ["web", "android", "desktop"],
+    changes: [
+      { type: "feature", text: "Image format conversion in chat — convert any image to PNG, JPG, or WebP before sending" },
+      { type: "feature", text: "AI background removal for image attachments — one tap to make a transparent PNG" },
+      { type: "feature", text: "Desktop auto-update — installed app now updates itself silently via GitHub Releases" },
+      { type: "feature", text: "Admin OTP Verifications tab — view the last 25 OTP attempts with status, channel, and IP" },
+      { type: "improvement", text: "Meeting details dialog is now mobile-friendly — full-screen on phones with a 2-up stat layout" },
+      { type: "fix", text: "Meeting details now show Duration and Started for instant meetings that ended without going live" },
+      { type: "fix", text: "Linked Devices QR scanner now requests camera permission upfront on Android and iOS" },
+      { type: "fix", text: "Meeting room controls on mobile no longer overlap the home-indicator safe area" },
+      { type: "improvement", text: "Cleaner login page — silenced 401/404 console noise on unauthenticated visits" },
+      { type: "security", text: "Rate-limited auth REST endpoints — 5 logins / 15 min, 3 password resets / hour" },
+    ],
+  },
+  {
     version: "1.5.2",
     date: "April 12, 2026",
-    tag: "Latest",
     platforms: ["web", "android", "ios", "desktop"],
     changes: [
       { type: "feature", text: "Incoming call ringtone — plays a ring sound with vibration when someone calls you" },
