@@ -3,21 +3,28 @@ const authController = require('../controllers/authController');
 const auth = require('../middlewares/auth');
 const requireNotRoleId = require('../middlewares/requireNotRoleId');
 const requireOwner = require('../middlewares/requireOwner');
+const {
+  authLimiter,
+  passwordResetLimiter,
+  otpResendLimiter,
+  refreshLimiter,
+  registrationLimiter,
+} = require('../middlewares/rateLimiters');
 
 const router = Router();
 const blockRole4 = requireNotRoleId(4);
 
-router.post('/register', authController.register);
-router.post('/create-account', authController.createNewAccount);
-router.post('/resend-otp', authController.resendOtp);
-router.post('/forgot-password', authController.forgotPassword);
-router.post('/reset-password', authController.resetPassword);
-router.post('/forgot-verify', authController.verifyForgotPasswordOtp);
+router.post('/register', registrationLimiter, authController.register);
+router.post('/create-account', registrationLimiter, authController.createNewAccount);
+router.post('/resend-otp', otpResendLimiter, authController.resendOtp);
+router.post('/forgot-password', passwordResetLimiter, authController.forgotPassword);
+router.post('/reset-password', authLimiter, authController.resetPassword);
+router.post('/forgot-verify', authLimiter, authController.verifyForgotPasswordOtp);
 router.post('/change-password', auth, authController.changePassword);
-router.post('/verify-otp', authController.verifyOtp);
-router.post('/login', authController.login);
+router.post('/verify-otp', authLimiter, authController.verifyOtp);
+router.post('/login', authLimiter, authController.login);
 router.get('/csrf', authController.getCsrfToken);
-router.post('/refresh', authController.refresh);
+router.post('/refresh', refreshLimiter, authController.refresh);
 router.post('/logout', auth, authController.logout);
 router.post('/logout-all', auth, authController.logoutAll);
 router.get('/trusted-devices', auth, authController.listTrustedDevices);

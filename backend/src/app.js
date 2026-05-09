@@ -44,6 +44,11 @@ const gifRoutes = require('./routes/gifRoutes');
 const meetingRoutes = require('./routes/meetingRoutes');
 
 const app = express();
+// Behind Render / Vercel / nginx the real client IP arrives in
+// X-Forwarded-For. Without trust proxy, express-rate-limit would key every
+// request to the proxy's IP and either rate-limit everyone collectively or
+// no one at all. Trust exactly one hop — the platform proxy in front of us.
+app.set('trust proxy', 1);
 
 const allowedOrigins = String(process.env.CORS_ORIGIN || process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
   .split(',')

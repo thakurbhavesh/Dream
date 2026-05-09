@@ -10,17 +10,21 @@ const {
   validateBulkDeleteOrgUsers,
   validateResetOrgUserPassword,
 } = require('../middlewares/orgUserValidation');
+const {
+  authLimiter,
+  passwordResetLimiter,
+} = require('../middlewares/rateLimiters');
 
 const router = Router();
 const blockRole4 = requireNotRoleId(4);
 
 router
   .route('/forgot-password')
-  .post(authController.forgotPassword);
+  .post(passwordResetLimiter, authController.forgotPassword);
 
 router
   .route('/forgot-verify')
-  .post(authController.verifyForgotPasswordOtp);
+  .post(authLimiter, authController.verifyForgotPasswordOtp);
 
 router
   .route('/')
