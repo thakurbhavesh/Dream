@@ -1,0 +1,21 @@
+# Local install
+node_modules/
+
+# electron-builder output (huge .exe files — distributed via GitHub Releases instead)
+release/
+dist/
+
+# Local env (NEVER commit GH_TOKEN or signing certs)
+.env
+.env.local
+*.pem
+*.pfx
+*.p12
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
