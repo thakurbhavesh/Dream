@@ -137,6 +137,34 @@ export const removeImageBackground = async (file) => {
 };
 
 /**
+ * Convert an image File to a specific output format. Used by the per-image
+ * "Convert to PNG / JPEG / WebP" menu in the composer attachment tray.
+ * Quality applies to lossy formats only (jpeg / webp); png is lossless.
+ */
+export const convertImageFormat = async (file, targetMime, quality = DEFAULT_QUALITY) => {
+  if (!file || !isImageMime(file.type)) return file;
+  const allowed = ["image/png", "image/jpeg", "image/webp"];
+  if (!allowed.includes(targetMime)) {
+    throw new Error("Unsupported target format");
+  }
+  // No-op when already in the requested format.
+  if ((file.type || "").toLowerCase() === targetMime) return file;
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  // JPEG has no transparency — paint a white background under the image
+  // so transparent PNGs don't end up with black corners.
+  if (targetMime === "image/jpeg") {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.drawImage(bitmap, 0, 0);
+  return canvasToFile(canvas, targetMime, targetMime === "image/png" ? 1 : quality, file.name);
+};
+
+/**
  * Friendly size-saving label for the UI ("82% smaller").
  */
 export const formatSavings = (originalSize, newSize) => {

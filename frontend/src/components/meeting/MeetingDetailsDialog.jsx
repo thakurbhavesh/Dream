@@ -12,6 +12,7 @@ import {
   Tooltip,
   Typography,
   alpha,
+  useMediaQuery,
   useTheme,
 } from "@mui/material";
 import {
@@ -129,6 +130,10 @@ const foldSessions = (sessions = []) => {
 const MeetingDetailsDialog = ({ open, meetingId, onClose, onCopyToast }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
+  // Mobile + narrow screens: fullScreen + tighter typography. The xs cutoff
+  // (600 px) catches phones in portrait + landscape; tablets keep the
+  // floating dialog.
+  const isFullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
   const [loading, setLoading] = useState(true);
   const [meeting, setMeeting] = useState(null);
@@ -159,18 +164,27 @@ const MeetingDetailsDialog = ({ open, meetingId, onClose, onCopyToast }) => {
   const status = String(meeting?.status || "").toLowerCase();
   const statusTheme = STATUS_THEME[status] || { label: status || "—", color: theme.palette.text.secondary };
 
-  // Effective duration: prefer server-stored duration_minutes; else compute
-  // from started_at / ended_at (fallback for live meetings).
+  // The "started_at" column only gets set when a meeting transitions to
+  // 'active'. Instant meetings created and ended within seconds, or
+  // scheduled meetings that ended before anyone joined, never get a value.
+  // Fall back to created_at so the UI still shows something sensible.
+  const effectiveStartIso = meeting?.started_at || meeting?.created_at || meeting?.scheduled_at || null;
+  const effectiveEndIso = meeting?.ended_at || (status === "active" ? new Date().toISOString() : null);
+
+  // Effective duration: prefer server-stored duration_minutes, else compute
+  // from started_at / ended_at, else fall back to (ended_at − created_at)
+  // for instant meetings that ended without ever flipping to active.
   const durationMs = useMemo(() => {
     if (Number.isFinite(meeting?.duration_minutes) && meeting.duration_minutes > 0) {
       return meeting.duration_minutes * 60_000;
     }
-    if (meeting?.started_at) {
-      const start = new Date(meeting.started_at).getTime();
-      const end = meeting?.ended_at ? new Date(meeting.ended_at).getTime() : (status === "active" ? Date.now() : null);
-      if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
-        return end - start;
-      }
+    const startIso = meeting?.started_at || meeting?.created_at;
+    if (!startIso) return null;
+    const start = new Date(startIso).getTime();
+    const endIso = meeting?.ended_at || (status === "active" ? new Date().toISOString() : null);
+    const end = endIso ? new Date(endIso).getTime() : null;
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return end - start;
     }
     return null;
   }, [meeting, status]);
@@ -214,7 +228,17 @@ const MeetingDetailsDialog = ({ open, meetingId, onClose, onCopyToast }) => {
       onClose={onClose}
       maxWidth="md"
       fullWidth
-      PaperProps={{ sx: { borderRadius: 3, overflow: "hidden" } }}
+      fullScreen={isFullScreen}
+      PaperProps={{
+        sx: {
+          borderRadius: { xs: 0, sm: 3 },
+          overflow: "hidden",
+          // On phones the dialog takes the whole viewport so it can scroll
+          // smoothly without competing with the body scroll.
+          height: { xs: "100%", sm: "auto" },
+          maxHeight: { xs: "100%", sm: "calc(100% - 64px)" },
+        },
+      }}
     >
       {/* Banner header */}
       <Box
@@ -320,13 +344,13 @@ const MeetingDetailsDialog = ({ open, meetingId, onClose, onCopyToast }) => {
               <StatCard
                 icon={PiCalendarBold}
                 label="Started"
-                value={meeting.started_at ? formatTime(meeting.started_at) : "—"}
+                value={effectiveStartIso ? formatTime(effectiveStartIso) : "—"}
                 color="#16a34a"
               />
               <StatCard
                 icon={PiHourglassBold}
                 label="Ended"
-                value={meeting.ended_at ? formatTime(meeting.ended_at) : "—"}
+                value={effectiveEndIso ? formatTime(effectiveEndIso) : "—"}
                 color={statusTheme.color}
               />
             </Stack>
@@ -567,8 +591,10 @@ const StatCard = ({ icon: Icon, label, value, color }) => {
   return (
     <Box
       sx={{
-        flex: 1,
-        minWidth: 130,
+        // On phones we want 2 cards per row (calc((100% - gap) / 2)). On
+        // tablets+ all 4 sit on a single row courtesy of flex-wrap + flex:1.
+        flex: { xs: "1 1 calc(50% - 6px)", sm: 1 },
+        minWidth: { xs: 0, sm: 130 },
         p: 1.5,
         borderRadius: 2,
         bgcolor: alpha(color, theme.palette.mode === "dark" ? 0.12 : 0.06),
@@ -629,16 +655,23 @@ const Section = ({ title, right, children }) => (
 const Row = ({ label, value, color, icon: Icon }) => (
   <Stack direction="row" alignItems="center" spacing={1.5} sx={{ py: 0.6 }}>
     {Icon ? (
-      <Box sx={{ width: 18, color: color || "text.secondary" }}>
+      <Box sx={{ width: 18, color: color || "text.secondary", flexShrink: 0 }}>
         <Icon size={14} />
       </Box>
     ) : (
-      <Box sx={{ width: 18 }} />
+      <Box sx={{ width: 18, flexShrink: 0 }} />
     )}
-    <Typography variant="caption" color="text.secondary" sx={{ width: 130, fontWeight: 600 }}>
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      sx={{ width: { xs: 90, sm: 130 }, fontWeight: 600, flexShrink: 0 }}
+    >
       {label}
     </Typography>
-    <Typography variant="body2" sx={{ flex: 1, fontWeight: 600 }}>
+    <Typography
+      variant="body2"
+      sx={{ flex: 1, fontWeight: 600, textAlign: "right", wordBreak: "break-word" }}
+    >
       {value}
     </Typography>
   </Stack>
