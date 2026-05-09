@@ -9,7 +9,8 @@ import {
   Typography,
   useTheme,
 } from "@mui/material";
-import { PiLinkSimple, PiX } from "react-icons/pi";
+import { PiLinkSimple, PiX, PiShieldWarning, PiWarning } from "react-icons/pi";
+import inspectLink from "../../utils/linkSafety";
 
 const MICROLINK_ENDPOINT =
   "https://api.microlink.io/?audio=false&video=false&iframe=false&palette=false&url=";
@@ -236,6 +237,7 @@ const LinkPreviewCard = ({
   const showSkeleton = status === "loading" && !preview;
   const showError = status === "error";
   const activePreview = preview || initialMetadata || null;
+  const safetyWarning = useMemo(() => inspectLink(activePreview?.url || normalizedUrl), [activePreview?.url, normalizedUrl]);
 
   return (
     <Box
@@ -246,6 +248,38 @@ const LinkPreviewCard = ({
         border: `1px solid ${theme.palette.divider}`,
       }}
     >
+      {safetyWarning && (
+        <Stack
+          direction="row"
+          spacing={1}
+          alignItems="flex-start"
+          sx={{
+            px: 1.25,
+            py: 0.75,
+            borderBottom: `1px solid ${theme.palette.divider}`,
+            bgcolor:
+              safetyWarning.level === "danger"
+                ? "rgba(220, 38, 38, 0.08)"
+                : "rgba(245, 158, 11, 0.10)",
+            color:
+              safetyWarning.level === "danger" ? "#dc2626" : "#b45309",
+          }}
+        >
+          {safetyWarning.level === "danger" ? (
+            <PiShieldWarning size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+          ) : (
+            <PiWarning size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+          )}
+          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+            <Typography variant="caption" sx={{ fontWeight: 700, color: "inherit", lineHeight: 1.3 }}>
+              {safetyWarning.title}
+            </Typography>
+            <Typography variant="caption" sx={{ color: "inherit", opacity: 0.85, lineHeight: 1.4 }}>
+              {safetyWarning.detail}
+            </Typography>
+          </Stack>
+        </Stack>
+      )}
       <Box
         sx={{
           position: "relative",

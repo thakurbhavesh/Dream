@@ -35,6 +35,9 @@ import {
   PiCopyBold,
   PiUsersBold,
   PiXBold,
+  PiPictureInPictureBold,
+  PiLockBold,
+  PiLockOpenBold,
 } from "react-icons/pi";
 import { useMeetingContext } from "../../contexts/MeetingContext.jsx";
 
@@ -42,12 +45,45 @@ import { useMeetingContext } from "../../contexts/MeetingContext.jsx";
 const VideoTile = ({ stream, userName, isMuted, isVideoOff, isLocal, isScreenShare, isPinned, onPin, handRaised }) => {
   const videoRef = useRef(null);
   const theme = useTheme();
+  const [pipSupported, setPipSupported] = useState(false);
+  const [inPip, setInPip] = useState(false);
 
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.srcObject = stream || null;
     }
   }, [stream, isVideoOff, isScreenShare]);
+
+  useEffect(() => {
+    setPipSupported(typeof document !== "undefined" && document.pictureInPictureEnabled);
+  }, []);
+
+  useEffect(() => {
+    const onEnter = () => setInPip(true);
+    const onLeave = () => setInPip(false);
+    const v = videoRef.current;
+    if (!v) return;
+    v.addEventListener("enterpictureinpicture", onEnter);
+    v.addEventListener("leavepictureinpicture", onLeave);
+    return () => {
+      v.removeEventListener("enterpictureinpicture", onEnter);
+      v.removeEventListener("leavepictureinpicture", onLeave);
+    };
+  }, [stream]);
+
+  const togglePip = async (e) => {
+    e?.stopPropagation?.();
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement === videoRef.current) {
+        await document.exitPictureInPicture();
+      } else if (videoRef.current.requestPictureInPicture) {
+        await videoRef.current.requestPictureInPicture();
+      }
+    } catch (err) {
+      console.warn("[meeting] PiP request rejected:", err.message);
+    }
+  };
 
   return (
     <Box
@@ -120,6 +156,27 @@ const VideoTile = ({ stream, userName, isMuted, isVideoOff, isLocal, isScreenSha
         {isPinned && <PiPushPinBold size={12} color={theme.palette.primary.light} />}
       </Stack>
 
+      {/* Picture-in-Picture toggle (web only — only when stream visible & not local own tile) */}
+      {stream && !isVideoOff && pipSupported && !isLocal && (
+        <Tooltip title={inPip ? "Exit Picture-in-Picture" : "Picture-in-Picture"} placement="left">
+          <IconButton
+            size="small"
+            onClick={togglePip}
+            sx={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              bgcolor: "rgba(0,0,0,0.55)",
+              color: "#fff",
+              p: 0.6,
+              "&:hover": { bgcolor: "rgba(0,0,0,0.75)" },
+            }}
+          >
+            <PiPictureInPictureBold size={14} />
+          </IconButton>
+        </Tooltip>
+      )}
+
       {/* Hand raised indicator */}
       {handRaised && (
         <Box
@@ -155,22 +212,67 @@ const EMOJI_MAP = {
 };
 
 const ReactionOverlay = ({ reactions }) => (
-  <Box sx={{ position: "absolute", top: 80, right: 20, zIndex: 100, pointerEvents: "none" }}>
-    {reactions.map((r) => (
-      <Fade in key={r.id}>
-        <Paper
-          elevation={3}
-          sx={{
-            px: 1.5, py: 0.5, mb: 0.5, display: "flex", alignItems: "center", gap: 0.5,
-            borderRadius: 4, bgcolor: "rgba(0,0,0,0.7)", color: "#fff",
-          }}
-        >
-          <Typography variant="body1">{EMOJI_MAP[r.reaction] || r.reaction}</Typography>
-          <Typography variant="caption">{r.userName}</Typography>
-        </Paper>
-      </Fade>
-    ))}
-  </Box>
+  <>
+    {/* Top-right name list (existing) */}
+    <Box sx={{ position: "absolute", top: 80, right: 20, zIndex: 100, pointerEvents: "none" }}>
+      {reactions.map((r) => (
+        <Fade in key={r.id}>
+          <Paper
+            elevation={3}
+            sx={{
+              px: 1.5, py: 0.5, mb: 0.5, display: "flex", alignItems: "center", gap: 0.5,
+              borderRadius: 4, bgcolor: "rgba(0,0,0,0.7)", color: "#fff",
+            }}
+          >
+            <Typography variant="body1">{EMOJI_MAP[r.reaction] || r.reaction}</Typography>
+            <Typography variant="caption">{r.userName}</Typography>
+          </Paper>
+        </Fade>
+      ))}
+    </Box>
+    {/* Floating emoji burst — rises from bottom and fades, like Zoom/Meet */}
+    <Box
+      sx={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 95,
+        pointerEvents: "none",
+        overflow: "hidden",
+        "@keyframes meetingReactionFloat": {
+          "0%": { transform: "translate3d(0, 40px, 0) scale(0.6)", opacity: 0 },
+          "10%": { opacity: 1 },
+          "60%": { transform: "translate3d(0, -180px, 0) scale(1.1)", opacity: 1 },
+          "100%": { transform: "translate3d(0, -360px, 0) scale(0.85)", opacity: 0 },
+        },
+      }}
+    >
+      {reactions
+        .filter((r) => r.reaction !== "hand-raise" && r.reaction !== "hand-lower")
+        .map((r) => {
+          // Stable random offset per reaction id so emojis spread across the bottom
+          const offsetSeed = String(r.id).split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+          const left = 18 + (offsetSeed % 65); // 18% .. 83%
+          const drift = ((offsetSeed * 7) % 21) - 10; // -10px .. +10px horizontal sway
+          return (
+            <Box
+              key={`float-${r.id}`}
+              sx={{
+                position: "absolute",
+                bottom: 110,
+                left: `${left}%`,
+                fontSize: 38,
+                lineHeight: 1,
+                animation: "meetingReactionFloat 2.6s ease-out forwards",
+                transform: `translateX(${drift}px)`,
+                textShadow: "0 4px 16px rgba(0,0,0,0.45)",
+              }}
+            >
+              {EMOJI_MAP[r.reaction] || r.reaction}
+            </Box>
+          );
+        })}
+    </Box>
+  </>
 );
 
 // ─── Chat Drawer ───────────────────────────────────────────────────
