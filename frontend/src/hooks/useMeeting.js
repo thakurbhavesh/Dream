@@ -42,6 +42,10 @@ const useMeeting = () => {
   // The room screen reads this to show "Meeting has ended" instead of
   // auto-dismissing silently. Cleared on the next joinMeeting call.
   const [endedByHost, setEndedByHost] = useState(false);
+  // Host can lock the room so further joins are rejected.
+  const [isLocked, setIsLocked] = useState(false);
+  // Host can pin a participant for everyone (independent of personal pin).
+  const [spotlightSocketId, setSpotlightSocketId] = useState(null);
 
   const peersRef = useRef(new Map());
   const remoteStreamsRef = useRef(new Map());
@@ -99,6 +103,8 @@ const useMeeting = () => {
     setHandRaised(false);
     setDuration(0);
     setPinnedSocketId(null);
+    setIsLocked(false);
+    setSpotlightSocketId(null);
   }, []);
 
   // ─── Create peer connection ───────────────────────────────────────
@@ -226,6 +232,10 @@ const useMeeting = () => {
       }
 
       setStatus("active");
+      // Replay current room state from the server ack — keeps late joiners
+      // in sync with the host's lock / spotlight choices.
+      setIsLocked(Boolean(res.locked));
+      setSpotlightSocketId(res.spotlight || null);
 
       const existingParticipants = res.participants || [];
       for (const p of existingParticipants) {
@@ -405,6 +415,20 @@ const useMeeting = () => {
     });
   }, [socket]);
 
+  const setLocked = useCallback((locked) => {
+    socket?.emit("meeting:host:lock", {
+      meetingRoomId: meetingRoomIdRef.current,
+      locked: Boolean(locked),
+    });
+  }, [socket]);
+
+  const spotlight = useCallback((targetSocketId) => {
+    socket?.emit("meeting:host:spotlight", {
+      meetingRoomId: meetingRoomIdRef.current,
+      targetSocketId: targetSocketId || null,
+    });
+  }, [socket]);
+
   // ─── Chat ─────────────────────────────────────────────────────────
   const sendChatMessage = useCallback((message) => {
     if (!message?.trim()) return;
@@ -575,6 +599,9 @@ const useMeeting = () => {
       }
     };
 
+    const onLocked = ({ locked }) => setIsLocked(Boolean(locked));
+    const onSpotlight = ({ targetSocketId }) => setSpotlightSocketId(targetSocketId || null);
+
     socket.on("meeting:user-joined", onUserJoined);
     socket.on("meeting:user-left", onUserLeft);
     socket.on("meeting:signal", onSignal);
@@ -585,6 +612,8 @@ const useMeeting = () => {
     socket.on("meeting:ended", onMeetingEnded);
     socket.on("meeting:force-mute", onForceMute);
     socket.on("meeting:removed", onRemoved);
+    socket.on("meeting:locked", onLocked);
+    socket.on("meeting:spotlight", onSpotlight);
 
     return () => {
       socket.off("meeting:user-joined", onUserJoined);
@@ -597,6 +626,8 @@ const useMeeting = () => {
       socket.off("meeting:ended", onMeetingEnded);
       socket.off("meeting:force-mute", onForceMute);
       socket.off("meeting:removed", onRemoved);
+      socket.off("meeting:locked", onLocked);
+      socket.off("meeting:spotlight", onSpotlight);
     };
   }, [socket, createPeer]);
 
@@ -610,9 +641,11 @@ const useMeeting = () => {
     status, meetingRoomId, meetingInfo, participants, localStream, screenStream,
     isMuted, isVideoOff, isScreenSharing, chatMessages, handRaised, reactions,
     pinnedSocketId, duration, viewMode, endedByHost,
+    isLocked, spotlightSocketId,
     joinMeeting, leaveMeeting, toggleMute, toggleVideo, toggleScreenShare,
     sendChatMessage, sendReaction, toggleHandRaise, pinParticipant, setViewMode,
     muteAll, removeParticipant, dismissEndedNotice,
+    setLocked, spotlight,
   };
 };
 

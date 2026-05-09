@@ -373,7 +373,17 @@ const ChatPanel = ({ open, onClose, messages, onSend, myUserId }) => {
 };
 
 // ─── Participants Panel ────────────────────────────────────────────
-const ParticipantsPanel = ({ open, onClose, participants, localUserName, isHost, onMuteAll, onRemove }) => {
+const ParticipantsPanel = ({
+  open,
+  onClose,
+  participants,
+  localUserName,
+  isHost,
+  onMuteAll,
+  onRemove,
+  spotlightSocketId,
+  onSpotlight,
+}) => {
   const theme = useTheme();
   return (
     <Drawer
@@ -418,23 +428,39 @@ const ParticipantsPanel = ({ open, onClose, participants, localUserName, isHost,
           </Avatar>
           <Typography variant="body2" sx={{ flex: 1 }}>{localUserName} (You){isHost ? " • Host" : ""}</Typography>
         </Stack>
-        {participants.map((p) => (
-          <Stack key={p.socketId} direction="row" alignItems="center" spacing={1} sx={{ py: 0.75 }}>
-            <Avatar sx={{ width: 28, height: 28, fontSize: 14 }}>
-              {(p.userName || "U").charAt(0)}
-            </Avatar>
-            <Typography variant="body2" sx={{ flex: 1 }} noWrap>{p.userName}</Typography>
-            {!p.audio && <PiMicrophoneSlashBold size={14} color="#f44336" />}
-            {p.handRaised && <Box component="span" sx={{ fontSize: 14 }}>&#9995;</Box>}
-            {isHost && (
-              <Tooltip title="Remove participant">
-                <IconButton size="small" onClick={() => onRemove?.(p.socketId)} sx={{ p: 0.5 }}>
-                  <PiXBold size={12} />
-                </IconButton>
-              </Tooltip>
-            )}
-          </Stack>
-        ))}
+        {participants.map((p) => {
+          const isSpotlight = spotlightSocketId === p.socketId;
+          return (
+            <Stack key={p.socketId} direction="row" alignItems="center" spacing={1} sx={{ py: 0.75 }}>
+              <Avatar sx={{ width: 28, height: 28, fontSize: 14 }}>
+                {(p.userName || "U").charAt(0)}
+              </Avatar>
+              <Typography variant="body2" sx={{ flex: 1 }} noWrap>
+                {p.userName}{isSpotlight ? " • Spotlight" : ""}
+              </Typography>
+              {!p.audio && <PiMicrophoneSlashBold size={14} color="#f44336" />}
+              {p.handRaised && <Box component="span" sx={{ fontSize: 14 }}>&#9995;</Box>}
+              {isHost && (
+                <>
+                  <Tooltip title={isSpotlight ? "Clear spotlight" : "Spotlight for everyone"}>
+                    <IconButton
+                      size="small"
+                      onClick={() => onSpotlight?.(isSpotlight ? null : p.socketId)}
+                      sx={{ p: 0.5, color: isSpotlight ? "primary.main" : "inherit" }}
+                    >
+                      <PiPushPinBold size={12} />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Remove participant">
+                    <IconButton size="small" onClick={() => onRemove?.(p.socketId)} sx={{ p: 0.5 }}>
+                      <PiXBold size={12} />
+                    </IconButton>
+                  </Tooltip>
+                </>
+              )}
+            </Stack>
+          );
+        })}
       </Stack>
     </Drawer>
   );
@@ -515,10 +541,13 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
     }
   }, [meeting.meetingRoomId]);
 
+  // Effective pin: host-set spotlight always wins over personal pin.
+  const effectivePinnedSocketId = meeting.spotlightSocketId || meeting.pinnedSocketId;
+
   // Determine grid layout
   const totalParticipants = meeting.participants.length + 1; // +1 for local
   const getGridCols = () => {
-    if (meeting.pinnedSocketId || meeting.viewMode === "speaker") return 1;
+    if (effectivePinnedSocketId || meeting.viewMode === "speaker") return 1;
     if (totalParticipants <= 1) return 1;
     if (totalParticipants <= 4) return 2;
     if (totalParticipants <= 9) return 3;
@@ -532,11 +561,11 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
   const showLocalScreenAsPrimary =
     meeting.isScreenSharing && meeting.viewMode !== "gallery";
   const showingPinned =
-    (meeting.pinnedSocketId && meeting.viewMode !== "gallery") ||
+    (effectivePinnedSocketId && meeting.viewMode !== "gallery") ||
     showLocalScreenAsPrimary;
 
-  // Build tiles array
-  const pinnedParticipant = meeting.participants.find((p) => p.socketId === meeting.pinnedSocketId);
+  // Build tiles array — spotlight overrides personal pin
+  const pinnedParticipant = meeting.participants.find((p) => p.socketId === effectivePinnedSocketId);
 
   const reactionEmojis = [
     { key: "thumbs-up", label: "\uD83D\uDC4D" },
@@ -730,7 +759,7 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
                 />
               )}
               {meeting.participants
-                .filter((p) => p.socketId !== meeting.pinnedSocketId)
+                .filter((p) => p.socketId !== effectivePinnedSocketId)
                 .map((p) => (
                   <VideoTile
                     key={p.socketId}
@@ -779,7 +808,7 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
                 isMuted={!p.audio}
                 isVideoOff={!p.video}
                 isScreenShare={p.screenShare}
-                isPinned={meeting.pinnedSocketId === p.socketId}
+                isPinned={effectivePinnedSocketId === p.socketId}
                 onPin={() => meeting.pinParticipant(p.socketId)}
                 handRaised={p.handRaised}
               />
@@ -959,6 +988,23 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
           </IconButton>
         </Tooltip>
 
+        {/* Lock meeting (host only) */}
+        {Number(meeting.meetingInfo?.host_id) === Number(userId) && (
+          <Tooltip title={meeting.isLocked ? "Unlock meeting (allow joins)" : "Lock meeting (block new joins)"}>
+            <IconButton
+              onClick={() => meeting.setLocked(!meeting.isLocked)}
+              sx={{
+                width: 48, height: 48, borderRadius: "50%",
+                bgcolor: meeting.isLocked ? "rgba(244, 67, 54, 0.2)" : "rgba(255,255,255,0.1)",
+                color: meeting.isLocked ? "#f44336" : "#fff",
+                "&:hover": { bgcolor: meeting.isLocked ? "rgba(244, 67, 54, 0.3)" : "rgba(255,255,255,0.2)" },
+              }}
+            >
+              {meeting.isLocked ? <PiLockBold size={22} /> : <PiLockOpenBold size={22} />}
+            </IconButton>
+          </Tooltip>
+        )}
+
         {/* Leave */}
         <Tooltip title="Leave meeting">
           <IconButton
@@ -992,6 +1038,8 @@ const MeetingRoom = ({ userName, userId, onLeave }) => {
         isHost={Number(meeting.meetingInfo?.host_id) === Number(userId)}
         onMuteAll={meeting.muteAll}
         onRemove={meeting.removeParticipant}
+        spotlightSocketId={meeting.spotlightSocketId}
+        onSpotlight={meeting.spotlight}
       />
     </Box>
   );

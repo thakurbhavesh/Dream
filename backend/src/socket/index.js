@@ -2014,6 +2014,10 @@ const onConnection = (socket) => {
   // ─── Meeting / Conference ──────────────────────────────────────────────────
   // In-memory meeting rooms: meetingRoomId → Set of { socketId, userId, userName }
   const _meetingRooms = (io._meetingRooms = io._meetingRooms || new Map());
+  // Per-room lock state: meetingRoomId → boolean (host blocked further joins)
+  const _meetingLocks = (io._meetingLocks = io._meetingLocks || new Map());
+  // Per-room spotlight pin: meetingRoomId → targetSocketId (host pin everyone follows)
+  const _meetingSpotlights = (io._meetingSpotlights = io._meetingSpotlights || new Map());
 
   // Auto-end a meeting in DB when the last participant leaves (Google Meet style)
   const _autoEndMeetingIfEmpty = async (meetingRoomId) => {
@@ -2038,6 +2042,18 @@ const onConnection = (socket) => {
     try {
       const { meetingRoomId, userName } = data || {};
       if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+
+      // Reject when the host has locked the meeting — but always let the host
+      // themselves back in (re-join after refresh).
+      if (_meetingLocks.get(meetingRoomId) === true) {
+        try {
+          const meeting = await meetingModel.findByMeetingId(meetingRoomId);
+          const isHost = meeting && Number(meeting.host_id) === Number(userId);
+          if (!isHost) return ack?.({ error: 'Meeting is locked by the host' });
+        } catch {
+          return ack?.({ error: 'Meeting is locked by the host' });
+        }
+      }
 
       const roomKey = `meeting:${meetingRoomId}`;
       socket.join(roomKey);
@@ -2064,9 +2080,12 @@ const onConnection = (socket) => {
         socketId: socket.id, userId, userName: userName || 'User',
       });
 
-      // Send list of current participants to the joiner
+      // Send list of current participants + current room state (lock /
+      // spotlight) to the joiner so they boot into the right view.
       const participants = Array.from(room.values());
-      ack?.({ ok: true, participants });
+      const locked = _meetingLocks.get(meetingRoomId) === true;
+      const spotlight = _meetingSpotlights.get(meetingRoomId) || null;
+      ack?.({ ok: true, participants, locked, spotlight });
     } catch (err) {
       console.error('[socket] meeting:join error', err.message);
       ack?.({ error: err.message });
@@ -2087,8 +2106,15 @@ const onConnection = (socket) => {
         room.delete(socket.id);
         if (room.size === 0) {
           _meetingRooms.delete(meetingRoomId);
+          _meetingLocks.delete(meetingRoomId);
+          _meetingSpotlights.delete(meetingRoomId);
           becameEmpty = true;
         }
+      }
+      // If the spotlighted participant left, clear the spotlight for the room
+      if (room && _meetingSpotlights.get(meetingRoomId) === socket.id) {
+        _meetingSpotlights.delete(meetingRoomId);
+        socket.to(roomKey).emit('meeting:spotlight', { targetSocketId: null, byUserId: null });
       }
 
       // Attendance session close
@@ -2129,6 +2155,41 @@ const onConnection = (socket) => {
       const roomKey = `meeting:${meetingRoomId}`;
       // Tell all participants except host to mute
       socket.to(roomKey).emit('meeting:force-mute', { byUserId: userId });
+      ack?.({ ok: true });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('meeting:host:lock', async (data, ack) => {
+    try {
+      const { meetingRoomId, locked } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+      const check = await _assertHost(meetingRoomId);
+      if (!check.ok) return ack?.({ error: check.error });
+      const next = Boolean(locked);
+      if (next) _meetingLocks.set(meetingRoomId, true);
+      else _meetingLocks.delete(meetingRoomId);
+      io.to(`meeting:${meetingRoomId}`).emit('meeting:locked', { locked: next, byUserId: userId });
+      ack?.({ ok: true, locked: next });
+    } catch (err) {
+      ack?.({ error: err.message });
+    }
+  });
+
+  socket.on('meeting:host:spotlight', async (data, ack) => {
+    try {
+      const { meetingRoomId, targetSocketId } = data || {};
+      if (!meetingRoomId) return ack?.({ error: 'meetingRoomId required' });
+      const check = await _assertHost(meetingRoomId);
+      if (!check.ok) return ack?.({ error: check.error });
+      // null / falsy targetSocketId clears the spotlight
+      if (targetSocketId) _meetingSpotlights.set(meetingRoomId, String(targetSocketId));
+      else _meetingSpotlights.delete(meetingRoomId);
+      io.to(`meeting:${meetingRoomId}`).emit('meeting:spotlight', {
+        targetSocketId: targetSocketId || null,
+        byUserId: userId,
+      });
       ack?.({ ok: true });
     } catch (err) {
       ack?.({ error: err.message });
