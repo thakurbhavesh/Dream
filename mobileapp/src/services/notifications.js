@@ -34,7 +34,36 @@ export const requestNotificationPermission = async () => {
   }
 };
 
-// Setup notification channels (Android)
+// Action category for chat notifications — adds a "Reply" inline text input
+// (iOS UNNotificationAction with textInput, Android RemoteInput) and a
+// "Mark as read" plain button. Wired to the category id "chat-message"
+// which we attach to every message notification.
+export const CHAT_NOTIF_CATEGORY = 'chat-message';
+
+const setupChatActionCategory = async () => {
+  try {
+    await Notifications.setNotificationCategoryAsync(CHAT_NOTIF_CATEGORY, [
+      {
+        identifier: 'reply',
+        buttonTitle: 'Reply',
+        textInput: {
+          submitButtonTitle: 'Send',
+          placeholder: 'Type a reply…',
+        },
+        options: { opensAppToForeground: false },
+      },
+      {
+        identifier: 'mark-read',
+        buttonTitle: 'Mark as read',
+        options: { opensAppToForeground: false },
+      },
+    ]);
+  } catch (err) {
+    console.log('[notif] action category register failed:', err?.message);
+  }
+};
+
+// Setup notification channels (Android) + chat action category (both OS)
 export const setupNotificationChannel = async () => {
   if (Platform.OS === 'android') {
     // Main messages channel
@@ -61,6 +90,7 @@ export const setupNotificationChannel = async () => {
       showBadge: true,
     });
   }
+  await setupChatActionCategory();
 };
 
 // Deduplicate — track last notification to prevent double
@@ -105,6 +135,9 @@ export const showMessageNotification = async ({ senderName, message, threadId, t
         data: { threadId, type: 'message', senderName },
         sound: 'default',
         badge: 1,
+        // Attach the action category so iOS shows the inline reply box and
+        // Android renders the Reply / Mark-as-read buttons.
+        categoryIdentifier: CHAT_NOTIF_CATEGORY,
         ...(Platform.OS === 'android' ? {
           channelId,
           color: '#ea4c89',

@@ -19,6 +19,7 @@ import { ToastProvider } from '../src/components/Toast';
 import { CallProvider, useCall } from '../src/store/CallContext';
 import IncomingCall from '../src/components/IncomingCall';
 import useSocket from '../src/hooks/useSocket';
+import { sendMessageRest, markRead } from '../src/api/chat';
 import ErrorBoundary from '../src/components/ErrorBoundary';
 import {
   requestNotificationPermission,
@@ -91,12 +92,39 @@ function NotificationListener() {
     return () => { unsub1(); };
   }, [user, on]);
 
-  // Handle notification tap — navigate to chat
+  // Handle notification interactions — tap, inline reply, mark-as-read.
+  // The "reply" / "mark-read" actions ship via the chat-message category
+  // (see src/services/notifications.js). They opensAppToForeground=false
+  // so the user stays where they were while the action runs in the background.
   useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      if (data?.threadId) {
-        router.push(`/chat/${data.threadId}?name=&avatar=`);
+    const sub = Notifications.addNotificationResponseReceivedListener(async (response) => {
+      const data = response.notification.request.content.data || {};
+      const threadId = data?.threadId;
+      const actionId = response.actionIdentifier;
+      const userText = response.userText; // populated only for inline-reply actions
+
+      // Inline reply: send the user's typed text via REST so it works even
+      // when the socket isn't connected (background notification context).
+      if (actionId === 'reply' && threadId && userText && userText.trim()) {
+        try {
+          await sendMessageRest(threadId, userText.trim(), 'text');
+        } catch (err) {
+          console.log('[notif] inline reply failed:', err?.message);
+        }
+        return;
+      }
+
+      // Mark-as-read shortcut from the notification.
+      if (actionId === 'mark-read' && threadId) {
+        try { await markRead(threadId); } catch (err) {
+          console.log('[notif] mark-read failed:', err?.message);
+        }
+        return;
+      }
+
+      // Default tap (no action id, or DEFAULT_ACTION_IDENTIFIER) opens the chat.
+      if (threadId) {
+        router.push(`/chat/${threadId}?name=&avatar=`);
       }
     });
     return () => sub.remove();
