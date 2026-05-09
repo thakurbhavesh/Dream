@@ -61,17 +61,32 @@ const mobileApps = [
   },
 ];
 
+// GitHub Releases is the source of truth for desktop installers — switched
+// to it from a backend endpoint that didn't exist (was returning 404 on
+// every page load). The latest release page works without auth and is
+// updated automatically by the desktop-release CI workflow.
+const RELEASES_API = "https://api.github.com/repos/thakurbhavesh/Dream/releases/latest";
+const RELEASES_PAGE = "https://github.com/thakurbhavesh/Dream/releases/latest";
+
 export default function Downloads() {
   const [appUrl, setAppUrl] = useState(null);
 
   useEffect(() => {
-    if (!API_BASE_URL) return;
-    fetch(`${API_BASE_URL}/api/desktop-apps/active`)
-      .then((r) => r.ok ? r.json() : null)
+    let cancelled = false;
+    fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } })
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.url) setAppUrl(data.url);
+        if (cancelled || !data?.assets) return;
+        // Prefer the .exe asset; fall back to the release page link so
+        // users still land somewhere useful even if the asset name shifts.
+        const winInstaller = data.assets.find((a) => /\.exe$/i.test(a.name));
+        setAppUrl(winInstaller?.browser_download_url || RELEASES_PAGE);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Fall back to the release page if the API is unreachable.
+        if (!cancelled) setAppUrl(RELEASES_PAGE);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   return (

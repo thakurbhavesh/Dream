@@ -1578,8 +1578,19 @@ export const fetchOrgControls = async () => {
   return _orgControlsFetchPromise;
 };
 
-// Preload org controls on import
-fetchOrgControls().catch(() => {});
+// Preload org controls on import — skip when unauthenticated (login /
+// register pages import this transitively and the eager call would 401).
+try {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.localStorage !== "undefined" &&
+    window.localStorage.getItem("accessToken")
+  ) {
+    fetchOrgControls().catch(() => {});
+  }
+} catch {
+  // ignore — best-effort preload only.
+}
 
 export const getOrgControlsCache = () => _cachedOrgControls;
 
@@ -1876,8 +1887,25 @@ export const fetchMenuItems = async () => {
   return _menuItemsFetchPromise;
 };
 
-// Preload on import
-fetchMenuItems().catch(() => {});
+// Preload on import — but ONLY when there's already an access token in
+// storage. On the /auth/login or /register pages this module gets pulled
+// in transitively (LinkPreviewCard → reactions → etc.) and the eager fetch
+// to /message-menu-items + /organization-message-menu-permissions used to
+// fire even before the user signed in, polluting the console with 401s.
+// Skipping the preload pre-login is safe: the first message render on the
+// dashboard triggers fetchMenuItems() again and resolves the cache then.
+try {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.localStorage !== "undefined" &&
+    window.localStorage.getItem("accessToken")
+  ) {
+    fetchMenuItems().catch(() => {});
+  }
+} catch {
+  // localStorage access can throw in some embedded contexts — never break
+  // the import for a console-noise optimisation.
+}
 
 export const getMenuOptions = (message, currentUserId) => {
   const own = isOwnMessage(message, currentUserId);
