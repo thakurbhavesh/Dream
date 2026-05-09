@@ -1,15 +1,80 @@
 {
-  "name": "electron-app",
+  "name": "teamchatx-desktop",
+  "productName": "TeamChatX",
   "version": "1.0.0",
-  "description": "teamchatx chat application build with electron js",
+  "description": "TeamChatX desktop client",
   "main": "main.js",
+  "author": {
+    "name": "TeamChatX",
+    "email": "support@teamchatx.com"
+  },
+  "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "release": "electron-builder --publish always"
   },
-  "author": "",
-  "license": "ISC",
+  "build": {
+    "appId": "com.teamchatx.desktop",
+    "productName": "TeamChatX",
+    "files": [
+      "main.js",
+      "preload.js",
+      "downloadManager.js",
+      "icons/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend",
+        "filter": ["**/*"]
+      }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TeamChatX"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] }
+      ],
+      "category": "Network"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "thakurbhavesh",
+        "repo": "Dream",
+        "releaseType": "release"
+      }
+    ]
+  },
   "devDependencies": {
-    "electron": "^38.2.2"
+    "electron": "^38.2.2",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   }
 }

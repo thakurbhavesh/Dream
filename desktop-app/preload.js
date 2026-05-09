@@ -41,3 +41,20 @@ contextBridge.exposeInMainWorld("downloads", {
     ipcRenderer.invoke("downloads:show-in-folder", filePath),
   openSource: (url) => ipcRenderer.invoke("downloads:open-source", url),
 });
+
+// Auto-update bridge — renderer subscribes to events, can trigger an
+// immediate check, and can request "install now" once an update is ready.
+contextBridge.exposeInMainWorld("updates", {
+  on: (eventName, handler) => {
+    if (typeof handler !== "function") return () => {};
+    const listener = (_event, payload) => {
+      if (!payload || (eventName && payload.event !== eventName)) return;
+      handler(payload.event, payload.data);
+    };
+    ipcRenderer.on("updates:event", listener);
+    return () => ipcRenderer.removeListener("updates:event", listener);
+  },
+  checkNow: () => ipcRenderer.invoke("updates:check-now"),
+  installNow: () => ipcRenderer.invoke("updates:install-now"),
+  getVersion: () => ipcRenderer.invoke("updates:get-version"),
+});

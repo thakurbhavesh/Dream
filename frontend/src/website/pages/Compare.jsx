@@ -176,10 +176,10 @@ const features = [
 
 // Pricing comparison
 const pricing = {
-  teamchatx: { starting: "$3", note: "per user / month", highlight: "Self-host free" },
+  teamchatx: { starting: "$1.99", note: "per user / month", highlight: "Self-host free", subtle: "billed annually" },
   slack: { starting: "$8.75", note: "per user / month", highlight: "Pro plan" },
   teams: { starting: "$4", note: "per user / month", highlight: "Essentials" },
-  troop: { starting: "$2.5", note: "per user / month", highlight: "Premium" },
+  troop: { starting: "$2.50", note: "per user / month", highlight: "Premium" },
 };
 
 // ─── Deployment Plans ──────────────────────────────────────────────
@@ -207,8 +207,8 @@ const deploymentPlans = [
   {
     type: "Cloud-Based",
     tagline: "Zero infrastructure hassle",
-    price: "$3",
-    priceSub: "per user / month",
+    price: "$1.99",
+    priceSub: "per user / month · billed annually",
     desc: "We host everything. Start chatting in minutes with zero setup.",
     features: [
       { label: "Unlimited users", included: true },
@@ -688,6 +688,13 @@ const Compare = () => {
           >
             {competitors.map((c) => {
               const p = pricing[c.key];
+              const tcxPrice = parseFloat(String(pricing.teamchatx.starting).replace(/[^0-9.]/g, "")) || 0;
+              const cPrice = parseFloat(String(p.starting).replace(/[^0-9.]/g, "")) || 0;
+              // Show savings only on competitor cards where we're cheaper
+              const showSavings = !c.isUs && cPrice > tcxPrice;
+              const savingsPct = showSavings
+                ? Math.round(((cPrice - tcxPrice) / cPrice) * 100)
+                : 0;
               return (
                 <div
                   key={c.key}
@@ -695,39 +702,64 @@ const Compare = () => {
                     background: c.isUs ? "linear-gradient(135deg, #eff6ff, #dbeafe)" : "#f8fafc",
                     border: c.isUs ? "2px solid #0162c4" : "1px solid #e2e8f0",
                     borderRadius: 14,
-                    padding: "20px 18px",
+                    padding: "22px 18px 20px",
                     textAlign: "center",
                     position: "relative",
+                    boxShadow: c.isUs ? "0 14px 40px -18px rgba(2, 88, 196, 0.45)" : "none",
+                    transform: c.isUs ? "translateY(-4px)" : "none",
+                    transition: "transform 220ms ease",
                   }}
                 >
                   {c.isUs && (
                     <div
                       style={{
                         position: "absolute",
-                        top: -10,
+                        top: -12,
                         right: 12,
-                        background: "#0162c4",
+                        background: "linear-gradient(135deg, #0162c4, #2563eb)",
                         color: "#fff",
-                        fontSize: 9,
-                        fontWeight: 700,
-                        padding: "3px 8px",
+                        fontSize: 10,
+                        fontWeight: 800,
+                        padding: "4px 10px",
                         borderRadius: 999,
-                        letterSpacing: 0.5,
+                        letterSpacing: 0.6,
+                        boxShadow: "0 4px 14px rgba(2, 88, 196, 0.35)",
                       }}
                     >
-                      BEST VALUE
+                      ★ CHEAPEST
                     </div>
                   )}
                   <div style={{ fontSize: 13, fontWeight: 700, color: c.color, marginBottom: 6 }}>
                     {c.name}
                   </div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>
+                  <div style={{ fontSize: 30, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>
                     {p.starting}
                   </div>
                   <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{p.note}</div>
-                  <div style={{ fontSize: 11, color: c.isUs ? "#0162c4" : "#94a3b8", marginTop: 6, fontWeight: 600 }}>
+                  {p.subtle && (
+                    <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2, fontStyle: "italic" }}>
+                      {p.subtle}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: c.isUs ? "#0162c4" : "#94a3b8", marginTop: 8, fontWeight: 700 }}>
                     {p.highlight}
                   </div>
+                  {showSavings && (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: "inline-block",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#16a34a",
+                        background: "#dcfce7",
+                        borderRadius: 6,
+                        padding: "3px 8px",
+                      }}
+                    >
+                      {savingsPct}% pricier than TeamChatX
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -1,8 +1,16 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, session } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { exec } = require("child_process");
 const { setupDownloadManager } = require("./downloadManager");
+// electron-updater is only useful in packaged builds — fail soft so dev mode
+// (where the binary is unsigned and there's no publish config) still works.
+let autoUpdater = null;
+try {
+  autoUpdater = require("electron-updater").autoUpdater;
+} catch {
+  // Not installed yet — updates skipped at runtime.
+}
 
 const isDev = !app.isPackaged;
 const DEV_URL = "http://localhost:5173/app";
@@ -147,14 +155,19 @@ function createWindow() {
       console.error("[main] dev server load failed (is `npm run dev` running?):", err.message);
     });
   } else {
-    // In production: load the Vite build output. The previous path pointed
-    // to ../chatx-frontend/build/index.html, which doesn't exist in this
-    // repo — Vite emits to ../frontend/dist. Try both for safety.
+    // In production: load the Vite build output. electron-builder copies
+    // ../frontend/dist into resources/frontend (see extraResources in
+    // package.json). For unpackaged dev installs we still fall back to
+    // the in-repo frontend/dist so `npm start` from a fresh clone works.
     const candidates = [
+      // Packaged (electron-builder extraResources)
+      path.join(process.resourcesPath || "", "frontend", "index.html"),
+      // Local repo dev / asar mode
       path.join(__dirname, "../frontend/dist/index.html"),
-      path.join(__dirname, "../chatx-frontend/build/index.html"), // legacy
+      // Legacy CRA path (back-compat)
+      path.join(__dirname, "../chatx-frontend/build/index.html"),
     ];
-    const indexPath = candidates.find((p) => fs.existsSync(p));
+    const indexPath = candidates.find((p) => p && fs.existsSync(p));
     if (indexPath) {
       win.loadFile(indexPath);
     } else {
@@ -286,11 +299,96 @@ app.whenReady().then(() => {
 
   createWindow();
   setupDownloadManager();
+  setupAutoUpdater();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+// ─── Auto-update wiring ───────────────────────────────────────────────────
+// Lifecycle:
+//  1. App boots →  autoUpdater.checkForUpdatesAndNotify() runs in background
+//     (only in packaged builds).
+//  2. If a newer release is found on GitHub, electron-updater downloads the
+//     installer in the background. Renderer is notified via IPC events so it
+//     can show a banner.
+//  3. When the download completes the renderer can call
+//     "updates:install-now" (a button on its banner) which restarts into
+//     the new version. Otherwise the install runs the next time the user
+//     quits the app naturally.
+const broadcastUpdateEvent = (event, payload = {}) => {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win.isDestroyed()) {
+      win.webContents.send("updates:event", { event, data: payload });
+    }
+  });
+};
+
+const setupAutoUpdater = () => {
+  if (!autoUpdater || isDev) {
+    // Dev mode: no signed binary, nothing to update against. Quietly skip.
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on("checking-for-update", () => broadcastUpdateEvent("checking"));
+  autoUpdater.on("update-available", (info) =>
+    broadcastUpdateEvent("available", { version: info?.version, releaseNotes: info?.releaseNotes })
+  );
+  autoUpdater.on("update-not-available", () => broadcastUpdateEvent("up-to-date"));
+  autoUpdater.on("error", (err) =>
+    broadcastUpdateEvent("error", { message: err?.message || "Update check failed" })
+  );
+  autoUpdater.on("download-progress", (progress) =>
+    broadcastUpdateEvent("progress", {
+      percent: Math.round(progress?.percent || 0),
+      bytesPerSecond: progress?.bytesPerSecond,
+      transferred: progress?.transferred,
+      total: progress?.total,
+    })
+  );
+  autoUpdater.on("update-downloaded", (info) =>
+    broadcastUpdateEvent("ready", { version: info?.version, releaseDate: info?.releaseDate })
+  );
+
+  // Run once on launch — and again every 4 hours while the app is open so
+  // long-running sessions still pick up new releases.
+  const runCheck = () => {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.warn("[auto-update] check failed:", err?.message);
+    });
+  };
+  // Slight delay so the window is ready to show a banner if needed.
+  setTimeout(runCheck, 5_000);
+  setInterval(runCheck, 4 * 60 * 60 * 1000);
+};
+
+// Renderer-triggered actions
+ipcMain.handle("updates:check-now", async () => {
+  if (!autoUpdater || isDev) return { ok: false, reason: "Updates only run in packaged builds." };
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { ok: true, info: result?.updateInfo || null };
+  } catch (err) {
+    return { ok: false, reason: err?.message || "Update check failed" };
+  }
+});
+
+ipcMain.handle("updates:install-now", () => {
+  if (!autoUpdater) return false;
+  // quitAndInstall(isSilent, isForceRunAfter)
+  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  return true;
+});
+
+ipcMain.handle("updates:get-version", () => ({
+  current: app.getVersion(),
+  packaged: app.isPackaged,
+  platform: process.platform,
+}));
 
 // When the user launches the app a second time, focus the existing window.
 app.on("second-instance", () => {
