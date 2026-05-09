@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { optimizeImageForUpload } from "../../../utils/imageProcessor";
 
 export const createAttachmentId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `att-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const isImageFile = (file) => {
+  if (!file) return false;
+  const mime = String(file.type || "").toLowerCase();
+  return /^image\/(jpeg|png|webp|heic|heif|gif|bmp|tiff)$/.test(mime);
+};
 
 const getFileSignature = (file) => {
   if (!file) return null;
@@ -89,9 +96,79 @@ const useAttachmentManager = ({ showSnackbar }) => {
       if (descriptors.length) {
         setAttachments((prev) => [...prev, ...descriptors]);
       }
+
+      // Silent image optimisation — auto-resize huge photos and pick a
+      // smarter format (HEIC → JPEG, PNG-photo → WebP, etc.). Failures
+      // fall back to the original file inside optimizeImageForUpload, so
+      // the worst case is "no saving" and never a failed send.
+      descriptors.forEach((descriptor) => {
+        const stored = attachmentFileStoreRef.current.get(descriptor.id);
+        if (!isImageFile(stored)) return;
+        Promise.resolve()
+          .then(() => optimizeImageForUpload(stored))
+          .then((optimised) => {
+            if (!optimised || optimised === stored) return;
+            const stillThere = attachmentFileStoreRef.current.get(descriptor.id);
+            if (!stillThere) return; // user removed the chip mid-process
+            // Swap the underlying File so the upload uses the smaller version.
+            attachmentFileStoreRef.current.set(descriptor.id, optimised);
+            // Refresh the signature index so duplicate-detection stays sane.
+            const oldSig = getFileSignature(stillThere);
+            if (oldSig) attachmentSignatureRef.current.delete(oldSig);
+            const newSig = getFileSignature(optimised);
+            if (newSig) attachmentSignatureRef.current.set(newSig, descriptor.id);
+            // Reflect new size / mime / name in the visible chip.
+            setAttachments((prev) =>
+              prev.map((item) =>
+                item.id === descriptor.id
+                  ? {
+                      ...item,
+                      name: optimised.name,
+                      size: optimised.size,
+                      mime: optimised.type || item.mime,
+                      lastModified: optimised.lastModified,
+                    }
+                  : item
+              )
+            );
+          })
+          .catch((err) => {
+            // Optimisation is best-effort; don't bother the user.
+            console.warn("[attachments] image optimise failed:", err?.message);
+          });
+      });
     },
     [showSnackbar]
   );
+
+  /**
+   * Replace the underlying File for an existing attachment (e.g. after
+   * background removal). Updates descriptor metadata and signature index
+   * so dedup + chip rendering stay in sync.
+   */
+  const replaceAttachmentFile = useCallback((id, nextFile) => {
+    if (!id || !nextFile) return;
+    const current = attachmentFileStoreRef.current.get(id);
+    if (!current) return;
+    const oldSig = getFileSignature(current);
+    if (oldSig) attachmentSignatureRef.current.delete(oldSig);
+    attachmentFileStoreRef.current.set(id, nextFile);
+    const newSig = getFileSignature(nextFile);
+    if (newSig) attachmentSignatureRef.current.set(newSig, id);
+    setAttachments((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              name: nextFile.name || item.name,
+              size: nextFile.size,
+              mime: nextFile.type || item.mime,
+              lastModified: nextFile.lastModified,
+            }
+          : item
+      )
+    );
+  }, []);
 
   const addAttachment = useCallback(
     (file, typeLabel) => {
@@ -149,6 +226,7 @@ const useAttachmentManager = ({ showSnackbar }) => {
     removeAttachmentById,
     resetAttachmentStore,
     replaceAttachments,
+    replaceAttachmentFile,
     getAttachmentFile,
   };
 };

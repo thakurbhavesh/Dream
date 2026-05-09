@@ -745,6 +745,7 @@ const ConversationFooter = ({
     removeAttachmentById,
     resetAttachmentStore,
     replaceAttachments,
+    replaceAttachmentFile,
     getAttachmentFile,
   } = useAttachmentManager({ showSnackbar });
 
@@ -2230,7 +2231,9 @@ const ConversationFooter = ({
         attachments={attachments}
         onAddMore={handleAddMoreAttachments}
         onRemove={removeAttachmentById}
+        onReplaceFile={replaceAttachmentFile}
         getAttachmentFile={getAttachmentFile}
+        showSnackbar={showSnackbar}
       />
       {editingPreview ? (
         <MemoizedEditComposerPreview
