@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 // ─── Platform icons ──────────────────────────────────────
 const PlatformIcon = ({ type, active }) => {
@@ -194,6 +195,7 @@ const TYPE_LABELS = {
 };
 
 export default function Versions() {
+  const { brandName } = useSiteBranding();
   const [platformFilter, setPlatformFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
 
@@ -237,7 +239,7 @@ export default function Versions() {
             We Keep Updating
           </h1>
           <p style={{ fontSize: "1.05rem", color: "#94a3b8", maxWidth: 560, margin: "0 auto 32px" }}>
-            Every update makes TeamChatX faster, more secure, and more powerful. Here's every change we've shipped.
+            Every update makes {brandName} faster, more secure, and more powerful. Here's every change we've shipped.
           </p>
 
           {/* Stats */}
@@ -392,7 +394,7 @@ export default function Versions() {
       <section style={{ background: "#0f172a", color: "#fff", padding: "48px 0", textAlign: "center" }}>
         <div className="container">
           <h3 style={{ fontWeight: 700, marginBottom: 8 }}>Want to see what's next?</h3>
-          <p style={{ color: "#94a3b8", marginBottom: 24 }}>We ship updates every week. Start using TeamChatX today.</p>
+          <p style={{ color: "#94a3b8", marginBottom: 24 }}>We ship updates every week. Start using {brandName} today.</p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
             <Link to="/auth/register" style={{ display: "inline-block", background: "#0162c4", color: "#fff", padding: "12px 28px", borderRadius: 8, fontWeight: 600, textDecoration: "none" }}>
               Start Free Trial

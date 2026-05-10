@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import {
   PiFacebookLogo,
   PiTwitterLogo,
@@ -8,71 +8,36 @@ import {
   PiPinterestLogo,
 } from "react-icons/pi";
 import { Link } from "react-router-dom";
-import { API_BASE_URL } from "../../config/apiBaseUrl";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const Footer = () => {
-  const [siteProfile, setSiteProfile] = useState(null);
-
-  useEffect(() => {
-    let ignore = false;
-
-    const loadSiteDetails = async () => {
-      if (!API_BASE_URL) return;
-
-      try {
-        const response = await fetch(`${API_BASE_URL}/site-details`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) return;
-
-        const payload = await response.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
-        const activeRow =
-          rows.find((row) => String(row?.status || "").toLowerCase() === "active") || rows[0] || null;
-
-        if (!ignore) {
-          setSiteProfile(activeRow);
-        }
-      } catch {
-        // Keep footer fallback values when site-details API is unavailable.
-      }
-    };
-
-    loadSiteDetails();
-    return () => {
-      ignore = true;
-    };
-  }, []);
+  const { brandName, social, emails } = useSiteBranding();
 
   const contactEmails = useMemo(() => {
-    const apiEmails = Array.isArray(siteProfile?.emails)
-      ? siteProfile.emails
-          .filter((row) => String(row?.status || "active").toLowerCase() !== "inactive")
+    const apiEmails = Array.isArray(emails)
+      ? emails
+          .filter(
+            (row) => String(row?.status || "active").toLowerCase() !== "inactive"
+          )
           .map((row) => String(row?.email_address || "").trim())
           .filter(Boolean)
       : [];
 
     if (apiEmails.length) return apiEmails;
 
-    return [
-      "support@teamchatx.com",
-      "sales@teamchatx.com",
-    ];
-  }, [siteProfile]);
-
-  const brandName = String(siteProfile?.brand_name || "").trim() || "TeamChatX";
+    return ["support@teamchatx.com", "sales@teamchatx.com"];
+  }, [emails]);
 
   const socialLinks = useMemo(
     () => ({
-      facebook: String(siteProfile?.google_plus_url || "").trim() || "#!",
-      twitter: String(siteProfile?.twitter_url || "").trim() || "#!",
-      instagram: "#!",
-      youtube: String(siteProfile?.youtube_url || "").trim() || "#!",
-      linkedin: String(siteProfile?.linkedin_url || "").trim() || "#!",
-      pinterest: "#!",
+      facebook: social?.facebook || "#!",
+      twitter: social?.twitter || "#!",
+      instagram: social?.instagram || "#!",
+      youtube: social?.youtube || "#!",
+      linkedin: social?.linkedin || "#!",
+      pinterest: social?.pinterest || "#!",
     }),
-    [siteProfile]
+    [social]
   );
 
   return (
@@ -81,11 +46,9 @@ const Footer = () => {
         <div className="row mx-0">
           {/* About Section */}
           <div className="col-lg-4 col-md-6 col-12 mb-4">
-            <h5 className="text-uppercase mb-2">
-              {brandName}
-            </h5>
+            <h5 className="text-uppercase mb-2">{brandName}</h5>
             <p className="text-muted fs-6 pe-md-4 ">
-              Empower your team with seamless communication. TeamChatX is a
+              Empower your team with seamless communication. {brandName} is a
               secure, self-hosted business messaging platform built for
               enterprises that demand data privacy, IP ownership, and full
               control. From instant messaging and video meetings to AI-powered
@@ -232,7 +195,7 @@ const Footer = () => {
 
       {/* Footer Bottom */}
       <div className="text-center py-3 bg-dark text-white">
-        &copy; {new Date().getFullYear()} TeamChatX. All rights reserved.
+        &copy; {new Date().getFullYear()} {brandName}. All rights reserved.
       </div>
     </footer>
   );

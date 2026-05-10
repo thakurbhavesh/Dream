@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PriceTableComponent from "../components/PriceTableComponent";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const TRUST_LOGOS = [
   { label: "AES-256-GCM", icon: "\uD83D\uDD12" },
@@ -10,35 +11,39 @@ const TRUST_LOGOS = [
   { label: "24/7 Support", icon: "\uD83D\uDC9A" },
 ];
 
-const FAQS = [
-  {
-    q: "Can I change plans anytime?",
-    a: "Yes. Upgrade or downgrade whenever you like — pro-rated automatically. No long-term contracts or hidden fees.",
-  },
-  {
-    q: "Is there a free trial?",
-    a: "Every paid plan comes with a 14-day free trial. No credit card required to start. Cancel anytime, no questions asked.",
-  },
-  {
-    q: "What payment methods do you accept?",
-    a: "All major credit cards, debit cards, and UPI through Stripe. Enterprise plans also support invoicing and bank transfer.",
-  },
-  {
-    q: "Do you offer a money-back guarantee?",
-    a: "Yes — 30 days. If TeamChatX doesn't fit your team, we'll refund every paisa, no questions asked.",
-  },
-  {
-    q: "Can I self-host TeamChatX?",
-    a: "Absolutely. Self-hosted deployment is included on the Enterprise plan. You get the full source bundle, deployment scripts, and white-glove setup support.",
-  },
-  {
-    q: "How does per-user billing work?",
-    a: "You're billed only for active seats. Add or remove users mid-cycle and your next invoice is automatically pro-rated.",
-  },
-];
-
 const Pricing = () => {
+  const { brandName } = useSiteBranding();
   const [openFaq, setOpenFaq] = useState(0);
+
+  const FAQS = useMemo(
+    () => [
+      {
+        q: "Can I change plans anytime?",
+        a: "Yes. Upgrade or downgrade whenever you like — pro-rated automatically. No long-term contracts or hidden fees.",
+      },
+      {
+        q: "Is there a free trial?",
+        a: "Every paid plan comes with a 14-day free trial. No credit card required to start. Cancel anytime, no questions asked.",
+      },
+      {
+        q: "What payment methods do you accept?",
+        a: "All major credit cards, debit cards, and UPI through Stripe. Enterprise plans also support invoicing and bank transfer.",
+      },
+      {
+        q: "Do you offer a money-back guarantee?",
+        a: `Yes — 30 days. If ${brandName} doesn't fit your team, we'll refund every paisa, no questions asked.`,
+      },
+      {
+        q: `Can I self-host ${brandName}?`,
+        a: "Absolutely. Self-hosted deployment is included on the Enterprise plan. You get the full source bundle, deployment scripts, and white-glove setup support.",
+      },
+      {
+        q: "How does per-user billing work?",
+        a: "You're billed only for active seats. Add or remove users mid-cycle and your next invoice is automatically pro-rated.",
+      },
+    ],
+    [brandName]
+  );
 
   return (
     <div className="pricing-page" style={{ fontFamily: "'Manrope', sans-serif", background: "#fafbff" }}>
@@ -205,7 +210,7 @@ const Pricing = () => {
                 30-day money-back guarantee
               </h3>
               <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.6, margin: 0 }}>
-                Try TeamChatX risk-free. If it doesn't fit your team in the first 30 days, we'll refund every paisa — no forms, no awkward calls.
+                Try {brandName} risk-free. If it doesn't fit your team in the first 30 days, we'll refund every paisa — no forms, no awkward calls.
               </p>
             </div>
           </div>

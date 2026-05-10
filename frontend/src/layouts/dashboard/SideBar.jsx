@@ -17,6 +17,7 @@ import SettingsDrawer from "../../components/settings/drawer/index.jsx";
 import { MdOutlineDashboardCustomize } from "react-icons/md";
 import useMascot from "../../hooks/useMascot";
 import useCurrentUser from "../../hooks/useCurrentUser";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const Nav_Buttons = [
   {
@@ -58,6 +59,7 @@ const SideBar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { themeMode, onToggleMode } = useSettings();
+  const { brandName } = useSiteBranding();
 
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -168,7 +170,7 @@ const SideBar = () => {
           >
             <img
               src={mascotSrc}
-              alt={"TeamChatX"}
+              alt={brandName}
               style={{
                 width: "100%",
                 height: "100%",

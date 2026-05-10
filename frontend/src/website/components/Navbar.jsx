@@ -6,8 +6,10 @@ import helpdeskGif from "../assets/Images/helpdesk.gif";
 import teamworkGif from "../assets/Images/teamwork.gif";
 
 import { API_BASE_URL } from "../../config/apiBaseUrl";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const Navbar = () => {
+  const { brandName, logoUrl } = useSiteBranding();
   const [showNavbar, setShowNavbar] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -108,8 +110,11 @@ const Navbar = () => {
       >
         <div className="container-fluid">
           <Link className="navbar-brand text-uppercase" to="/">
-            {/* Aabhyasa <span className="text-secondary">Messenger</span> */}
-            <img src="teamchatXLogo.png" style={{ width: "100px" }} />
+            <img
+              src={logoUrl || "teamchatXLogo.png"}
+              alt={brandName}
+              style={{ width: "100px" }}
+            />
           </Link>
           <button
             className="navbar-toggler border-none p-1 shadow-none"
@@ -302,7 +307,7 @@ const Navbar = () => {
               <div className="d-flex flex-column gap-4">
                 <div>
                   <h2 className="modal-title">
-                    Collaborate better with TeamChatX!
+                    Collaborate better with {brandName}!
                   </h2>
                   <p>Start Now</p>
                 </div>

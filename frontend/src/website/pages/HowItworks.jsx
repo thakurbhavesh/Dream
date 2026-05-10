@@ -1,13 +1,14 @@
 import React from "react";
 import ChatDemoBox from "../components/ChatDemoBox";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const HowItWorks = () => {
+  const { brandName } = useSiteBranding();
   const steps = [
     {
       number: "1",
       title: "Admin Login",
-      description:
-        "Admin Login to TeamChatX with valid user credentials.",
+      description: `Admin Login to ${brandName} with valid user credentials.`,
       image: "login.gif", // Replace with actual image path
     },
     {

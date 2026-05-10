@@ -26,8 +26,10 @@ import DownloadToasts from "../../components/DownloadToasts.jsx";
 import useCurrentUser from "../../hooks/useCurrentUser.js";
 import { API_BASE_URL } from "../../config/apiBaseUrl";
 import { getOrCreateClientDeviceId } from "../../utils/deviceId.js";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const TopBar = () => {
+  const { brandName } = useSiteBranding();
   const theme = useTheme();
   const navigate = useNavigate();
   const currentUser = useCurrentUser();
@@ -188,7 +190,7 @@ const TopBar = () => {
               textTransform: "uppercase",
             }}
           >
-            TeamChatX
+            {brandName}
           </Typography>
 
           <Divider orientation="vertical" variant="middle" flexItem />

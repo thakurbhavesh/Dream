@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Link } from "react-router-dom";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 // ─── Competitors ────────────────────────────────────────────────────
 // `color` = brand color used in pricing/table/cards
@@ -439,6 +440,7 @@ const RadarChart = ({ size = 420 }) => {
 };
 
 const Compare = () => {
+  const { brandName } = useSiteBranding();
   const [activeCategory, setActiveCategory] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [exclusiveOnly, setExclusiveOnly] = useState(false);
@@ -588,10 +590,10 @@ const Compare = () => {
             Side-by-Side Comparison
           </p>
           <h1 style={{ fontSize: "clamp(28px, 5vw, 52px)", fontWeight: 800, marginBottom: 16, lineHeight: 1.15 }}>
-            TeamChatX <span style={{ color: "#64b5f6" }}>vs</span> Slack <span style={{ color: "#64b5f6" }}>vs</span> Teams <span style={{ color: "#64b5f6" }}>vs</span> Troop
+            {brandName} <span style={{ color: "#64b5f6" }}>vs</span> Slack <span style={{ color: "#64b5f6" }}>vs</span> Teams <span style={{ color: "#64b5f6" }}>vs</span> Troop
           </h1>
           <p style={{ fontSize: 18, color: "#94a3b8", maxWidth: 680, margin: "0 auto 40px", lineHeight: 1.6 }}>
-            One workspace. {features.length} features. Compare TeamChatX against the biggest names in team chat — feature by feature, no marketing fluff.
+            One workspace. {features.length} features. Compare {brandName} against the biggest names in team chat — feature by feature, no marketing fluff.
           </p>
 
           {/* Score grid — 4 competitors */}
@@ -666,7 +668,7 @@ const Compare = () => {
           </div>
 
           <div style={{ fontSize: 14, color: "#94a3b8" }}>
-            <span style={{ color: "#ff9100", fontWeight: 700 }}>{exclusiveCount}</span> features exclusive to TeamChatX • <span style={{ color: "#16a34a", fontWeight: 700 }}>Full</span> · <span style={{ color: "#d97706", fontWeight: 700 }}>Partial</span> · <span style={{ color: "#dc2626", fontWeight: 700 }}>None</span>
+            <span style={{ color: "#ff9100", fontWeight: 700 }}>{exclusiveCount}</span> features exclusive to {brandName} • <span style={{ color: "#16a34a", fontWeight: 700 }}>Full</span> · <span style={{ color: "#d97706", fontWeight: 700 }}>Partial</span> · <span style={{ color: "#dc2626", fontWeight: 700 }}>None</span>
           </div>
         </div>
       </section>
@@ -757,7 +759,7 @@ const Compare = () => {
                         padding: "3px 8px",
                       }}
                     >
-                      {savingsPct}% pricier than TeamChatX
+                      {savingsPct}% pricier than {brandName}
                     </div>
                   )}
                 </div>
@@ -778,7 +780,7 @@ const Compare = () => {
               Features your current tool <span style={{ color: "#dc2626" }}>doesn't have</span>
             </h2>
             <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
-              These {exclusiveCount} features are exclusive to TeamChatX. No other platform offers them.
+              These {exclusiveCount} features are exclusive to {brandName}. No other platform offers them.
             </p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, maxWidth: 900, margin: "0 auto" }}>
@@ -941,7 +943,7 @@ const Compare = () => {
                       <div style={{ fontSize: 12, color: "#64748b" }}>
                         {tcxWins ? (
                           <>
-                            <span style={{ color: "#16a34a", fontWeight: 700 }}>TeamChatX wins</span>
+                            <span style={{ color: "#16a34a", fontWeight: 700 }}>{brandName} wins</span>
                             {margin > 0 && (
                               <span> by {margin === 0.5 ? "½" : margin} feature{margin === 1 || margin === 0.5 ? "" : "s"}</span>
                             )}
@@ -1176,7 +1178,7 @@ const Compare = () => {
               Self-Hosted or Cloud — your choice
             </h2>
             <p style={{ fontSize: 15, color: "#64748b", maxWidth: 560, margin: "0 auto" }}>
-              Unlike Slack and Microsoft Teams, TeamChatX gives you the freedom to deploy on your own infrastructure or let us handle everything.
+              Unlike Slack and Microsoft Teams, {brandName} gives you the freedom to deploy on your own infrastructure or let us handle everything.
             </p>
           </div>
 
@@ -1302,7 +1304,7 @@ const Compare = () => {
                 className={`tcx-toggle ${exclusiveOnly ? "on" : ""}`}
                 onClick={() => setExclusiveOnly((v) => !v)}
               />
-              <span>Exclusive to TeamChatX only</span>
+              <span>Exclusive to {brandName} only</span>
             </label>
           </div>
 

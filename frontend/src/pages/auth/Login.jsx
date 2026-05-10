@@ -31,6 +31,7 @@ import OtpAttemptStatus from "../../components/auth/OtpAttemptStatus";
 import OtpCodeInput from "../../components/auth/OtpCodeInput";
 import useOtpResendCooldown from "../../hooks/useOtpResendCooldown";
 import { getOrCreateClientDeviceId } from "../../utils/deviceId";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const decodeJwtPayload = (token) => {
   try {
@@ -189,6 +190,7 @@ const resolveGeoHint = async () => {
 };
 
 const Login = () => {
+  const { brandName } = useSiteBranding();
   const [showPassword, setShowPassword] = useState(false);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -723,7 +725,7 @@ const Login = () => {
         <DialogTitle sx={{ fontWeight: 800, fontSize: 20 }}>
           Login via QR Code
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Scan this QR code with the TeamChatX mobile app
+            Scan this QR code with the {brandName} mobile app
           </Typography>
         </DialogTitle>
         <DialogContent>
@@ -750,7 +752,7 @@ const Login = () => {
                 />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Open TeamChatX app → Login → QR Code
+                Open {brandName} app → Login → QR Code
               </Typography>
               <Typography variant="caption" color="text.disabled" sx={{ display: "block", mt: 1 }}>
                 QR expires in 5 minutes

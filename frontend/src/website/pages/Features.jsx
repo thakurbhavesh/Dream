@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ChatDemoBox from "../components/ChatDemoBox.jsx";
 import { Alert, CircularProgress } from "@mui/material";
 import { API_BASE_URL } from "../../config/apiBaseUrl";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const toSectionId = (value, fallbackId) => {
   const normalized = String(value || "")
@@ -65,6 +66,7 @@ const normalizeFeatureSections = (catalogRows = []) =>
     .sort((a, b) => a.display_order - b.display_order);
 
 const Features = () => {
+  const { brandName } = useSiteBranding();
   const [featureSections, setFeatureSections] = useState([]);
   const [activeTab, setActiveTab] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -308,14 +310,14 @@ const Features = () => {
                 More features. Lower price. Full control.
               </h2>
               <p style={{ color: "#6b7280", fontSize: "0.95rem", maxWidth: 560, margin: "0 auto" }}>
-                See how TeamChatX stacks up against Slack and Microsoft Teams — on features, pricing, and deployment.
+                See how {brandName} stacks up against Slack and Microsoft Teams — on features, pricing, and deployment.
               </p>
             </div>
 
             {/* Feature count bars */}
             <div style={{ maxWidth: 700, margin: "0 auto 32px" }}>
               {[
-                { name: "TeamChatX", features: totalFeatures, price: "$3", color: "#6366f1", isUs: true },
+                { name: brandName, features: totalFeatures, price: "$3", color: "#6366f1", isUs: true },
                 { name: "Slack", features: Math.round(totalFeatures * 0.58), price: "$8.75", color: "#4A154B" },
                 { name: "MS Teams", features: Math.round(totalFeatures * 0.62), price: "$4", color: "#4b53bc" },
                 { name: "Troop Messenger", features: Math.round(totalFeatures * 0.48), price: "$2.5", color: "#64748b" },

@@ -5,6 +5,7 @@ import { alpha, useTheme } from "@mui/material/styles";
 import { Box, Grid, Paper, Stack, Typography } from "@mui/material";
 import FeatureSlider from "../../components/auth/FeatureSlider";
 import { appBrandingAssets } from "../../data/CommonData";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const AuthSplitLayout = ({
   title,
@@ -15,13 +16,15 @@ const AuthSplitLayout = ({
   sliderInterval,
 }) => {
   const theme = useTheme();
+  const { brandName, mascotUrl, logoUrl } = useSiteBranding();
   const [isElectron, setIsElectron] = useState(false);
 
   useEffect(() => {
     setIsElectron(Boolean(window?.electron?.isElectron));
   }, []);
 
-  const mascotSrc = appBrandingAssets.mascot;
+  const mascotSrc = mascotUrl || logoUrl || appBrandingAssets.mascot;
+  const displayBrand = brandName || appBrandingAssets.brand;
   return (
     <Box
       sx={{
@@ -97,7 +100,7 @@ const AuthSplitLayout = ({
                   >
                     <img
                       src={mascotSrc}
-                      alt={"TeamChatX"}
+                      alt={displayBrand}
                       style={{
                         width: "100%",
                         height: "100%",
@@ -114,7 +117,7 @@ const AuthSplitLayout = ({
                     }
                     fontWeight={600}
                   >
-                    {appBrandingAssets.brand}
+                    {displayBrand}
                   </Typography>
                 </Stack>
                 <Stack spacing={1}>
@@ -169,7 +172,7 @@ const AuthSplitLayout = ({
                 textAlign={"center"}
               >
                 <Typography variant="h5" color="inherit">
-                  Welcome to TeamChatX
+                  Welcome to {displayBrand}
                 </Typography>
                 <Typography variant="body2" sx={{ opacity: 0.85 }}>
                   Sign in to explore the latest updates and insights we have

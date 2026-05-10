@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE_URL } from "../../config/apiBaseUrl";
+import { useSiteBranding } from "../../contexts/SiteBrandingContext.jsx";
 
 const platforms = [
   {
@@ -69,6 +70,7 @@ const RELEASES_API = "https://api.github.com/repos/thakurbhavesh/Dream/releases/
 const RELEASES_PAGE = "https://github.com/thakurbhavesh/Dream/releases/latest";
 
 export default function Downloads() {
+  const { brandName } = useSiteBranding();
   const [appUrl, setAppUrl] = useState(null);
 
   useEffect(() => {
@@ -94,7 +96,7 @@ export default function Downloads() {
       {/* Hero */}
       <section style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", color: "#fff", padding: "80px 0 60px", textAlign: "center" }}>
         <div className="container">
-          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, marginBottom: 12 }}>Download TeamChatX</h1>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: 800, marginBottom: 12 }}>Download {brandName}</h1>
           <p style={{ fontSize: "1.1rem", color: "#94a3b8", maxWidth: 560, margin: "0 auto" }}>
             Available on every platform. Install once, communicate everywhere with your team.
           </p>
@@ -195,7 +197,7 @@ export default function Downloads() {
       <section style={{ background: "#0f172a", color: "#fff", padding: "48px 0", textAlign: "center" }}>
         <div className="container">
           <h3 style={{ fontWeight: 700, marginBottom: 12 }}>Prefer the browser?</h3>
-          <p style={{ color: "#94a3b8", marginBottom: 24 }}>No download needed. Access TeamChatX directly from your browser.</p>
+          <p style={{ color: "#94a3b8", marginBottom: 24 }}>No download needed. Access {brandName} directly from your browser.</p>
           <Link to="/auth/register" style={{ display: "inline-block", background: "#0162c4", color: "#fff", padding: "12px 32px", borderRadius: 8, fontWeight: 600, textDecoration: "none" }}>
             Open Web App
           </Link>
